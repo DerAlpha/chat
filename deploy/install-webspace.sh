@@ -81,7 +81,9 @@ list_candidates() {
 }
 
 if [ -z "$DOCROOT" ]; then
-    for candidate in "$HOME/html" "$HOME/www" "$HOME/public_html" "$HOME/htdocs" "$HOME/httpdocs" "$HOME/web" "$HOME/webseiten"; do
+    # "default-website" ist der Vorgabename bei lima-city.
+    for candidate in "$HOME/html" "$HOME/www" "$HOME/public_html" "$HOME/htdocs" \
+                     "$HOME/httpdocs" "$HOME/web" "$HOME/webseiten" "$HOME/default-website"; do
         if [ -d "$candidate" ]; then
             if [ -n "$DOCROOT" ]; then
                 list_candidates
