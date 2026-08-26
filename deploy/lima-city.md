@@ -21,44 +21,49 @@ nichts umzustellen.
 Voraussetzung: dein Tarif hat SSH (bei lima-city die bezahlten Pakete,
 Anmeldung ausschließlich per Schlüssel).
 
-**Das Repo ist privat.** Ein `curl … | sh` direkt von GitHub scheitert deshalb
-auf dem Server mit 404 – dort liegen keine Zugangsdaten. Der Weg führt über das
-fertige Paket, das du ohnehin schon hast:
+```bash
+curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh | sh -s -- --url https://fluester.4lima.de
+```
+
+Das Skript sucht den Document Root, lädt das Paket, legt den Datenordner
+**neben** dem Document Root an, trägt den Pfad ein und prüft zum Schluss, ob
+wirklich alles liegt. Es braucht weder root noch Node – nur eine Shell,
+`curl` (oder `wget`) und `tar`.
+
+Der `refs/heads/`-Teil in der Adresse ist nötig, weil der Branchname selbst
+Schrägstriche enthält – ohne ihn kann GitHub nicht erkennen, wo der Branch
+aufhört und der Dateipfad anfängt.
+
+Wer ein Skript nicht ungesehen ausführen möchte – und das ist die bessere
+Gewohnheit – lädt es erst herunter, liest es und startet es dann:
 
 ```bash
-# 1. Paket hochladen
-scp fluesterchat-webspace.tar.gz DEINNUTZER@fluester.4lima.de:~/
+curl -fsSLO https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh
+less install-webspace.sh
+sh install-webspace.sh --url https://fluester.4lima.de
+```
 
-# 2. Ein Befehl, der den Rest erledigt
-ssh DEINNUTZER@fluester.4lima.de 'mkdir -p ~/fc \
+### Ohne Zugriff auf GitHub
+
+Ist das Repo privat oder der Server ohne Netz nach draußen, geht es über das
+fertige Paket:
+
+```bash
+scp fluesterchat-webspace.tar.gz DEINNUTZER@DEINHOST:~/
+ssh DEINNUTZER@DEINHOST 'mkdir -p ~/fc \
   && tar xzf ~/fluesterchat-webspace.tar.gz -C ~/fc \
   && sh ~/fc/install-webspace.sh --source ~/fc --url https://fluester.4lima.de \
   && rm -rf ~/fc ~/fluesterchat-webspace.tar.gz'
 ```
 
-Das Skript sucht den Document Root, legt den Datenordner **neben** ihm an,
-trägt den Pfad ein und prüft zum Schluss, ob wirklich alles liegt. Es braucht
-weder root noch Node – nur eine Shell und `tar`.
-
-### Wenn das Repo öffentlich wäre
-
-Dann ginge es tatsächlich in einer Zeile, ohne vorher etwas hochzuladen:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/BRANCH/deploy/install-webspace.sh | sh
-```
-
-Das ist deine Entscheidung – im Code stecken keine Geheimnisse (Schlüssel
-entstehen erst im Browser), aber öffentlich ist öffentlich.
-
 ### Schalter
 
 | Schalter | Wofür |
 | --- | --- |
-| `--source ~/ordner` | Aus einem entpackten Paket installieren |
-| `--archive ~/paket.tar.gz` | Direkt aus `.tar.gz` oder `.zip` |
 | `--docroot ~/html` | Verzeichnis selbst angeben, wenn die Suche danebenliegt |
 | `--url https://…` | Für die Schlussmeldung mit den richtigen Adressen |
+| `--source ~/ordner` | Aus einem entpackten Paket statt von GitHub |
+| `--archive ~/paket.tar.gz` | Direkt aus `.tar.gz` oder `.zip` |
 | `--data ~/woanders` | Anderer Ort für die Daten |
 | `--force` | Auch installieren, wenn im Verzeichnis schon etwas anderes liegt |
 

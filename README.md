@@ -99,10 +99,13 @@ npm run php:dev                  # PHP-Backend samt Client lokal starten
 node scripts/build-webspace.mjs  # fertiges Verzeichnis zum Hochladen
 ```
 
-Auf einem Webspace mit SSH erledigt `deploy/install-webspace.sh` die
-Einrichtung – aus einem hochgeladenen Paket oder, wenn das Repo öffentlich ist,
-direkt von GitHub. Ohne SSH tut es der FTP-Weg. Beides steht in
-[`deploy/lima-city.md`](deploy/lima-city.md).
+Auf einem Webspace mit SSH genügt ein Befehl:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh | sh
+```
+
+Ohne SSH tut es der FTP-Weg. Beides steht in [`deploy/lima-city.md`](deploy/lima-city.md).
 
 ### In einem Unterordner einer bestehenden Domain
 
