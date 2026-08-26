@@ -5,9 +5,11 @@
 # Braucht weder root noch Node - nur eine Shell, curl oder wget, und tar.
 # Es wird ausschliesslich innerhalb deines Webspace geschrieben.
 #
-#   sh install-webspace.sh                      # Docroot wird gesucht
-#   sh install-webspace.sh --docroot ~/html     # oder selbst angeben
-#   sh install-webspace.sh --url https://fluester.4lima.de
+#   sh install-webspace.sh --archive ~/fluesterchat-webspace.zip
+#   sh install-webspace.sh --source ~/entpacktes-paket
+#   sh install-webspace.sh                      # laedt von GitHub (oeffentliches Repo)
+#
+# Weitere Schalter: --docroot ~/html, --url https://…, --data ~/…, --force
 #
 # Erneut ausführen = aktualisieren. Eine eigene api/lib/config.local.php
 # und der Datenordner bleiben dabei unangetastet.
@@ -18,6 +20,8 @@ REPO_URL="https://codeload.github.com/DerAlpha/chat/tar.gz/refs/heads/claude/cha
 DOCROOT=""
 SITE_URL=""
 DATA_DIR=""
+ARCHIVE=""
+SOURCE=""
 FORCE=0
 MARKER=".fluesterchat"
 
@@ -28,6 +32,8 @@ die()  { printf '\nFEHLER: %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --docroot) DOCROOT="${2:-}"; shift 2 ;;
+        --archive) ARCHIVE="${2:-}"; shift 2 ;;
+        --source)  SOURCE="${2:-}"; shift 2 ;;
         --url)     SITE_URL="${2:-}"; shift 2 ;;
         --data)    DATA_DIR="${2:-}"; shift 2 ;;
         --force)   FORCE=1; shift ;;
@@ -38,15 +44,19 @@ done
 
 # --- Werkzeuge -------------------------------------------------------------
 step "Werkzeuge"
-if command -v curl >/dev/null 2>&1; then
-    FETCH="curl -fsSL -o"
-elif command -v wget >/dev/null 2>&1; then
-    FETCH="wget -qO"
-else
-    die "Weder curl noch wget vorhanden - dann bitte den Weg per FTP nehmen."
+FETCH=""
+if [ -z "$SOURCE" ] && [ -z "$ARCHIVE" ]; then
+    if command -v curl >/dev/null 2>&1; then
+        FETCH="curl -fsSL -o"
+    elif command -v wget >/dev/null 2>&1; then
+        FETCH="wget -qO"
+    else
+        die "Weder curl noch wget vorhanden. Dann das Paket hochladen und --archive verwenden."
+    fi
+    say "Herunterladen mit ${FETCH%% *}"
 fi
 command -v tar >/dev/null 2>&1 || die "tar fehlt."
-say "Herunterladen mit ${FETCH%% *}, entpacken mit tar"
+say "Entpacken mit tar"
 
 # --- Document Root ---------------------------------------------------------
 step "Document Root"
@@ -86,15 +96,51 @@ else
     DATA_OUTSIDE=0
 fi
 
-# --- Herunterladen ---------------------------------------------------------
-step "Herunterladen"
+# --- Quelle beschaffen -----------------------------------------------------
+step "Quelle"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t fluesterchat)
 trap 'rm -rf "$TMP"' EXIT INT TERM
-$FETCH "$TMP/app.tar.gz" "$REPO_URL" || die "Download fehlgeschlagen: $REPO_URL"
 mkdir -p "$TMP/src"
-tar -xzf "$TMP/app.tar.gz" -C "$TMP/src" --strip-components=1 || die "Archiv liess sich nicht entpacken."
-[ -d "$TMP/src/public" ] && [ -d "$TMP/src/php/api" ] || die "Archiv sieht nicht wie erwartet aus."
-say "$(du -sh "$TMP/src" 2>/dev/null | cut -f1) entpackt"
+
+if [ -n "$SOURCE" ]; then
+    [ -d "$SOURCE" ] || die "$SOURCE ist kein Verzeichnis."
+    cp -R "$SOURCE/." "$TMP/src/"
+    say "aus $SOURCE"
+elif [ -n "$ARCHIVE" ]; then
+    [ -f "$ARCHIVE" ] || die "$ARCHIVE gibt es nicht."
+    case "$ARCHIVE" in
+        *.zip)
+            command -v unzip >/dev/null 2>&1 || die "unzip fehlt - dann bitte ein .tar.gz nehmen."
+            unzip -oq "$ARCHIVE" -d "$TMP/src" || die "ZIP liess sich nicht entpacken."
+            ;;
+        *.tar.gz|*.tgz)
+            tar -xzf "$ARCHIVE" -C "$TMP/src" || die "Archiv liess sich nicht entpacken."
+            ;;
+        *) die "Unbekanntes Format: $ARCHIVE (erwartet .zip oder .tar.gz)" ;;
+    esac
+    # Steckt alles in einem einzelnen Unterordner? Dann eine Ebene hoch.
+    inner=$(ls -A "$TMP/src" | head -2)
+    if [ "$(ls -A "$TMP/src" | wc -l)" = "1" ] && [ -d "$TMP/src/$inner" ]; then
+        mv "$TMP/src/$inner" "$TMP/unwrapped" && rm -rf "$TMP/src" && mv "$TMP/unwrapped" "$TMP/src"
+    fi
+    say "aus $ARCHIVE"
+else
+    $FETCH "$TMP/app.tar.gz" "$REPO_URL" || die "Download fehlgeschlagen. Ist das Repo öffentlich? Sonst das Paket hochladen und --archive verwenden."
+    mkdir -p "$TMP/repo"
+    tar -xzf "$TMP/app.tar.gz" -C "$TMP/repo" --strip-components=1 || die "Archiv liess sich nicht entpacken."
+    rm -rf "$TMP/src" && mv "$TMP/repo" "$TMP/src"
+    say "von GitHub geladen"
+fi
+
+# Zwei Formen sind zulässig: das Repo (public/ + php/) oder das fertige Paket.
+if [ -d "$TMP/src/public" ] && [ -d "$TMP/src/php/api" ]; then
+    LAYOUT="repo"
+elif [ -f "$TMP/src/index.html" ] && [ -d "$TMP/src/api" ]; then
+    LAYOUT="paket"
+else
+    die "Die Quelle sieht weder nach Projektverzeichnis noch nach fertigem Paket aus."
+fi
+say "$(du -sh "$TMP/src" 2>/dev/null | cut -f1), Form: $LAYOUT"
 
 # --- Eigene Einstellungen retten -------------------------------------------
 KEEP_CONFIG=""
@@ -110,11 +156,16 @@ step "Installieren"
 for dir in css js img api; do
     rm -rf "$DOCROOT/$dir"
 done
-cp -R "$TMP/src/public/." "$DOCROOT/"
-mkdir -p "$DOCROOT/api"
-cp -R "$TMP/src/php/api/." "$DOCROOT/api/"
-cp "$TMP/src/php/site/.htaccess" "$DOCROOT/.htaccess"
-cp "$TMP/src/php/site/.user.ini" "$DOCROOT/.user.ini"
+if [ "$LAYOUT" = "repo" ]; then
+    cp -R "$TMP/src/public/." "$DOCROOT/"
+    mkdir -p "$DOCROOT/api"
+    cp -R "$TMP/src/php/api/." "$DOCROOT/api/"
+    cp "$TMP/src/php/site/.htaccess" "$DOCROOT/.htaccess"
+    cp "$TMP/src/php/site/.user.ini" "$DOCROOT/.user.ini"
+else
+    cp -R "$TMP/src/." "$DOCROOT/"
+    rm -f "$DOCROOT/install-webspace.sh"
+fi
 [ -n "$KEEP_CONFIG" ] && cp "$KEEP_CONFIG" "$DOCROOT/api/lib/config.local.php"
 
 if [ "$DATA_OUTSIDE" -eq 1 ] && [ ! -f "$DOCROOT/api/lib/config.local.php" ]; then

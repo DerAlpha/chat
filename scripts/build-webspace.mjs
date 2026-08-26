@@ -28,6 +28,13 @@ for (const file of ['.htaccess', '.user.ini']) {
   fs.copyFileSync(path.join(root, 'php', 'site', file), path.join(out, file));
 }
 
+// 4) Das Installationsskript liegt bei, damit im Paket alles Nötige steckt.
+//    Beim Installieren wird es nicht mit ausgeliefert.
+fs.copyFileSync(
+  path.join(root, 'deploy', 'install-webspace.sh'),
+  path.join(out, 'install-webspace.sh'),
+);
+
 // Nichts aus der Entwicklung mitschleppen.
 for (const stray of ['api/lib/config.local.php', 'api/data']) {
   fs.rmSync(path.join(out, stray), { recursive: true, force: true });
