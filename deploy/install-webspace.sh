@@ -60,15 +60,41 @@ say "Entpacken mit tar"
 
 # --- Document Root ---------------------------------------------------------
 step "Document Root"
+
+# Zeigt, was im Home liegt - damit man beim Nachbessern nicht raten muss.
+list_candidates() {
+    printf '\nVerzeichnisse in %s:\n' "$HOME"
+    found=0
+    for entry in "$HOME"/*/; do
+        [ -d "$entry" ] || continue
+        found=1
+        name=$(basename "$entry")
+        if [ -w "$entry" ]; then
+            printf '    %-28s (beschreibbar)\n' "$name"
+        else
+            printf '    %-28s (nur lesbar)\n' "$name"
+        fi
+    done
+    [ "$found" -eq 1 ] || printf '    (keine)\n'
+    printf '\nDen richtigen Namen nennt das Panel des Hosters als "Document Root".\n'
+    printf 'Dann erneut mit:  --docroot %s/NAME\n' "$HOME"
+}
+
 if [ -z "$DOCROOT" ]; then
-    for candidate in "$HOME/html" "$HOME/www" "$HOME/public_html" "$HOME/htdocs"; do
+    for candidate in "$HOME/html" "$HOME/www" "$HOME/public_html" "$HOME/htdocs" "$HOME/httpdocs" "$HOME/web" "$HOME/webseiten"; do
         if [ -d "$candidate" ]; then
-            [ -n "$DOCROOT" ] && die "Mehrere mögliche Verzeichnisse gefunden. Bitte --docroot angeben."
+            if [ -n "$DOCROOT" ]; then
+                list_candidates
+                die "Mehrere mögliche Verzeichnisse gefunden. Bitte --docroot angeben."
+            fi
             DOCROOT="$candidate"
         fi
     done
 fi
-[ -n "$DOCROOT" ] || die "Kein Document Root gefunden. Bitte --docroot <pfad> angeben (steht im lima-city-Panel unter Domains)."
+if [ -z "$DOCROOT" ]; then
+    list_candidates
+    die "Kein Document Root gefunden."
+fi
 [ -d "$DOCROOT" ] || die "$DOCROOT gibt es nicht."
 [ -w "$DOCROOT" ] || die "In $DOCROOT darf nicht geschrieben werden."
 DOCROOT=$(cd "$DOCROOT" && pwd)
