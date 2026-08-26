@@ -1,0 +1,122 @@
+# ---------------------------------------------------------------------------
+# Ausliefern auf den eigenen Server.
+#
+# Läuft NUR auf Knopfdruck (Actions -> "Auf den Server ausliefern" -> Run
+# workflow). Ohne die unten genannten Secrets passiert gar nichts - der
+# Workflow ist bis dahin wirkungslos.
+#
+# Benötigte Repository-Secrets (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_HOST      z. B. megamc.de
+#   DEPLOY_USER      SSH-Benutzer auf dem Server
+#   DEPLOY_SSH_KEY   privater Schlüssel (der öffentliche gehört in dessen
+#                    ~/.ssh/authorized_keys)
+#   DEPLOY_PORT      optional, Standard 22
+#   DEPLOY_KNOWN_HOSTS  optional, Ausgabe von `ssh-keyscan megamc.de`. Ohne
+#                    diesen Wert wird der Schlüssel beim ersten Mal einfach
+#                    übernommen - mit ihm ist der Server fest verankert.
+#
+# Auf dem Server muss der Benutzer diese beiden Befehle ohne Passwort dürfen:
+#   /usr/bin/systemctl restart fluesterchat
+#   /usr/bin/systemctl is-active fluesterchat
+# Beispiel für /etc/sudoers.d/fluesterchat-deploy:
+#   deployuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart fluesterchat, \
+#                                   /usr/bin/systemctl is-active fluesterchat
+# ---------------------------------------------------------------------------
+name: Auf den Server ausliefern
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch oder Commit, der ausgeliefert werden soll
+        required: false
+        default: claude/chat-website-no-signup-qpswkk
+
+concurrency:
+  group: deploy-fluesterchat
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Erst prüfen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit-Tests
+        run: npm test
+      - name: Browser für die E2E-Tests
+        run: npx playwright install --with-deps chromium
+      - name: End-to-End unter /chats
+        run: npm run test:e2e:subpath
+
+  deploy:
+    name: Ausliefern
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Zugangsdaten prüfen
+        run: |
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret $name fehlt - siehe Kopf dieser Datei."
+              exit 1
+            fi
+          done
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          else
+            echo "::warning::DEPLOY_KNOWN_HOSTS ist nicht gesetzt - der Serverschlüssel wird ungeprüft übernommen."
+            ssh-keyscan -p "${{ secrets.DEPLOY_PORT || 22 }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Aktualisieren und neu starten
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${{ secrets.DEPLOY_PORT || 22 }}" \
+              -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "REF='${{ inputs.ref }}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR=/opt/fluesterchat
+          cd "$APP_DIR"
+          git fetch --depth 1 origin "$REF"
+          git checkout -B deploy FETCH_HEAD
+          npm ci --omit=dev --no-audit --no-fund
+          sudo /usr/bin/systemctl restart fluesterchat
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8123/chats/healthz >/dev/null; then
+              echo "Dienst antwortet wieder."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Der Dienst ist nach dem Neustart nicht hochgekommen." >&2
+          exit 1
+          REMOTE
+
+      - name: Von außen nachsehen
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ secrets.DEPLOY_HOST }}/chats/")
+          echo "https://${{ secrets.DEPLOY_HOST }}/chats/ -> HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::Unerwarteter Status $code"; exit 1; }
+
+      - name: Schlüssel entfernen
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

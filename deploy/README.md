@@ -71,6 +71,32 @@ Die ganze Konfiguration wurde mit einem echten Apache 2.4 gegengeprüft –
 inklusive WebSocket, Bildversand, PWA-Geltungsbereich und der Frage, ob
 `/chatsammlung` weiterhin bei GameRoom landet.
 
+## Auf Knopfdruck aus GitHub ausliefern
+
+Wenn du künftig nicht mehr auf den Server willst: der Workflow
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) macht das
+Ganze aus GitHub heraus – testet vorher und startet danach neu.
+
+Er läuft **nur auf Knopfdruck** (Actions → „Auf den Server ausliefern" → *Run
+workflow*) und tut ohne die folgenden Secrets gar nichts:
+
+| Secret | Inhalt |
+| --- | --- |
+| `DEPLOY_HOST` | `megamc.de` |
+| `DEPLOY_USER` | SSH-Benutzer |
+| `DEPLOY_SSH_KEY` | privater Schlüssel; der öffentliche gehört in dessen `~/.ssh/authorized_keys` |
+| `DEPLOY_PORT` | optional, Standard 22 |
+| `DEPLOY_KNOWN_HOSTS` | optional, Ausgabe von `ssh-keyscan megamc.de` – damit ist der Server fest verankert |
+
+Der Benutzer braucht auf dem Server passwortlosen `sudo` für genau zwei Befehle:
+
+```
+deployuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart fluesterchat, \
+                                /usr/bin/systemctl is-active fluesterchat
+```
+
+Voraussetzung: die Erstinstallation (oben) ist einmal gelaufen.
+
 ## Von Hand statt per Skript
 
 ```bash
