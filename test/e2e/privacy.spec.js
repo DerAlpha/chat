@@ -9,13 +9,18 @@ test('Der Server bekommt nur unlesbare Daten zu sehen', async ({ browser }) => {
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
-  // Alles mitschreiben, was der Browser Richtung Server schickt.
+  // Alles mitschreiben, was der Browser Richtung Server schickt - je nach
+  // Backend sind das WebSocket-Frames oder die Rümpfe von POST-Anfragen.
   const sentFrames = [];
   const requestUrls = [];
   pageA.on('websocket', (socket) => {
-    socket.on('framesent', (frame) => sentFrames.push(frame.payload));
+    socket.on('framesent', (frame) => sentFrames.push(String(frame.payload)));
   });
-  pageA.on('request', (request) => requestUrls.push(request.url()));
+  pageA.on('request', (request) => {
+    requestUrls.push(request.url());
+    const body = request.postData();
+    if (body) sentFrames.push(body);
+  });
 
   const { code, link } = await createChat(pageA);
   await joinChat(pageB, link);
@@ -26,7 +31,7 @@ test('Der Server bekommt nur unlesbare Daten zu sehen', async ({ browser }) => {
   await expect(bubbles(pageB).last()).toContainText(secret);
 
   const outgoing = sentFrames.join('\n');
-  expect(outgoing.length).toBeGreaterThan(0);
+  expect(outgoing.length, 'es muss überhaupt etwas rausgegangen sein').toBeGreaterThan(0);
   expect(outgoing).not.toContain(secret);
   expect(outgoing).not.toContain(code);
   expect(outgoing).not.toContain(code.replace(/-/g, ''));
@@ -345,6 +350,8 @@ test('Ältere Nachrichten werden wirklich nachgeladen', async ({ browser }) => {
 test('Das Zugangstoken steht in keiner URL', async ({ browser }) => {
   const context = await browser.newContext(MOBILE);
   const page = await context.newPage();
+  // Bei WebSocket steht das Token früher im Query-String, beim Abholen könnte
+  // es in einer URL landen - geprüft wird beides.
   const socketUrls = [];
   const requestUrls = [];
   page.on('websocket', (socket) => socketUrls.push(socket.url()));
@@ -358,7 +365,7 @@ test('Das Zugangstoken steht in keiner URL', async ({ browser }) => {
 
   const token = await page.evaluate(() => JSON.parse(localStorage.getItem('fc:sessions:v1'))[0].token);
   expect(token).toBeTruthy();
-  expect(socketUrls.length).toBeGreaterThan(0);
+  expect(requestUrls.length, 'es muss Verkehr gegeben haben').toBeGreaterThan(0);
   for (const url of [...socketUrls, ...requestUrls]) {
     expect(url, `Token steckt in ${url}`).not.toContain(token);
   }

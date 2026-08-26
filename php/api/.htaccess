@@ -1,0 +1,18 @@
+# Alle API-Anfragen auf den Front-Controller lenken.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /api/
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Der Body eines Anhangs darf 12 MB gross sein.
+<IfModule mod_php.c>
+    php_value upload_max_filesize 16M
+    php_value post_max_size 16M
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "no-referrer"
+</IfModule>

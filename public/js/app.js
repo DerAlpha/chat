@@ -15,7 +15,7 @@ import { qrSvg } from './qr.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
-import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, Connection, ApiError } from './net.js';
+import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, ApiError } from './net.js';
 import { prepareImage, readFileBytes, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
 import {
   el, make, icon, showScreen, currentScreen, toast, busy, openSheet, closeSheet, sheetOpen,
@@ -228,18 +228,30 @@ async function openSession(session, { screen = 'chat' } = {}) {
   if (screen === 'invite') showInvite(session);
   else showChatScreen();
 
-  connect();
+  await connect();
 }
 
-function connect() {
-  app.conn = new Connection({
-    roomId: app.session.roomId,
-    token: app.session.token,
+/**
+ * Baut die Verbindung auf. Welche Art - WebSocket oder Abholen per HTTP -
+ * entscheidet der Server; für den Rest der App sieht beides gleich aus.
+ */
+async function connect() {
+  const opened = app.session;
+  handleConnectionStatus('connecting');
+  const connection = await createConnection({
+    roomId: opened.roomId,
+    token: opened.token,
     onFrame: handleFrame,
     onStatus: handleConnectionStatus,
     onFatal: handleFatalClose,
   });
-  app.conn.connect(true);
+  // Während des Aufbaus kann der Chat schon wieder verlassen worden sein.
+  if (app.session !== opened) {
+    connection.close();
+    return;
+  }
+  app.conn = connection;
+  connection.connect(true);
 }
 
 function teardownChat() {
@@ -333,10 +345,9 @@ function handleConnectionStatus(status) {
 
 function handleFatalClose(code) {
   if (code === 4003) showError(t('errorRoomFull'), { retry: false });
-  else if (code === 4010) {
-    if (app.session) removeSession(app.session.roomId);
-    showError(t('burnDone'), { retry: false });
-  } else showError(t('errorRoomUnknown'), { retry: false });
+  // Gelöscht ist kein Fehler, sondern ein Ende: zurück auf die Startseite.
+  else if (code === 4010) onBurned();
+  else showError(t('errorRoomUnknown'), { retry: false });
 }
 
 function handleFrame(frame) {
@@ -491,6 +502,9 @@ async function onHistory(frame) {
 }
 
 async function onIncomingMessage(message) {
+  // Beim Abholen kann dieselbe Nachricht ein zweites Mal hereinkommen -
+  // etwa die eigene, die man gerade selbst geschickt hat.
+  if (app.messages.has(message.id)) return;
   const entry = await toEntry(message);
   insertEntry(entry);
   redrawAll();
@@ -518,6 +532,11 @@ function onAck(frame) {
   const orderIndex = app.order.indexOf(entry.id);
   if (orderIndex !== -1) app.order.splice(orderIndex, 1);
 
+  // Kam die Nachricht über das Abholen schon zurück, ist sie bereits da.
+  if (app.messages.has(frame.id)) {
+    redrawAll();
+    return;
+  }
   entry.id = frame.id;
   entry.seq = frame.seq;
   entry.ts = frame.ts;

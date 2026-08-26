@@ -1,0 +1,38 @@
+# Baut das fertige Verzeichnis zum Hochladen auf klassischen Webspace und
+# hängt es als ZIP an den Lauf. Praktisch, wenn auf dem eigenen Rechner
+# kein Node installiert ist.
+name: Webspace-Paket bauen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit-Tests
+        run: npm test
+      - name: PHP bereitstellen
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - name: Syntax des PHP-Backends prüfen
+        run: find php -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Browser für die E2E-Tests
+        run: npx playwright install --with-deps chromium
+      - name: End-to-End gegen das PHP-Backend
+        run: npm run test:e2e:php
+      - name: Paket bauen
+        run: node scripts/build-webspace.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fluesterchat-webspace
+          path: dist/webspace/
+          include-hidden-files: true
+          retention-days: 30

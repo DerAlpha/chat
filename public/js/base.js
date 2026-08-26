@@ -17,8 +17,15 @@ export const basePath = baseUrl.pathname;
 /** Baut eine absolute URL relativ zur App-Basis. */
 export const appUrl = (path) => new URL(String(path).replace(/^\//, ''), baseUrl).toString();
 
-/** Pfad relativ zur App-Basis, z. B. "/chats/api/rooms". */
-export const appPath = (path) => new URL(String(path).replace(/^\//, ''), baseUrl).pathname;
+/**
+ * Pfad relativ zur App-Basis, z. B. "/chats/api/rooms".
+ * Ein angehängter Query-String bleibt erhalten - ohne ihn ginge etwa das
+ * "since" beim Abholen verloren, und der Client fragte endlos dasselbe ab.
+ */
+export function appPath(path) {
+  const url = new URL(String(path).replace(/^\//, ''), baseUrl);
+  return url.pathname + url.search;
+}
 
 /** WebSocket-Adresse der App. */
 export function socketUrl(query) {

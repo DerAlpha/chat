@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -9,7 +10,9 @@ const PORT = Number(process.env.E2E_PORT ?? 3199);
  *   E2E_BASE_PATH=/chats ...    -> http://127.0.0.1:3199/chats/
  */
 const BASE_PATH = (process.env.E2E_BASE_PATH ?? '').replace(/\/+$/, '');
-const baseURL = `http://127.0.0.1:${PORT}${BASE_PATH}/`;
+/** Gegen eine bereits laufende Auslieferung testen (z. B. das gebaute Paket unter Apache). */
+const EXTERNAL = process.env.E2E_EXTERNAL_URL ?? '';
+const baseURL = EXTERNAL || `http://127.0.0.1:${PORT}${BASE_PATH}/`;
 // Frischer Datenordner pro Lauf, damit Tests sich nicht gegenseitig sehen.
 const dataDir = path.join(os.tmpdir(), `fluesterchat-e2e-${process.pid}`);
 
@@ -21,6 +24,36 @@ const launchOptions = {
   ...(executablePath ? { executablePath } : {}),
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
 };
+
+/**
+ * Dieselbe Suite läuft gegen beide Backends:
+ *   npm run test:e2e      -> Node mit WebSocket
+ *   npm run test:e2e:php  -> PHP mit Long-Polling (wie auf dem Webspace)
+ */
+const BACKEND = process.env.E2E_BACKEND === 'php' ? 'php' : 'node';
+
+function phpWebServer() {
+  const docRoot = path.join(os.tmpdir(), `fluesterchat-php-e2e-${process.pid}`);
+  const dataDir = path.join(os.tmpdir(), `fluesterchat-php-data-${process.pid}`);
+  fs.rmSync(docRoot, { recursive: true, force: true });
+  fs.rmSync(dataDir, { recursive: true, force: true });
+  fs.mkdirSync(docRoot, { recursive: true });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.cpSync('public', docRoot, { recursive: true });
+  fs.cpSync('php/api', path.join(docRoot, 'api'), { recursive: true });
+  fs.writeFileSync(
+    path.join(docRoot, 'api', 'lib', 'config.local.php'),
+    `<?php return ['dataDir' => '${dataDir}', 'pollWaitSeconds' => 15, 'welcomeHistory' => 5];\n`,
+  );
+  return {
+    command: `php -S 127.0.0.1:${PORT} -t ${docRoot} php/router.php`,
+    // Ohne Arbeitsprozesse blockiert eine wartende Abfrage den ganzen Server.
+    env: { PHP_CLI_SERVER_WORKERS: '24' },
+    url: `${baseURL}api/healthz`,
+    reuseExistingServer: false,
+    timeout: 20_000,
+  };
+}
 
 export default defineConfig({
   testDir: './test/e2e',
@@ -49,7 +82,7 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
+  webServer: EXTERNAL ? undefined : BACKEND === 'php' ? phpWebServer() : {
     command: 'node server/index.js',
     url: `${baseURL}healthz`,
     reuseExistingServer: false,

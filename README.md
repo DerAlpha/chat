@@ -77,6 +77,30 @@ docker compose up -d
 
 Die Daten (Momentaufnahme + verschlüsselte Anhänge) landen im Volume `chat-data`.
 
+### Auf ganz normalem Webspace, ohne Node
+
+Nicht jeder Hoster lässt dauerhaft laufende Prozesse zu – klassischer
+PHP-Webspace etwa kann keine WebSockets. Dafür liegt ein **zweites Backend in
+PHP** bei (`php/`). Verschlüsselung, Oberfläche, Bilder und Sprachnachrichten
+bleiben identisch; nur der Weg der Nachrichten ist ein anderer:
+
+| | Node (`server/`) | PHP (`php/`) |
+| --- | --- | --- |
+| Zustellung | WebSocket – der Server ruft | Long-Polling – der Browser fragt |
+| Verzögerung | Millisekunden | meist unter einer Sekunde |
+| Speicher | Momentaufnahme als JSON | Dateien je Raum, atomar geschrieben |
+| Voraussetzung | Node ≥ 20 | PHP ≥ 8.1, `.htaccess` |
+
+Welches der beiden läuft, findet der Browser selbst heraus (`GET api/config`)
+und wählt den passenden Transportweg. Am Client ist nichts umzustellen.
+
+```bash
+npm run php:dev                  # PHP-Backend samt Client lokal starten
+node scripts/build-webspace.mjs  # fertiges Verzeichnis zum Hochladen
+```
+
+Anleitung für lima-city: [`deploy/lima-city.md`](deploy/lima-city.md).
+
 ### In einem Unterordner einer bestehenden Domain
 
 Die App muss nicht auf einer eigenen Domain wohnen. Mit `BASE_PATH` hängt sie
@@ -171,6 +195,10 @@ Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
 ## Wie es aufgebaut ist
 
 ```
+php/            Backend für Webspace ohne Node (PHP 8.1+)
+  api/index.php   Front-Controller
+  api/lib/        Speicher, Frames, Präsenz, Rate-Limits
+  site/           .htaccess und .user.ini fürs Wurzelverzeichnis
 server/
   index.js      Einstieg: HTTP-Server, Aufräum-Intervall, sauberes Herunterfahren
   app.js        REST-Schnittstelle, Sicherheits-Header, statische Dateien
@@ -184,7 +212,7 @@ public/
   css/app.css   Mobile-First-Gestaltung, hell und dunkel
   js/crypto.js  Code-Erzeugung, Schlüsselableitung, Ver- und Entschlüsselung
   js/qr.js      Eigener QR-Encoder (Byte-Modus, Stufe M, Versionen 1–10)
-  js/net.js     REST-Aufrufe und WebSocket mit selbsttätigem Wiederverbinden
+  js/net.js     REST-Aufrufe; WebSocket oder Long-Polling, je nach Server
   js/media.js   Bilder verkleinern, Ton aufnehmen
   js/session.js Was das Gerät sich merkt
   js/i18n.js    Deutsch und Englisch
@@ -194,7 +222,8 @@ public/
 ```
 
 Keine Build-Kette, kein Bundler, kein Framework: Der Browser lädt die ES-Module direkt.
-Auf dem Server stehen nur `express` und `ws` – sonst nichts.
+Auf dem Node-Server stehen nur `express` und `ws`, im PHP-Backend gar keine
+Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ## Tests
 
@@ -202,6 +231,7 @@ Auf dem Server stehen nur `express` und `ws` – sonst nichts.
 npm test                  # 77 Unit-Tests (Server, Krypto, QR, i18n)
 npm run test:e2e          # 25 End-to-End-Tests mit zwei simulierten Smartphones
 npm run test:e2e:subpath  # dieselben 25 Tests unter /chats
+npm run test:e2e:php      # dieselben 25 Tests gegen das PHP-Backend
 npm run test:all
 ```
 
@@ -221,8 +251,11 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   und das Chat-Layout hält auch, wenn das Verbindungsbanner verschwindet.
 - Schnell hintereinander abgeschickte Nachrichten behalten ihre Reihenfolge, schon
   bevor die erste Quittung da ist.
-- Die komplette Suite läuft ein zweites Mal unter `/chats`, damit der Betrieb in
-  einem Unterordner nicht bei der nächsten Änderung wieder kaputtgeht.
+- Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
+  gegen das PHP-Backend. Dieselben 25 Tests, drei Auslieferungen – damit fällt
+  auf, wenn eine davon bei der nächsten Änderung wegbricht.
+- Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
+  `mod_php` und der mitgelieferten `.htaccess` durchgetestet.
 
 Jeder dieser Regressionstests wurde gegen den fehlerhaften Stand gegengeprüft – sie
 werden rot, wenn man die zugehörige Korrektur zurücknimmt.

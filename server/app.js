@@ -56,6 +56,20 @@ export function createApp(store, hub) {
   // Unterordner einer fremden Domain leben kann (z. B. /chats).
   const site = express.Router();
 
+  // Der Client fragt hier, wie er mit diesem Server sprechen soll.
+  site.get('/api/config', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      realtime: 'ws',
+      backend: 'node',
+      capacity: config.maxMembersPerRoom,
+      limits: {
+        maxBlobBytes: config.maxBlobBytes,
+        maxCiphertextBytes: config.maxCiphertextBytes,
+      },
+    });
+  });
+
   site.get('/healthz', (req, res) => {
     res.json({ ok: true, uptime: Math.round(process.uptime()), basePath: base, ...store.stats() });
   });
