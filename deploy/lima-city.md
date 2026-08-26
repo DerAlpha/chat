@@ -53,7 +53,7 @@ html/                     <- Document Root
   index.html
   .htaccess               <- wichtig!
   .user.ini               <- wichtig!
-  css/  js/  icons/
+  css/  js/  img/
   manifest.webmanifest
   sw.js
   api/

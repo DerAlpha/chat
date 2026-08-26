@@ -30,9 +30,9 @@ const SHELL = [
   'js/session.js',
   'js/ui.js',
   'manifest.webmanifest',
-  'icons/icon.svg',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
+  'img/icon.svg',
+  'img/icon-192.png',
+  'img/icon-512.png',
 ].map((path) => BASE + path);
 
 self.addEventListener('install', (event) => {

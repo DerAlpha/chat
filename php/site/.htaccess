@@ -5,6 +5,10 @@
 
 DirectoryIndex index.html
 
+# Hinweis: Die Symbole der App liegen in img/ und nicht in icons/. Apache
+# bringt vielerorts ein "Alias /icons/" auf sein eigenes Symbolverzeichnis
+# mit, das einen gleichnamigen Ordner im Webverzeichnis verdeckt.
+
 <IfModule mod_mime.c>
     AddType application/manifest+json .webmanifest
     AddType image/svg+xml            .svg

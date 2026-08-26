@@ -1,5 +1,9 @@
 /**
- * Erzeugt die PNG-Icons aus public/icons/icon.svg.
+ * Erzeugt die PNG-Icons aus public/img/icon.svg.
+ *
+ * Der Ordner heisst bewusst img und nicht icons: Apache bringt in vielen
+ * Installationen ein "Alias /icons/" auf sein eigenes Symbolverzeichnis mit,
+ * das unseren Ordner sonst verdeckt (dann fehlen Favicon und App-Symbol).
  * Braucht Chromium (kommt mit @playwright/test):  node scripts/make-icons.mjs
  */
 import { chromium } from '@playwright/test';
@@ -8,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const iconsDir = path.join(root, 'public', 'icons');
+const iconsDir = path.join(root, 'public', 'img');
 const source = await fs.readFile(path.join(iconsDir, 'icon.svg'), 'utf8');
 
 /** maskable: Safe-Zone von 80 % - Android darf die Ecken beschneiden. */
@@ -38,7 +42,7 @@ try {
     );
     await page.screenshot({ path: path.join(iconsDir, target.file), omitBackground: false });
     await page.close();
-    console.log(`geschrieben: icons/${target.file} (${target.size}px)`);
+    console.log(`geschrieben: img/${target.file} (${target.size}px)`);
   }
 
   // Einfarbiges Badge fuer Android-Benachrichtigungen.
@@ -53,7 +57,7 @@ try {
   );
   await page.screenshot({ path: path.join(iconsDir, 'badge.png'), omitBackground: true });
   await page.close();
-  console.log('geschrieben: icons/badge.png (96px)');
+  console.log('geschrieben: img/badge.png (96px)');
 } finally {
   await browser.close();
 }

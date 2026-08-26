@@ -11,9 +11,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Flüsterchat">
+<!-- Die Symbole liegen in img/ und nicht in img/: viele Apache-Installationen
+     bringen von Haus aus ein "Alias /img/" auf ihr eigenes Symbolverzeichnis mit
+     und würden unseren Ordner damit verdecken. -->
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="stylesheet" href="css/app.css">
 <script type="module" src="js/app.js"></script>
 

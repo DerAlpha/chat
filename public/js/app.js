@@ -1625,8 +1625,8 @@ function notifyIncoming(entry) {
   try {
     const notification = new Notification(peerName(), {
       body: previewOf(entry).slice(0, 140),
-      icon: appUrl('icons/icon-192.png'),
-      badge: appUrl('icons/badge.png'),
+      icon: appUrl('img/icon-192.png'),
+      badge: appUrl('img/badge.png'),
       tag: app.session.roomId,
       renotify: false,
     });

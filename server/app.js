@@ -173,7 +173,7 @@ export function createApp(store, hub) {
       lastModified: true,
       maxAge: 0,
       setHeaders(res, filePath) {
-        if (/[\\/]icons[\\/]/.test(filePath)) {
+        if (/[\\/]img[\\/]/.test(filePath)) {
           res.setHeader('Cache-Control', 'public, max-age=604800');
         } else if (filePath.endsWith('sw.js')) {
           res.setHeader('Cache-Control', 'no-cache');

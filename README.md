@@ -229,9 +229,9 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 77 Unit-Tests (Server, Krypto, QR, i18n)
-npm run test:e2e          # 25 End-to-End-Tests mit zwei simulierten Smartphones
-npm run test:e2e:subpath  # dieselben 25 Tests unter /chats
-npm run test:e2e:php      # dieselben 25 Tests gegen das PHP-Backend
+npm run test:e2e          # 26 End-to-End-Tests mit zwei simulierten Smartphones
+npm run test:e2e:subpath  # dieselben 26 Tests unter /chats
+npm run test:e2e:php      # dieselben 26 Tests gegen das PHP-Backend
 npm run test:all
 ```
 
@@ -252,10 +252,13 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Schnell hintereinander abgeschickte Nachrichten behalten ihre Reihenfolge, schon
   bevor die erste Quittung da ist.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 25 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 26 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
-  `mod_php` und der mitgelieferten `.htaccess` durchgetestet.
+  `mod_php` und der mitgelieferten `.htaccess` durchgetestet. Dabei fiel auf,
+  dass Apache vielerorts ein `Alias /icons/` auf sein eigenes Symbolverzeichnis
+  mitbringt und einen gleichnamigen Ordner verdeckt – deshalb heißt er hier
+  `img/`, und ein Test prüft, dass wirklich jede Datei geladen wird.
 
 Jeder dieser Regressionstests wurde gegen den fehlerhaften Stand gegengeprüft – sie
 werden rot, wenn man die zugehörige Korrektur zurücknimmt.

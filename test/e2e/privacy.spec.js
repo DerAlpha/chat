@@ -54,6 +54,38 @@ test('Der Server bekommt nur unlesbare Daten zu sehen', async ({ browser }) => {
   await contextB.close();
 });
 
+test('Die Seite lädt ohne eine einzige fehlende Datei', async ({ page }) => {
+  // Fängt Stolperfallen wie den Apache-Standard "Alias /icons/", der einen
+  // gleichnamigen Ordner im Webverzeichnis verdeckt.
+  const broken = [];
+  page.on('response', (response) => {
+    if (response.status() >= 400) broken.push(`HTTP ${response.status()} ${response.url()}`);
+  });
+  page.on('requestfailed', (request) => broken.push(`fehlgeschlagen ${request.url()}`));
+
+  await page.goto('./', { waitUntil: 'networkidle' });
+
+  // Alles, was das Manifest verspricht, muss es auch geben.
+  const iconStatus = await page.evaluate(async () => {
+    const href = document.querySelector('link[rel=manifest]').href;
+    const manifest = await (await fetch(href)).json();
+    const results = [];
+    for (const icon of manifest.icons) {
+      const url = new URL(icon.src, href).toString();
+      const res = await fetch(url);
+      results.push({ url, status: res.status });
+    }
+    const favicon = document.querySelector('link[rel=icon]')?.href;
+    if (favicon) results.push({ url: favicon, status: (await fetch(favicon)).status });
+    return results;
+  });
+  for (const icon of iconStatus) {
+    expect(icon.status, `${icon.url} fehlt`).toBe(200);
+  }
+  expect(iconStatus.length).toBeGreaterThan(3);
+  expect(broken, 'diese Dateien fehlen').toEqual([]);
+});
+
 test('Ein falscher Code öffnet den Chat nicht', async ({ page }) => {
   await page.goto('./');
   await page.getByRole('button', { name: /Code eingeben/i }).click();
