@@ -14,7 +14,7 @@ async function request(path, options = {}) {
   try {
     response = await fetch(path, options);
   } catch (cause) {
-    throw new ApiError('network', 'Netzwerkfehler', 0, { cause });
+    throw new ApiError('network', 'Netzwerkfehler', 0);
   }
   if (response.status === 204) return null;
   const isJson = (response.headers.get('content-type') ?? '').includes('application/json');
@@ -78,6 +78,9 @@ export const burnRoom = (roomId, token) =>
 
 // --------------------------------------------------------------- WebSocket
 
+/** Muss zum Server passen (server/ws.js). */
+export const SUBPROTOCOL = 'fluesterchat';
+
 /** Schliess-Codes, nach denen ein neuer Versuch keinen Sinn ergibt. */
 const FATAL_CLOSE_CODES = new Set([4000, 4003, 4004, 4010]);
 const MIN_BACKOFF = 600;
@@ -130,8 +133,10 @@ export class Connection {
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const query = new URLSearchParams({ r: this.roomId });
-    if (this.token) query.set('t', this.token);
-    const socket = new WebSocket(`${scheme}://${location.host}/ws?${query}`);
+    // Das Token reist im Subprotokoll, nicht im Query-String: Query-Strings landen
+    // in Reverse-Proxy-Logs, Header-Werte nicht.
+    const protocols = this.token ? [SUBPROTOCOL, `t.${this.token}`] : [SUBPROTOCOL];
+    const socket = new WebSocket(`${scheme}://${location.host}/ws?${query}`, protocols);
     this.socket = socket;
 
     socket.onopen = () => {

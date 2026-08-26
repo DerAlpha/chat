@@ -56,6 +56,8 @@ export default defineConfig({
       CREATE_ROOM_PER_HOUR: '2000',
       JOIN_ATTEMPTS_PER_HOUR: '5000',
       UPLOADS_PER_HOUR: '2000',
+      // Klein gehalten, damit das Nachladen älterer Nachrichten überhaupt geprüft wird.
+      WELCOME_HISTORY: '5',
     },
   },
 });

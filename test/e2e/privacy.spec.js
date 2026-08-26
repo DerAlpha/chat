@@ -176,18 +176,141 @@ test('Die Oberfläche passt auf ein schmales Display', async ({ browser }) => {
   expect(fontSize).toBeGreaterThanOrEqual(16);
 
   // Antippbares muss den Daumen vertragen.
-  for (const selector of ['#btn-send', '#btn-attach', '#chat-menu', '#chat-back']) {
+  for (const selector of ['#btn-send', '#btn-attach', '#chat-menu', '#chat-back', '#jump-down']) {
     const box = await page.locator(selector).boundingBox();
     if (!box) continue;
-    expect(box.width, `${selector} zu schmal`).toBeGreaterThanOrEqual(40);
-    expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(40);
+    expect(box.width, `${selector} zu schmal`).toBeGreaterThanOrEqual(44);
+    expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(44);
+  }
+
+  // Auch die kleinen Chips auf der Startseite.
+  await page.goto('/');
+  for (const selector of ['#btn-lang', '#btn-theme', '#btn-about']) {
+    const box = await page.locator(selector).boundingBox();
+    expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(44);
   }
 
   await context.close();
   await context2.close();
 });
 
-test('Ältere Nachrichten werden nachgeladen', async ({ browser }) => {
+test('Der Zurück-Knopf verdeckt die Überschrift nicht', async ({ browser }) => {
+  const context = await browser.newContext({ ...MOBILE, viewport: { width: 320, height: 568 } });
+  const page = await context.newPage();
+  await page.goto('/');
+  await page.getByRole('button', { name: /Code eingeben/i }).click();
+  await expect(page.locator('#screen-join')).toBeVisible();
+
+  const back = await page.locator('#join-back').boundingBox();
+  const title = await page.locator('#join-title').boundingBox();
+  expect(back).not.toBeNull();
+  expect(title).not.toBeNull();
+  const overlaps = back.y < title.y + title.height && back.y + back.height > title.y
+    && back.x < title.x + title.width && back.x + back.width > title.x;
+  expect(overlaps, 'Zurück-Knopf und Überschrift überlappen').toBe(false);
+
+  await context.close();
+});
+
+test('Das Chat-Layout hält, wenn das Verbindungsbanner verschwindet', async ({ browser }) => {
+  const contextA = await browser.newContext(MOBILE);
+  const contextB = await browser.newContext(MOBILE);
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  const { link } = await createChat(pageA);
+  await joinChat(pageB, link);
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+  await expect(pageA.locator('#banner')).toBeHidden();
+
+  // Ohne Banner darf die Nachrichtenliste nicht auf Zeilenhöhe zusammenfallen.
+  const layout = await pageA.evaluate(() => {
+    const messages = document.getElementById('messages').getBoundingClientRect();
+    const composer = document.querySelector('.composer-wrap').getBoundingClientRect();
+    const header = document.querySelector('.chat-header').getBoundingClientRect();
+    return { messages: messages.height, composer: composer.height, header: header.height,
+             viewport: window.innerHeight, composerTop: composer.top, messagesBottom: messages.bottom };
+  });
+  expect(layout.messages, 'Nachrichtenliste muss den freien Platz füllen').toBeGreaterThan(layout.viewport * 0.5);
+  expect(layout.composer, 'Eingabezeile darf nicht gedehnt werden').toBeLessThan(160);
+  expect(Math.abs(layout.composerTop - layout.messagesBottom)).toBeLessThan(2);
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Aufnahme abbrechen und den Chat verlassen lässt kein verstecktes Eingabefeld zurück', async ({ browser }) => {
+  const contextA = await browser.newContext({ ...MOBILE, permissions: ['microphone'] });
+  const contextB = await browser.newContext(MOBILE);
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  const { link } = await createChat(pageA);
+  await joinChat(pageB, link);
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+
+  await pageA.locator('#btn-record').click();
+  await expect(pageA.locator('#recorder')).toBeVisible({ timeout: 10_000 });
+  await expect(pageA.locator('#composer')).toBeHidden();
+
+  // Mitten in der Aufnahme zurück und wieder hinein.
+  await pageA.locator('#chat-back').click();
+  await expect(pageA.locator('#screen-start')).toBeVisible();
+  await pageA.locator('#chat-list .chat-list__item').first().click();
+  await expect(pageA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+
+  await expect(pageA.locator('#recorder')).toBeHidden();
+  await expect(pageA.locator('#composer')).toBeVisible();
+  await sendText(pageA, 'Wieder schreibbar');
+  await expect(bubbles(pageB).last()).toContainText('Wieder schreibbar');
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Mehrere schnell abgeschickte Nachrichten behalten ihre Reihenfolge', async ({ browser }) => {
+  const contextA = await browser.newContext(MOBILE);
+  const contextB = await browser.newContext(MOBILE);
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  const { link } = await createChat(pageA);
+  await joinChat(pageB, link);
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+
+  const expected = ['eins', 'zwei', 'drei', 'vier', 'fünf'];
+
+  // Alle fünf im selben synchronen Block abschicken und die Liste sofort ablesen -
+  // dann ist noch keine Quittung da und wir sehen wirklich die offenen Nachrichten.
+  const whileStillPending = await pageA.evaluate((texts) => {
+    const input = document.getElementById('message-input');
+    const send = document.getElementById('btn-send');
+    for (const text of texts) {
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      send.click();
+    }
+    return [...document.querySelectorAll('#messages .msg')].map((node) => node.textContent);
+  }, expected);
+
+  expect(whileStillPending).toHaveLength(expected.length);
+  for (const [index, text] of expected.entries()) {
+    expect(whileStillPending[index], 'offene Nachrichten stehen in falscher Reihenfolge').toContain(text);
+  }
+
+  await expect(bubbles(pageA)).toHaveCount(5, { timeout: 15_000 });
+  for (const [index, text] of expected.entries()) {
+    await expect(bubbles(pageA).nth(index)).toContainText(text);
+  }
+  await expect(bubbles(pageB)).toHaveCount(5, { timeout: 15_000 });
+  for (const [index, text] of expected.entries()) {
+    await expect(bubbles(pageB).nth(index)).toContainText(text);
+  }
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Ältere Nachrichten werden wirklich nachgeladen', async ({ browser }) => {
+  // Der Testserver liefert beim Verbinden nur WELCOME_HISTORY=5 Nachrichten mit,
+  // der Rest muss über das Nachladen kommen.
   const contextA = await browser.newContext(MOBILE);
   const contextB = await browser.newContext(MOBILE);
   const pageA = await contextA.newPage();
@@ -198,11 +321,50 @@ test('Ältere Nachrichten werden nachgeladen', async ({ browser }) => {
 
   for (let i = 1; i <= 12; i += 1) await sendText(pageA, `Nachricht ${i}`);
   await expect(bubbles(pageB)).toHaveCount(12, { timeout: 20_000 });
-  await expect(bubbles(pageB).first()).toContainText('Nachricht 1');
+
+  // Nach dem Neuladen kommt erst einmal nur der jüngste Teil an.
+  await pageB.reload();
+  await pageB.locator('#chat-list .chat-list__item').first().click();
+  await expect(pageB.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(pageB)).toHaveCount(5, { timeout: 15_000 });
+  await expect(bubbles(pageB).first()).toContainText('Nachricht 8');
   await expect(bubbles(pageB).last()).toContainText('Nachricht 12');
+
+  // Und jetzt der Rest.
+  const loadOlder = pageB.locator('#load-older');
+  await expect(loadOlder).toBeVisible();
+  await loadOlder.click();
+  await expect(bubbles(pageB)).toHaveCount(12, { timeout: 15_000 });
+  await expect(bubbles(pageB).first()).toContainText('Nachricht 1');
+  await expect(loadOlder).toHaveCount(0, 'kein Nachladen mehr nötig');
 
   await contextA.close();
   await contextB.close();
+});
+
+test('Das Zugangstoken steht in keiner URL', async ({ browser }) => {
+  const context = await browser.newContext(MOBILE);
+  const page = await context.newPage();
+  const socketUrls = [];
+  const requestUrls = [];
+  page.on('websocket', (socket) => socketUrls.push(socket.url()));
+  page.on('request', (request) => requestUrls.push(request.url()));
+
+  const { link } = await createChat(page);
+  const context2 = await browser.newContext(MOBILE);
+  const page2 = await context2.newPage();
+  await joinChat(page2, link);
+  await expect(page.locator('#screen-chat')).toBeVisible();
+
+  const token = await page.evaluate(() => JSON.parse(localStorage.getItem('fc:sessions:v1'))[0].token);
+  expect(token).toBeTruthy();
+  expect(socketUrls.length).toBeGreaterThan(0);
+  for (const url of [...socketUrls, ...requestUrls]) {
+    expect(url, `Token steckt in ${url}`).not.toContain(token);
+  }
+
+  await context.close();
+  await context2.close();
 });
 
 test('Ein Zweitgerät des gleichen Nutzers bekommt denselben Verlauf', async ({ browser }) => {

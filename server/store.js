@@ -25,6 +25,7 @@ export class Store {
     this.rooms = new Map();
     this.dirty = false;
     this.persistTimer = null;
+    this.persistChain = Promise.resolve();
     this.closed = false;
   }
 
@@ -70,7 +71,18 @@ export class Store {
     if (typeof this.persistTimer.unref === 'function') this.persistTimer.unref();
   }
 
+  /**
+   * Schreibt die Momentaufnahme. Laeufe werden aneinandergereiht, damit sich
+   * zwei Schreibvorgaenge nicht ueber dieselbe Datei legen.
+   */
   async persist() {
+    this.persistChain = this.persistChain
+      .catch(() => {})
+      .then(() => this.writeSnapshot());
+    return this.persistChain;
+  }
+
+  async writeSnapshot() {
     if (!this.dirty) return;
     this.dirty = false;
     const payload = JSON.stringify({
@@ -79,9 +91,16 @@ export class Store {
       rooms: [...this.rooms.values()].map((room) => room.toJSON()),
     });
     const tmp = `${this.snapshotPath}.${process.pid}.tmp`;
-    await fsp.mkdir(this.dataDir, { recursive: true });
-    await fsp.writeFile(tmp, payload, 'utf8');
-    await fsp.rename(tmp, this.snapshotPath);
+    try {
+      await fsp.mkdir(this.dataDir, { recursive: true });
+      await fsp.writeFile(tmp, payload, 'utf8');
+      await fsp.rename(tmp, this.snapshotPath);
+    } catch (err) {
+      // Nicht geschrieben heisst weiterhin schmutzig - sonst ginge der Stand verloren.
+      this.dirty = true;
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 
   async close() {
@@ -308,7 +327,10 @@ export class Store {
       return await fsp.readFile(this.blobPath(room.id, blobId));
     } catch (err) {
       if (err.code === 'ENOENT') {
+        // Datei weg, Buchhaltung nachziehen - sonst bleibt das Kontingent belegt.
+        const stale = room.blobs.get(blobId);
         room.blobs.delete(blobId);
+        if (stale) room.blobBytes = Math.max(0, room.blobBytes - stale.size);
         this.markDirty();
         return null;
       }

@@ -8,7 +8,7 @@
 
 import {
   cryptoAvailable, generateCode, formatCode, normalizeCode, isCompleteCode, codeLength,
-  deriveRoomId, deriveKey, importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
+  deriveSecrets, importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
   toBase64, fromBase64, randomId,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
@@ -23,6 +23,9 @@ import {
 } from './ui.js';
 
 const MAX_ATTACHMENTS = 4;
+/** Ausstehende Nachrichten sortieren hinter allem Bestaetigten - und untereinander in Sendereihenfolge. */
+const PENDING_SEQ_BASE = Number.MAX_SAFE_INTEGER - 1_000_000;
+let pendingCounter = 0;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const TYPING_INTERVAL = 2500;
 const TYPING_TIMEOUT = 4000;
@@ -127,7 +130,7 @@ async function startNewChat() {
   try {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const code = generateCode();
-      const roomId = await deriveRoomId(code);
+      const { roomId, keyRaw } = await deriveSecrets(code);
       try {
         await createRoom(roomId);
       } catch (error) {
@@ -135,7 +138,6 @@ async function startNewChat() {
         if (error instanceof ApiError && error.code === 'room_exists') continue;
         throw error;
       }
-      const keyRaw = await deriveKey(code);
       const session = saveSession({
         roomId,
         code,
@@ -161,12 +163,23 @@ async function startNewChat() {
   }
 }
 
-/** Beitreten oder zurueckkehren - je nachdem, was dieses Geraet schon kennt. */
-async function enterChat(code, { deviceToken = null } = {}) {
+/**
+ * Beitreten oder zurueckkehren - je nachdem, was dieses Geraet schon kennt.
+ * Ist die Sitzung bekannt, sind Raum-ID und Schluessel schon da und die
+ * teure Ableitung entfaellt.
+ */
+async function enterChat(code, { deviceToken = null, known: knownSession = null } = {}) {
   busy(true, t('joining'));
   try {
-    const roomId = await deriveRoomId(code);
-    const known = getSession(roomId);
+    let roomId;
+    let keyRaw;
+    if (knownSession) {
+      roomId = knownSession.roomId;
+      keyRaw = fromBase64(knownSession.key);
+    } else {
+      ({ roomId, keyRaw } = await deriveSecrets(code));
+    }
+    const known = knownSession ?? getSession(roomId);
     const token = deviceToken ?? known?.token ?? null;
 
     let status;
@@ -184,7 +197,6 @@ async function enterChat(code, { deviceToken = null } = {}) {
       return;
     }
 
-    const keyRaw = known?.key ? fromBase64(known.key) : await deriveKey(code);
     const session = saveSession({
       roomId,
       code: formatCode(code),
@@ -244,6 +256,11 @@ function teardownChat() {
   clearTimeout(app.peerTypingTimer);
   app.recorder?.cancel();
   app.recorder = null;
+  // Sonst bliebe nach einem Abbruch mitten in der Aufnahme das Eingabefeld verdeckt.
+  const recorderBar = el('recorder');
+  if (recorderBar) recorderBar.hidden = true;
+  const composerForm = el('composer');
+  if (composerForm) composerForm.hidden = false;
   app.session = null;
   app.key = null;
   resetConversation();
@@ -342,11 +359,11 @@ function handleFrame(frame) {
 async function onWelcome(frame) {
   app.me = { id: frame.you.id, ...findMember(frame.members, frame.you.id) };
   app.limits = frame.room.limits ?? app.limits;
-  app.session = patchSession(app.session.roomId, {
-    token: frame.you.token,
-    memberId: frame.you.id,
-    lastActivity: Date.now(),
-  }) ?? app.session;
+  // Erst die laufende Sitzung aktualisieren: ohne nutzbaren localStorage gibt
+  // patchSession() null zurueck, und das Token ginge sonst verloren.
+  const patch = { token: frame.you.token, memberId: frame.you.id, lastActivity: Date.now() };
+  app.session = { ...app.session, ...patch };
+  patchSession(app.session.roomId, patch);
   if (app.conn) app.conn.token = frame.you.token;
 
   const peerRaw = frame.members.find((member) => member.id !== frame.you.id) ?? null;
@@ -445,9 +462,14 @@ async function renderHistory(messages, { replace = false } = {}) {
     list.replaceChildren();
     app.messages.clear();
     app.order = [];
+    app.oldestSeq = Infinity;
   }
   const entries = await Promise.all(messages.map(toEntry));
   for (const entry of entries) insertEntry(entry);
+  // Noch nicht quittierte Nachrichten ueberleben einen Wiederaufbau des Verlaufs.
+  if (replace) {
+    for (const pending of app.pending.values()) insertEntry(pending);
+  }
   redrawAll();
   scrollToBottom(true);
 }
@@ -605,8 +627,10 @@ function redrawAll() {
   let previous = null;
 
   if (app.hasMore) {
-    const more = make('button', 'btn btn--ghost', '⋯');
+    const more = make('button', 'btn btn--ghost load-more', t('loadOlder'));
     more.type = 'button';
+    more.id = 'load-older';
+    more.disabled = app.loadingMore;
     more.addEventListener('click', loadMore);
     fragment.appendChild(more);
   }
@@ -1007,6 +1031,8 @@ function jumpTo(messageId) {
 function loadMore() {
   if (app.loadingMore || !app.hasMore) return;
   app.loadingMore = true;
+  const button = el('load-older');
+  if (button) button.disabled = true;
   app.conn?.send({ t: 'history', before: app.oldestSeq, limit: 100 });
 }
 
@@ -1049,7 +1075,9 @@ async function sendMessage() {
         media: item.media,
       }, [item.blobId]);
     }
-    app.attachments = app.attachments.filter((item) => !item.blobId);
+    // Per Identitaet, nicht per Merkmal: waehrend des Sendens kann ein neuer
+    // Anhang fertig hochgeladen worden sein, der noch nicht mitgeschickt wurde.
+    app.attachments = app.attachments.filter((item) => !attachments.includes(item));
     renderAttachments();
   }
   scrollToBottom();
@@ -1061,7 +1089,7 @@ async function deliver(payload, blobIds) {
   const entry = {
     id: `local:${cid}`,
     cid,
-    seq: Number.MAX_SAFE_INTEGER - app.pending.size,
+    seq: PENDING_SEQ_BASE + (pendingCounter += 1),
     from: app.me?.id ?? '__pending__',
     ts: Date.now(),
     deleted: false,
@@ -1402,9 +1430,12 @@ async function editMessage(entry) {
 }
 
 function openChatMenu() {
-  const notificationLabel = Notification?.permission === 'denied'
+  // Achtung: `Notification?.permission` wuerde werfen, wenn es die API gar
+  // nicht gibt - Optional Chaining schuetzt nicht vor unbekannten Bezeichnern.
+  const notificationsBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
+  const notificationLabel = notificationsBlocked
     ? t('notificationsBlocked')
-    : (app.prefs.notifications ? t('notificationsOn') : t('notificationsOff'));
+    : (app.prefs.notifications ? t('switchOn') : t('switchOff'));
 
   openSheet(t('menu'), [
     { icon: 'i-users', label: t('yourName'), value: app.session?.nick || '–', onClick: changeNick },
@@ -1416,7 +1447,12 @@ function openChatMenu() {
       onClick: shareDeviceLink,
     },
     { icon: 'i-bell', label: t('notifications'), value: notificationLabel, onClick: toggleNotifications },
-    { icon: 'i-bell', label: t('sound'), value: app.prefs.sound ? t('soundOn') : t('soundOff'), onClick: toggleSound },
+    {
+      icon: app.prefs.sound ? 'i-sound' : 'i-sound-off',
+      label: t('sound'),
+      value: app.prefs.sound ? t('switchOn') : t('switchOff'),
+      onClick: toggleSound,
+    },
     { icon: 'i-sun', label: t('theme'), value: themeLabel(), onClick: cycleTheme },
     { icon: 'i-globe', label: t('language'), value: getLanguage().toUpperCase(), onClick: cycleLanguage },
     { icon: 'i-info', label: t('about'), onClick: showAbout },
@@ -1551,7 +1587,17 @@ async function toggleNotifications() {
   toast(t('notificationsOn'));
 }
 
+/** Sagt Screenreadern genau eine neue Nachricht an - nicht den ganzen Verlauf. */
+function announce(text) {
+  const region = el('live-region');
+  if (!region || !text) return;
+  region.textContent = '';
+  // Ein Tick Pause, damit auch zweimal derselbe Text angesagt wird.
+  requestAnimationFrame(() => { region.textContent = text; });
+}
+
 function notifyIncoming(entry) {
+  announce(`${peerName()}: ${previewOf(entry)}`);
   if (app.prefs.sound && document.visibilityState !== 'visible') playPing();
   if (!app.prefs.notifications || typeof Notification === 'undefined') return;
   if (Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
@@ -1594,7 +1640,7 @@ function renderChatList() {
     button.append(avatar, text);
     if (session.unread > 0) button.appendChild(make('span', 'pill', String(session.unread)));
     button.appendChild(icon('i-chevron-down'));
-    button.addEventListener('click', () => void enterChat(session.code));
+    button.addEventListener('click', () => void enterChat(session.code, { known: session }));
     onLongPress(button, () => openSessionMenu(session));
     item.appendChild(button);
     list.appendChild(item);
@@ -1781,6 +1827,7 @@ function wireStaticHandlers() {
 
   // --- Overlays ---
   el('sheet-backdrop').addEventListener('click', closeSheet);
+  el('sheet-grip').addEventListener('click', closeSheet);
   el('lightbox-close').addEventListener('click', closeLightbox);
   el('error-home').addEventListener('click', showStart);
   el('error-retry').addEventListener('click', () => {

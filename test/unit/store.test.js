@@ -190,6 +190,103 @@ test('Das Speicherkontingent eines Raums wird durchgesetzt', async () => {
   }
 });
 
+test('Ein verschwundener Anhang gibt sein Kontingent wieder frei', async () => {
+  const { store, dataDir, cleanup } = tempStore();
+  try {
+    await store.init();
+    const room = store.createRoom(ROOM);
+    const { member } = store.joinRoom(room, null);
+    const blob = await store.putBlob(room, Buffer.alloc(4096, 3));
+    store.appendMessage(room, member, 'ct', [blob.id]);
+    assert.equal(room.blobBytes, 4096);
+
+    // Datei unter dem Server weggezogen (Backup, Aufraeumskript, kaputte Platte).
+    fs.rmSync(path.join(dataDir, 'blobs', ROOM, `${blob.id}.bin`));
+    assert.equal(await store.readBlob(room, blob.id), null);
+    assert.equal(room.blobs.has(blob.id), false);
+    assert.equal(room.blobBytes, 0, 'Kontingent darf nicht dauerhaft belegt bleiben');
+
+    // Und der Platz laesst sich wieder benutzen.
+    const replacement = await store.putBlob(room, Buffer.alloc(1024, 9));
+    assert.equal(room.blobBytes, 1024);
+    assert.ok(replacement.id);
+  } finally {
+    await store.close();
+    cleanup();
+  }
+});
+
+test('Schreibvorgaenge ueberlappen sich nie - sie laufen nacheinander', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-race-'));
+  try {
+    const store = new Store({ dataDir });
+    await store.init();
+    const room = store.createRoom(ROOM);
+    const { member } = store.joinRoom(room, null);
+
+    // Mitzaehlen, wie viele Schreibvorgaenge gleichzeitig laufen. Alle schreiben
+    // in dieselbe temporaere Datei - ueberlappen sie sich, wird der Snapshot Muell.
+    let active = 0;
+    let maxActive = 0;
+    const original = store.writeSnapshot.bind(store);
+    store.writeSnapshot = async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        return await original();
+      } finally {
+        active -= 1;
+      }
+    };
+
+    const writes = [];
+    for (let i = 0; i < 40; i += 1) {
+      // Ordentlich Daten, damit ein Schreibvorgang lange genug dauert.
+      store.appendMessage(room, member, 'x'.repeat(2048) + i);
+      writes.push(store.persist());
+    }
+    await Promise.all(writes);
+    assert.equal(maxActive, 1, `es liefen bis zu ${maxActive} Schreibvorgaenge gleichzeitig`);
+
+    await store.persist();
+    await store.close();
+
+    const snapshot = JSON.parse(fs.readFileSync(path.join(dataDir, 'rooms.json'), 'utf8'));
+    assert.equal(snapshot.rooms[0].messages.length, 40, 'alle Nachrichten muessen im Snapshot stehen');
+    assert.ok(snapshot.rooms[0].messages[39].ct.endsWith('39'));
+
+    const leftovers = fs.readdirSync(dataDir).filter((name) => name.includes('.tmp'));
+    assert.deepEqual(leftovers, [], 'temporaere Dateien muessen aufgeraeumt sein');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('Ein fehlgeschlagener Schreibvorgang laesst den Stand als ungespeichert stehen', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-failwrite-'));
+  try {
+    const store = new Store({ dataDir });
+    await store.init();
+    const room = store.createRoom(ROOM);
+    const { member } = store.joinRoom(room, null);
+    store.appendMessage(room, member, 'wichtig');
+
+    // Schreiben unmoeglich machen: der Zielpfad ist ein Verzeichnis.
+    store.snapshotPath = path.join(dataDir, 'blobs');
+    await assert.rejects(() => store.persist());
+    assert.equal(store.dirty, true, 'nach einem Fehler muss weiter als schmutzig gelten');
+
+    // Danach klappt es wieder, und der Stand ist vollstaendig.
+    store.snapshotPath = path.join(dataDir, 'rooms.json');
+    await store.persist();
+    const snapshot = JSON.parse(fs.readFileSync(store.snapshotPath, 'utf8'));
+    assert.equal(snapshot.rooms[0].messages[0].ct, 'wichtig');
+    await store.close();
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('Lesestand kann nur vorwaerts laufen', async () => {
   const { store, cleanup } = tempStore();
   try {

@@ -4,7 +4,9 @@ import { log } from './logger.js';
 import { BadRequest, ROOM_ID_RE } from './store.js';
 import { perMinute } from './ratelimit.js';
 
-const WELCOME_HISTORY = 300;
+const WELCOME_HISTORY = config.welcomeHistory;
+export const SUBPROTOCOL = 'fluesterchat';
+const TOKEN_PREFIX = 't.';
 /** Leichte Frames sollen echte Nachrichten nicht aus dem Budget draengen. */
 const FRAME_COST = { ping: 0, typing: 0.1, read: 0.1, history: 0.5 };
 const MAX_HISTORY_PAGE = 300;
@@ -30,6 +32,9 @@ export class Hub {
     this.wss = new WebSocketServer({
       noServer: true,
       maxPayload: Math.ceil(config.maxCiphertextBytes * 1.5) + 8192,
+      // Der Client bietet ['fluesterchat', 't.<token>'] an; bestaetigt wird nur
+      // der Protokollname, das Token ist nur ein Transportmittel.
+      handleProtocols: () => SUBPROTOCOL,
     });
     this.heartbeat = setInterval(() => this.pingAll(), config.heartbeatIntervalMs);
     if (typeof this.heartbeat.unref === 'function') this.heartbeat.unref();
@@ -57,7 +62,9 @@ export class Hub {
     if (url.pathname !== '/ws') return destroy(socket, 404);
 
     const roomId = url.searchParams.get('r') ?? '';
-    const token = url.searchParams.get('t') ?? '';
+    // Das Token kommt im Subprotokoll-Header statt im Query-String: Query-Strings
+    // stehen in fast jedem Reverse-Proxy-Log, Header-Werte nicht.
+    const token = readToken(request.headers['sec-websocket-protocol']);
     if (!ROOM_ID_RE.test(roomId)) return destroy(socket, 400);
 
     this.wss.handleUpgrade(request, socket, head, (ws) => {
@@ -67,6 +74,10 @@ export class Hub {
   }
 
   onConnection(ws, roomId, token) {
+    // Muss ganz oben stehen: ein 'error'-Ereignis ohne Listener beendet den
+    // Prozess, und die Abbruchpfade unten schliessen den Socket sofort.
+    ws.on('error', (err) => log.debug('WS-Fehler:', err.message));
+
     const room = this.store.getRoom(roomId);
     if (!room) return ws.close(CLOSE.ROOM_UNKNOWN, 'room_unknown');
 
@@ -88,7 +99,6 @@ export class Hub {
     ws.memberId = member.id;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => this.onMessage(ws, data, isBinary));
-    ws.on('error', (err) => log.debug('WS-Fehler:', err.message));
     ws.on('close', () => this.onClose(ws));
 
     const history = room.messages.slice(-WELCOME_HISTORY);
@@ -333,6 +343,16 @@ function sendRaw(ws, text) {
 
 function sendError(ws, code, msg, cid) {
   send(ws, { t: 'err', code, msg, cid: cid ?? null });
+}
+
+/** Liest `t.<token>` aus der angebotenen Subprotokoll-Liste. */
+function readToken(header) {
+  if (!header) return '';
+  for (const raw of String(header).split(',')) {
+    const value = raw.trim();
+    if (value.startsWith(TOKEN_PREFIX)) return value.slice(TOKEN_PREFIX.length);
+  }
+  return '';
 }
 
 function destroy(socket, status) {

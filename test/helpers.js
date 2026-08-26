@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import { startServer } from '../server/index.js';
+import { SUBPROTOCOL } from '../server/ws.js';
 
 export async function withServer(fn) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-test-'));
@@ -26,8 +27,9 @@ export class TestClient {
   constructor(ctx, roomId, token) {
     this.frames = [];
     this.consumed = 0;
-    const query = `r=${encodeURIComponent(roomId)}${token ? `&t=${encodeURIComponent(token)}` : ''}`;
-    this.ws = new WebSocket(`${ctx.wsBase}/ws?${query}`);
+    // Das Token reist wie im Browser im Subprotokoll, nicht im Query-String.
+    const protocols = token ? [SUBPROTOCOL, `t.${token}`] : [SUBPROTOCOL];
+    this.ws = new WebSocket(`${ctx.wsBase}/ws?r=${encodeURIComponent(roomId)}`, protocols);
     this.closed = null;
     this.ws.on('message', (data) => this.frames.push(JSON.parse(data.toString('utf8'))));
     this.ws.on('close', (code, reason) => { this.closed = { code, reason: reason.toString() }; });

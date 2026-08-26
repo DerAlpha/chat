@@ -40,6 +40,8 @@ export const config = {
   cleanupIntervalMs: int('CLEANUP_INTERVAL_MINUTES', 5) * MINUTE,
 
   maxMembersPerRoom: 2,
+  // Wie viele Nachrichten beim Verbinden sofort mitkommen; aeltere holt der Client nach.
+  welcomeHistory: int('WELCOME_HISTORY', 300),
   maxMessagesPerRoom: int('MAX_MESSAGES_PER_ROOM', 5000),
   // Groesse eines verschluesselten Nachrichtentextes (Base64) in Bytes.
   maxCiphertextBytes: int('MAX_CIPHERTEXT_BYTES', 64 * 1024),

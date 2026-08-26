@@ -2,8 +2,14 @@
  * Ende-zu-Ende-Verschluesselung.
  *
  * Der Einmal-Code ist das gemeinsame Geheimnis. Aus ihm entstehen zwei Dinge:
- *   1. die Raum-ID, die der Server sieht (ein Hash - daraus laesst sich der Code nicht zurueckrechnen),
+ *   1. die Raum-ID, die der Server sieht,
  *   2. der AES-GCM-Schluessel, der den Server nie erreicht.
+ *
+ * Beide stammen aus EINER teuren PBKDF2-Ableitung. Das ist wichtig: waere die
+ * Raum-ID ein billiger Ein-Runden-Hash desselben Codes, koennte jemand mit
+ * Kenntnis der Raum-ID den 60-Bit-Coderaum guenstig durchprobieren und danach
+ * einmalig den Schluessel ableiten - die 250.000 Runden waeren wertlos. So
+ * kostet jeder einzelne Rateversuch den vollen PBKDF2-Aufwand.
  *
  * Der Code steht ausschliesslich im URL-Fragment (#...). Fragmente werden
  * nie an den Server geschickt.
@@ -15,7 +21,10 @@ const CODE_LENGTH = 12;
 const GROUP = 4;
 const PBKDF2_ITERATIONS = 250_000;
 const IV_BYTES = 12;
-const ROOM_ID_LENGTH = 22;
+/** 32 Byte Schluessel + 16 Byte Raum-ID; 16 Byte ergeben in base64url genau 22 Zeichen. */
+const DERIVED_BITS = 384;
+const KEY_BYTES = 32;
+const ROOM_ID_BYTES = 16;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -69,27 +78,41 @@ async function sha256(text) {
   return new Uint8Array(digest);
 }
 
-/** Die einzige Information ueber den Code, die der Server je zu sehen bekommt. */
-export async function deriveRoomId(code) {
+/**
+ * Leitet Raum-ID und Nachrichtenschluessel in einem Zug ab.
+ *
+ * Beides kommt aus demselben PBKDF2-Lauf mit 250.000 Runden. Wer nur die
+ * Raum-ID kennt, muss fuer jeden Rateversuch dieselbe teure Ableitung rechnen.
+ *
+ * @param {string} code
+ * @returns {Promise<{roomId: string, keyRaw: Uint8Array}>}
+ */
+export async function deriveSecrets(code) {
   const clean = normalizeCode(code);
-  const digest = await sha256(`fluesterchat:room:v1:${clean}`);
-  return toBase64Url(digest).slice(0, ROOM_ID_LENGTH);
+  const salt = await sha256(`fluesterchat:salt:v2:${clean}`);
+  const material = await crypto.subtle.importKey('raw', encoder.encode(clean), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    material,
+    DERIVED_BITS,
+  ));
+  return {
+    keyRaw: bits.slice(0, KEY_BYTES),
+    roomId: toBase64Url(bits.slice(KEY_BYTES, KEY_BYTES + ROOM_ID_BYTES)),
+  };
 }
 
 /**
- * Leitet den Nachrichtenschluessel ab. PBKDF2 mit 250.000 Runden macht das
- * Durchprobieren der 60 Code-Bits fuer Aussenstehende teuer.
+ * Nur die Raum-ID. Kostet genauso viel wie `deriveSecrets` - wer beides
+ * braucht, ruft besser einmal `deriveSecrets` auf.
  */
+export async function deriveRoomId(code) {
+  return (await deriveSecrets(code)).roomId;
+}
+
+/** Nur die Schluesselbytes. Gleiche Kosten wie `deriveSecrets`. */
 export async function deriveKey(code) {
-  const clean = normalizeCode(code);
-  const salt = await sha256(`fluesterchat:salt:v1:${clean}`);
-  const material = await crypto.subtle.importKey('raw', encoder.encode(clean), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-    material,
-    256,
-  );
-  return new Uint8Array(bits);
+  return (await deriveSecrets(code)).keyRaw;
 }
 
 /** Macht aus rohen Schluesselbytes einen benutzbaren AES-GCM-Schluessel. */

@@ -5,7 +5,7 @@
  * die (verschluesselten) Inhalte, und die gehoeren nicht in einen Cache.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `fluesterchat-shell-${VERSION}`;
 
 const SHELL = [

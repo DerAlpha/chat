@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {
   generateCode, formatCode, normalizeCode, isCompleteCode, codeLength,
-  deriveRoomId, deriveKey, importKey, encryptJson, decryptJson,
-  encryptBytes, decryptBytes, toBase64, fromBase64, randomId,
+  deriveSecrets, deriveRoomId, deriveKey, importKey, encryptJson, decryptJson,
+  encryptBytes, decryptBytes, toBase64, toBase64Url, fromBase64, randomId,
 } from '../../public/js/crypto.js';
 import { ROOM_ID_RE } from '../../server/store.js';
 
@@ -54,6 +55,41 @@ test('Die Raum-ID passt zum Serverformat und ist stabil', async () => {
   assert.equal(roomId, await deriveRoomId(code.toLowerCase()));
   assert.equal(roomId, await deriveRoomId(normalizeCode(code)));
   assert.notEqual(roomId, await deriveRoomId(generateCode()));
+});
+
+test('Raum-ID und Schluessel kommen aus derselben teuren Ableitung', async () => {
+  const code = generateCode();
+  const { roomId, keyRaw } = await deriveSecrets(code);
+  assert.match(roomId, ROOM_ID_RE);
+  assert.equal(keyRaw.length, 32);
+  assert.equal(await deriveRoomId(code), roomId);
+  assert.deepEqual(await deriveKey(code), keyRaw);
+
+  // Der wichtige Punkt: die Raum-ID darf KEIN billiger Ein-Runden-Hash des Codes
+  // sein. Sonst kann jemand mit der Raum-ID den Coderaum guenstig durchprobieren
+  // und muss PBKDF2 nur ein einziges Mal rechnen.
+  const clean = normalizeCode(code);
+  for (const candidate of [
+    clean,
+    `fluesterchat:room:v1:${clean}`,
+    `fluesterchat:room:v2:${clean}`,
+    `fluesterchat:salt:v2:${clean}`,
+  ]) {
+    const cheap = toBase64Url(new Uint8Array(crypto.createHash('sha256').update(candidate).digest()));
+    assert.notEqual(roomId, cheap.slice(0, 22), `Raum-ID ist ein einfacher SHA-256 von "${candidate}"`);
+  }
+
+  // Und sie darf auch nicht einfach ein Stueck des Schluessels sein.
+  assert.ok(!toBase64Url(keyRaw).includes(roomId));
+});
+
+test('Die Ableitung ist absichtlich langsam', async () => {
+  const started = process.hrtime.bigint();
+  await deriveSecrets(generateCode());
+  const millis = Number(process.hrtime.bigint() - started) / 1e6;
+  // 250.000 PBKDF2-Runden brauchen selbst auf schneller Hardware zweistellige
+  // Millisekunden. Faellt das unter 15 ms, wurde die Haertung aufgeweicht.
+  assert.ok(millis > 15, `Ableitung war nur ${millis.toFixed(1)} ms schnell - zu billig`);
 });
 
 test('Aus der Raum-ID laesst sich der Code nicht ablesen', async () => {

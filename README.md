@@ -97,12 +97,20 @@ location / {
 
 ## Wie die Verschlüsselung funktioniert
 
-Der Code ist das gemeinsame Geheimnis. Aus ihm entstehen im Browser zwei Dinge:
+Der Code ist das gemeinsame Geheimnis. Aus ihm entstehen im Browser zwei Dinge –
+beide aus **einem einzigen** PBKDF2-Lauf mit 250 000 Runden:
 
-| Aus dem Code abgeleitet | Wofür | Sieht der Server? |
-| --- | --- | --- |
-| `SHA-256("…room…" + Code)`, gekürzt auf 22 Zeichen | Raum-ID | **ja** – ein Hash, aus dem sich der Code nicht zurückrechnen lässt |
-| `PBKDF2-SHA256(Code, Salt, 250 000 Runden)` → AES-256-GCM | Nachrichten und Anhänge | **nein** |
+```
+Code ──PBKDF2-SHA256(250 000 Runden)──▶ 384 Bit
+                                         ├─ Byte 0–31  → AES-256-GCM-Schlüssel   (bleibt im Browser)
+                                         └─ Byte 32–47 → Raum-ID (22 Zeichen)    (sieht der Server)
+```
+
+Dass beides aus demselben teuren Lauf kommt, ist kein Detail, sondern der Kern:
+Wäre die Raum-ID ein billiger Ein-Runden-Hash desselben Codes, könnte jemand mit
+Kenntnis der Raum-ID den 60-Bit-Coderaum mit einem SHA-256 pro Kandidat
+durchprobieren – und die 250 000 Runden nur ein einziges Mal für den Treffer
+rechnen. So kostet **jeder** Rateversuch den vollen Aufwand.
 
 - Der Code steht ausschließlich im **URL-Fragment** (`…/#H7Q2-9XKM-3BTV`). Fragmente
   werden von Browsern grundsätzlich nicht an den Server geschickt.
@@ -112,16 +120,21 @@ Der Code ist das gemeinsame Geheimnis. Aus ihm entstehen im Browser zwei Dinge:
 - AES-GCM erkennt Manipulationen: ein einziges gekipptes Bit lässt die Entschlüsselung fehlschlagen.
 
 Der Code besteht aus 12 Zeichen des Crockford-Base32-Alphabets – 60 Bit Entropie.
-Zusammen mit 250 000 PBKDF2-Runden ist Durchprobieren teuer. Die verwechselbaren
-Zeichen `I`, `L`, `O` und `U` kommen nicht vor; beim Eintippen werden `O→0` und
-`I/L→1` automatisch korrigiert.
+Zusammen mit 250 000 PBKDF2-Runden liegt der Aufwand fürs Durchprobieren bei
+rund 2⁷⁸ Hash-Operationen. Die verwechselbaren Zeichen `I`, `L`, `O` und `U`
+kommen nicht vor; beim Eintippen werden `O→0` und `I/L→1` automatisch korrigiert.
+
+Das Zugangstoken, das der Server jedem der beiden Plätze gibt, reist im
+WebSocket-Subprotokoll statt im Query-String – Query-Strings landen in fast jedem
+Reverse-Proxy-Log, Header-Werte nicht.
 
 ### Was der Server trotzdem weiß
 
 Ehrlichkeit gehört dazu. Der Server sieht:
 
-- die Raum-ID (Hash des Codes), Zeitstempel und Größen der Nachrichten,
+- die Raum-ID, Zeitstempel und Größen der Nachrichten,
 - wer wann verbunden ist, und wie viele Anhänge es gibt,
+- die beiden Zugangstoken, die er selbst vergeben hat,
 - die IP-Adressen der Verbindungen (wie bei jedem Webserver).
 
 Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
@@ -167,8 +180,8 @@ Auf dem Server stehen nur `express` und `ws` – sonst nichts.
 ## Tests
 
 ```bash
-npm test          # 72 Unit-Tests (Server, Krypto, QR, i18n)
-npm run test:e2e  # 20 End-to-End-Tests mit zwei simulierten Smartphones
+npm test          # 77 Unit-Tests (Server, Krypto, QR, i18n)
+npm run test:e2e  # 25 End-to-End-Tests mit zwei simulierten Smartphones
 npm run test:all
 ```
 
@@ -178,10 +191,19 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 
 - Der QR-Encoder wird für **alle Längen von 1 bis 213 Zeichen** Modul für Modul gegen
   eine unabhängige Referenzimplementierung verglichen.
-- Ein Mitschnitt aller WebSocket-Frames belegt, dass Klartext und Code den Browser nie verlassen.
+- Ein Mitschnitt aller WebSocket-Frames belegt, dass Klartext und Code den Browser nie verlassen;
+  ein zweiter Test belegt dasselbe für das Zugangstoken in allen URLs.
+- Die Raum-ID wird gegen die naheliegenden Ein-Runden-Hashes des Codes geprüft, damit
+  die PBKDF2-Härtung nicht versehentlich wieder umgangen wird.
 - `<script>` im Nachrichtentext bleibt Text und wird nicht ausgeführt.
 - Ein dritter Gast wird abgewiesen, ein zweites eigenes Gerät nicht.
-- Auf 320 px Breite scrollt nichts seitlich weg, und alle Schaltflächen bleiben daumengroß.
+- Auf 320 px Breite scrollt nichts seitlich weg, alle Schaltflächen bleiben 44 px groß,
+  und das Chat-Layout hält auch, wenn das Verbindungsbanner verschwindet.
+- Schnell hintereinander abgeschickte Nachrichten behalten ihre Reihenfolge, schon
+  bevor die erste Quittung da ist.
+
+Jeder dieser Regressionstests wurde gegen den fehlerhaften Stand gegengeprüft – sie
+werden rot, wenn man die zugehörige Korrektur zurücknimmt.
 
 ## Einstellungen
 
@@ -196,6 +218,7 @@ Alle Werte sind optional – siehe `.env.example`. Die wichtigsten:
 | `UNCLAIMED_ROOM_TTL_HOURS` | `24` | Nie eingelöste Codes verfallen nach einem Tag |
 | `MAX_BLOB_BYTES` | `12582912` | Größe eines einzelnen Anhangs (12 MB) |
 | `MESSAGES_PER_MINUTE` | `240` | Nachrichten pro Mitglied und Minute |
+| `WELCOME_HISTORY` | `300` | Nachrichten beim Verbinden; ältere lädt der Client nach |
 
 ## Lizenz
 

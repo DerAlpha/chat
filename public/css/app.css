@@ -149,7 +149,8 @@ button, input, textarea { font: inherit; color: inherit; }
 
 .center-block { text-align: center; align-items: center; margin: auto 0; }
 
-.back { position: absolute; top: -4px; left: -8px; }
+/* Im Fluss statt absolut: sonst liegt der Knopf ueber der Ueberschrift. */
+.back { align-self: flex-start; margin: 0 0 -8px -8px; }
 
 /* ---------------------------------------------------------------- Hero --- */
 
@@ -193,8 +194,10 @@ button, input, textarea { font: inherit; color: inherit; }
 
 .btn--primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 .btn--ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+/* Die grosse Nebenaktion braucht eine sichtbare Kante, sonst wirkt sie nicht antippbar. */
+.btn--ghost.btn--lg { border-color: var(--border); }
 .btn--lg { min-height: 54px; font-size: 1.03rem; }
-.btn--chip { min-height: 38px; padding: 0 12px; font-size: .85rem; border-radius: 999px; gap: 6px; }
+.btn--chip { min-height: 44px; padding: 0 14px; font-size: .85rem; border-radius: 999px; gap: 6px; }
 .btn--chip .icon { width: 17px; height: 17px; }
 
 .btn--icon {
@@ -337,7 +340,21 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ------------------------------------------------------------ Chat-View --- */
 
 .screen--chat { display: none; }
-.screen--chat[data-active] { display: grid; grid-template-rows: auto auto 1fr auto; height: 100%; min-height: 0; min-width: 0; }
+/* Feste Zeilenzuordnung und position:relative - ohne beides verrutscht das
+   Layout, sobald das Banner ausgeblendet wird, und der Sprung-Knopf haengt
+   sich an den Viewport statt an den Chat. */
+.screen--chat[data-active] {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+.chat-header { grid-row: 1; }
+.banner { grid-row: 2; }
+.messages { grid-row: 3; }
+.composer-wrap { grid-row: 4; }
 
 .chat-header {
   display: flex;
@@ -379,6 +396,7 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .messages:focus { outline: none; }
 
+.load-more { align-self: center; margin: 6px 0 2px; min-height: 40px; font-size: .88rem; }
 .day-sep { align-self: center; margin: 14px 0 8px; padding: 4px 12px; font-size: .76rem; font-weight: 600; color: var(--text-muted); background: var(--bg-sunken); border-radius: 999px; }
 .unread-sep { align-self: stretch; display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--accent); font-size: .76rem; font-weight: 600; }
 .unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35; }
@@ -598,7 +616,28 @@ button, input, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow-lg);
   animation: slide-up .22s cubic-bezier(.2, .9, .3, 1);
 }
-.sheet__grip { width: 40px; height: 4px; border-radius: 2px; background: var(--border); margin: 6px auto 10px; }
+/* Nicht nur Zierde: auf schmalen Displays ist der Hintergrund fast verdeckt,
+   also muss der Griff selbst zum Schliessen taugen. */
+.sheet__grip {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  margin: 2px auto 6px;
+  cursor: pointer;
+}
+.sheet__grip::before {
+  content: "";
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 11px auto;
+}
 .sheet__title { font-size: 1rem; margin-bottom: 8px; padding: 0 4px; }
 .sheet__body { display: flex; flex-direction: column; gap: 4px; }
 
