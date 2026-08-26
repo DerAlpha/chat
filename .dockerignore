@@ -1,0 +1,12 @@
+node_modules
+data
+test
+test-results
+playwright-report
+blob-report
+scripts
+.git
+.github
+.env
+*.log
+playwright.config.js

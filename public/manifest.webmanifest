@@ -1,0 +1,21 @@
+{
+  "name": "Flüsterchat",
+  "short_name": "Flüsterchat",
+  "description": "Ende-zu-Ende verschlüsselter Chat für zwei – ohne Anmeldung. Ein Einmal-Code genügt.",
+  "lang": "de",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#f6f7f9",
+  "theme_color": "#2f6df6",
+  "categories": ["social", "communication"],
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

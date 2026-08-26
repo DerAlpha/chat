@@ -1,0 +1,36 @@
+{
+  "name": "fluesterchat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anonymer Ende-zu-Ende-verschluesselter Chat ohne Anmeldung - ein Einmal-Code verbindet zwei Personen.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test \"test/unit/*.test.js\"",
+    "test:e2e": "playwright test",
+    "test:all": "npm run test && npm run test:e2e",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0",
+    "qrcode-generator": "^2.0.4"
+  },
+  "keywords": [
+    "chat",
+    "ende-zu-ende",
+    "e2ee",
+    "pwa",
+    "ohne-anmeldung",
+    "websocket"
+  ],
+  "license": "MIT"
+}
