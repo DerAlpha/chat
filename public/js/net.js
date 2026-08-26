@@ -1,5 +1,7 @@
 /** Alles, was mit dem Server spricht: REST fuer Raeume und Anhaenge, WebSocket fuer den Rest. */
 
+import { appPath, socketUrl } from './base.js';
+
 export class ApiError extends Error {
   constructor(code, message, status) {
     super(message);
@@ -26,20 +28,20 @@ async function request(path, options = {}) {
 }
 
 export const createRoom = (roomId) =>
-  request('/api/rooms', {
+  request(appPath('api/rooms'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ roomId }),
   });
 
-export const roomStatus = (roomId) => request(`/api/rooms/${encodeURIComponent(roomId)}`);
+export const roomStatus = (roomId) => request(appPath(`api/rooms/${encodeURIComponent(roomId)}`));
 
 /** Laedt bereits verschluesselte Bytes hoch. */
 export async function uploadBlob(roomId, token, bytes, onProgress) {
   // XMLHttpRequest, weil fetch keinen Upload-Fortschritt meldet.
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/rooms/${encodeURIComponent(roomId)}/blobs`);
+    xhr.open('POST', appPath(`api/rooms/${encodeURIComponent(roomId)}/blobs`));
     xhr.setRequestHeader('x-room-token', token);
     xhr.setRequestHeader('content-type', 'application/octet-stream');
     xhr.responseType = 'json';
@@ -61,7 +63,7 @@ export async function uploadBlob(roomId, token, bytes, onProgress) {
 
 /** Holt verschluesselte Bytes zurueck. */
 export async function downloadBlob(roomId, token, blobId) {
-  const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/blobs/${encodeURIComponent(blobId)}`, {
+  const response = await fetch(appPath(`api/rooms/${encodeURIComponent(roomId)}/blobs/${encodeURIComponent(blobId)}`), {
     headers: { 'x-room-token': token },
   });
   if (!response.ok) {
@@ -71,7 +73,7 @@ export async function downloadBlob(roomId, token, blobId) {
 }
 
 export const burnRoom = (roomId, token) =>
-  request(`/api/rooms/${encodeURIComponent(roomId)}`, {
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}`), {
     method: 'DELETE',
     headers: { 'x-room-token': token },
   });
@@ -131,12 +133,11 @@ export class Connection {
     if (immediate) this.attempt = 0;
     this.setStatus('connecting');
 
-    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const query = new URLSearchParams({ r: this.roomId });
     // Das Token reist im Subprotokoll, nicht im Query-String: Query-Strings landen
     // in Reverse-Proxy-Logs, Header-Werte nicht.
     const protocols = this.token ? [SUBPROTOCOL, `t.${this.token}`] : [SUBPROTOCOL];
-    const socket = new WebSocket(`${scheme}://${location.host}/ws?${query}`, protocols);
+    const socket = new WebSocket(socketUrl(query), protocols);
     this.socket = socket;
 
     socket.onopen = () => {

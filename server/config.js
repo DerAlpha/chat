@@ -14,6 +14,22 @@ function int(name, fallback) {
   return value;
 }
 
+/**
+ * Unterpfad, unter dem die App haengt: '' fuer die Wurzel, sonst z. B. '/chats'
+ * (mit fuehrendem, ohne abschliessenden Schraegstrich).
+ */
+function basePath(name) {
+  const raw = (process.env[name] ?? '').trim();
+  if (!raw || raw === '/') return '';
+  const segments = raw.split('/').filter(Boolean);
+  if (segments.length === 0) return '';
+  const valid = segments.every(
+    (segment) => /^[A-Za-z0-9._~-]+$/.test(segment) && segment !== '.' && segment !== '..',
+  );
+  if (!valid) throw new Error(`Ungueltiger Wert fuer ${name}: ${raw}`);
+  return `/${segments.join('/')}`;
+}
+
 function bool(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -30,6 +46,8 @@ export const config = {
   dataDir: process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(rootDir, 'data'),
 
   host: process.env.HOST || '0.0.0.0',
+  // Hinter einem Reverse Proxy, der NICHT abschneidet: BASE_PATH=/chats
+  basePath: basePath('BASE_PATH'),
   port: int('PORT', 3000),
   trustProxy: bool('TRUST_PROXY', false),
 

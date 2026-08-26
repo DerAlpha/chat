@@ -14,7 +14,7 @@ async function pairUp(browser) {
 }
 
 test('Startseite zeigt die wichtigsten Wege', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.getByRole('heading', { name: 'Flüsterchat' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Neuen Chat starten/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /Code eingeben/i })).toBeVisible();
@@ -55,7 +55,7 @@ test('Der Code lässt sich auch abtippen', async ({ browser }) => {
   const pageB = await contextB.newPage();
   const { code } = await createChat(pageA);
 
-  await pageB.goto('/');
+  await pageB.goto('./');
   await pageB.getByRole('button', { name: /Code eingeben/i }).click();
   // Kleinschreibung und fehlende Bindestriche muss die App verkraften.
   await pageB.locator('#code-input').fill(code.toLowerCase().replace(/-/g, ''));

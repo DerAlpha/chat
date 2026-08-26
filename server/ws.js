@@ -59,7 +59,7 @@ export class Hub {
     } catch {
       return destroy(socket, 400);
     }
-    if (url.pathname !== '/ws') return destroy(socket, 404);
+    if (url.pathname !== `${config.basePath}/ws`) return destroy(socket, 404);
 
     const roomId = url.searchParams.get('r') ?? '';
     // Das Token kommt im Subprotokoll-Header statt im Query-String: Query-Strings

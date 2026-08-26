@@ -5,26 +5,35 @@
  * die (verschluesselten) Inhalte, und die gehoeren nicht in einen Cache.
  */
 
-const VERSION = 'v2';
-const SHELL_CACHE = `fluesterchat-shell-${VERSION}`;
+const VERSION = 'v3';
+
+/**
+ * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
+ * Service Workers ist ohnehin sein eigener Ordner - also leiten wir alle Pfade
+ * daraus ab, statt sie fest zu verdrahten.
+ */
+const BASE = new URL('./', self.location).pathname;
+const SHELL_CACHE = `fluesterchat-shell-${VERSION}-${BASE}`;
+const INDEX = `${BASE}index.html`;
 
 const SHELL = [
-  '/',
-  '/index.html',
-  '/css/app.css',
-  '/js/app.js',
-  '/js/crypto.js',
-  '/js/i18n.js',
-  '/js/media.js',
-  '/js/net.js',
-  '/js/qr.js',
-  '/js/session.js',
-  '/js/ui.js',
-  '/manifest.webmanifest',
-  '/icons/icon.svg',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-];
+  '',
+  'index.html',
+  'css/app.css',
+  'js/app.js',
+  'js/base.js',
+  'js/crypto.js',
+  'js/i18n.js',
+  'js/media.js',
+  'js/net.js',
+  'js/qr.js',
+  'js/session.js',
+  'js/ui.js',
+  'manifest.webmanifest',
+  'icons/icon.svg',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+].map((path) => BASE + path);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -49,12 +58,17 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname === '/ws' || url.pathname === '/healthz') return;
+  if (url.pathname.startsWith(`${BASE}api/`)
+    || url.pathname === `${BASE}ws`
+    || url.pathname === `${BASE}healthz`) return;
+  // Alles ausserhalb der eigenen Basis geht uns nichts an (z. B. Nachbar-Apps
+  // auf derselben Domain).
+  if (!url.pathname.startsWith(BASE)) return;
 
   // Navigationen: erst das Netz fragen, sonst die gespeicherte Huelle zeigen.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html').then((hit) => hit ?? Response.error())),
+      fetch(request).catch(() => caches.match(INDEX).then((hit) => hit ?? Response.error())),
     );
     return;
   }

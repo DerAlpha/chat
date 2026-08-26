@@ -56,12 +56,13 @@ export function makePng(width = 240, height = 160) {
 
 /** Startet einen neuen Chat und liefert Code und Einladungslink. */
 export async function createChat(page) {
-  await page.goto('/');
+  await page.goto('./');
   await page.getByRole('button', { name: /Neuen Chat starten/i }).click();
   const codeNode = page.locator('#code-display');
   await expect(codeNode).toHaveText(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/, { timeout: 20_000 });
   const code = (await codeNode.textContent()).trim();
-  return { code, link: `/#${encodeURIComponent(code)}` };
+  // Relativ, damit derselbe Test unter "/" und unter "/chats/" funktioniert.
+  return { code, link: `./#${encodeURIComponent(code)}` };
 }
 
 /** Tritt einem Chat ueber den Einladungslink bei. */
@@ -81,7 +82,7 @@ export const bubbles = (page) => page.locator('#messages .msg');
 /** Liefert die Rohdaten, die der Server gespeichert hat. */
 export async function serverMessages(request, baseURL, code, page) {
   const roomId = await page.evaluate(async (value) => {
-    const module = await import('/js/crypto.js');
+    const module = await import('./js/crypto.js');
     return module.deriveRoomId(value);
   }, code);
   return { roomId, statusUrl: `${baseURL}/api/rooms/${roomId}` };

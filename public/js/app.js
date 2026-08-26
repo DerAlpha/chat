@@ -12,6 +12,7 @@ import {
   toBase64, fromBase64, randomId,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
+import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, Connection, ApiError } from './net.js';
@@ -305,8 +306,9 @@ function showInvite(session, { fromChat = false } = {}) {
   showScreen('invite');
 }
 
-const inviteLink = (code) => `${location.origin}${location.pathname}#${encodeURIComponent(formatCode(code))}`;
-const deviceLink = (code, token) => `${location.origin}${location.pathname}#${encodeURIComponent(formatCode(code))}.${encodeURIComponent(token)}`;
+const inviteLink = (code) => `${baseUrl.href}#${encodeURIComponent(formatCode(code))}`;
+const deviceLink = (code, token) =>
+  `${baseUrl.href}#${encodeURIComponent(formatCode(code))}.${encodeURIComponent(token)}`;
 
 function setInviteWaiting(peerArrived) {
   const status = el('invite-status');
@@ -1604,8 +1606,8 @@ function notifyIncoming(entry) {
   try {
     const notification = new Notification(peerName(), {
       body: previewOf(entry).slice(0, 140),
-      icon: '/icons/icon-192.png',
-      badge: '/icons/badge.png',
+      icon: appUrl('icons/icon-192.png'),
+      badge: appUrl('icons/badge.png'),
       tag: app.session.roomId,
       renotify: false,
     });
@@ -1868,7 +1870,9 @@ function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register(appUrl('sw.js'), { scope: basePath })
+      .catch(() => {});
   });
 }
 

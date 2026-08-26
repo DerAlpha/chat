@@ -3,7 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PORT = Number(process.env.E2E_PORT ?? 3199);
-const baseURL = `http://127.0.0.1:${PORT}`;
+/**
+ * Dieselbe Suite laeuft gegen die Wurzel und gegen einen Unterpfad:
+ *   npm run test:e2e            -> http://127.0.0.1:3199/
+ *   E2E_BASE_PATH=/chats ...    -> http://127.0.0.1:3199/chats/
+ */
+const BASE_PATH = (process.env.E2E_BASE_PATH ?? '').replace(/\/+$/, '');
+const baseURL = `http://127.0.0.1:${PORT}${BASE_PATH}/`;
 // Frischer Datenordner pro Lauf, damit Tests sich nicht gegenseitig sehen.
 const dataDir = path.join(os.tmpdir(), `fluesterchat-e2e-${process.pid}`);
 
@@ -45,13 +51,14 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node server/index.js',
-    url: `${baseURL}/healthz`,
+    url: `${baseURL}healthz`,
     reuseExistingServer: false,
     timeout: 20_000,
     env: {
       PORT: String(PORT),
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
+      BASE_PATH,
       LOG_LEVEL: 'warn',
       CREATE_ROOM_PER_HOUR: '2000',
       JOIN_ATTEMPTS_PER_HOUR: '5000',

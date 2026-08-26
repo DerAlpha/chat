@@ -77,6 +77,24 @@ docker compose up -d
 
 Die Daten (Momentaufnahme + verschlüsselte Anhänge) landen im Volume `chat-data`.
 
+### In einem Unterordner einer bestehenden Domain
+
+Die App muss nicht auf einer eigenen Domain wohnen. Mit `BASE_PATH` hängt sie
+unter einem beliebigen Pfad – Startseite, API, WebSocket, Service Worker,
+Manifest und Einladungslinks ziehen automatisch mit:
+
+```bash
+BASE_PATH=/chats PORT=8123 npm start
+# -> http://localhost:8123/chats/
+```
+
+Der Client leitet seine Basis aus dem eigenen Modulpfad ab (`import.meta.url`),
+das HTML lädt alles relativ. Es braucht also weder einen Bauschritt noch ein
+eingebettetes Skript – was auch gut ist, denn die CSP verbietet inline.
+
+Eine fertige Anleitung für **Apache + systemd** samt geprüfter Konfiguration
+liegt in [`deploy/`](deploy/README.md).
+
 ### Hinter einem Reverse Proxy
 
 WebSockets müssen durchgereicht werden, und `TRUST_PROXY=1` sorgt dafür, dass die
@@ -162,6 +180,7 @@ server/
   config.js     Alle Stellschrauben an einem Ort
 public/
   index.html    Grundgerüst inklusive Icon-Sprite
+  js/base.js    Wo die App hängt - aus dem eigenen Modulpfad abgeleitet
   css/app.css   Mobile-First-Gestaltung, hell und dunkel
   js/crypto.js  Code-Erzeugung, Schlüsselableitung, Ver- und Entschlüsselung
   js/qr.js      Eigener QR-Encoder (Byte-Modus, Stufe M, Versionen 1–10)
@@ -180,8 +199,9 @@ Auf dem Server stehen nur `express` und `ws` – sonst nichts.
 ## Tests
 
 ```bash
-npm test          # 77 Unit-Tests (Server, Krypto, QR, i18n)
-npm run test:e2e  # 25 End-to-End-Tests mit zwei simulierten Smartphones
+npm test                  # 77 Unit-Tests (Server, Krypto, QR, i18n)
+npm run test:e2e          # 25 End-to-End-Tests mit zwei simulierten Smartphones
+npm run test:e2e:subpath  # dieselben 25 Tests unter /chats
 npm run test:all
 ```
 
@@ -201,6 +221,8 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   und das Chat-Layout hält auch, wenn das Verbindungsbanner verschwindet.
 - Schnell hintereinander abgeschickte Nachrichten behalten ihre Reihenfolge, schon
   bevor die erste Quittung da ist.
+- Die komplette Suite läuft ein zweites Mal unter `/chats`, damit der Betrieb in
+  einem Unterordner nicht bei der nächsten Änderung wieder kaputtgeht.
 
 Jeder dieser Regressionstests wurde gegen den fehlerhaften Stand gegengeprüft – sie
 werden rot, wenn man die zugehörige Korrektur zurücknimmt.
@@ -219,6 +241,7 @@ Alle Werte sind optional – siehe `.env.example`. Die wichtigsten:
 | `MAX_BLOB_BYTES` | `12582912` | Größe eines einzelnen Anhangs (12 MB) |
 | `MESSAGES_PER_MINUTE` | `240` | Nachrichten pro Mitglied und Minute |
 | `WELCOME_HISTORY` | `300` | Nachrichten beim Verbinden; ältere lädt der Client nach |
+| `BASE_PATH` | – | Unterpfad, z. B. `/chats`. Leer = Wurzel |
 
 ## Lizenz
 

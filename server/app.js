@@ -1,5 +1,4 @@
 import express from 'express';
-import path from 'node:path';
 import { config } from './config.js';
 import { log } from './logger.js';
 import { BadRequest, BLOB_ID_RE, ROOM_ID_RE, safeEqual } from './store.js';
@@ -29,6 +28,7 @@ export function createApp(store, hub) {
   const app = express();
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', true);
+  const base = config.basePath;
 
   const limits = {
     create: perHour(config.createRoomPerHour),
@@ -52,8 +52,12 @@ export function createApp(store, hub) {
     next();
   });
 
-  app.get('/healthz', (req, res) => {
-    res.json({ ok: true, uptime: Math.round(process.uptime()), ...store.stats() });
+  // Alles haengt unter `site`, damit die App per BASE_PATH auch in einem
+  // Unterordner einer fremden Domain leben kann (z. B. /chats).
+  const site = express.Router();
+
+  site.get('/healthz', (req, res) => {
+    res.json({ ok: true, uptime: Math.round(process.uptime()), basePath: base, ...store.stats() });
   });
 
   const api = express.Router();
@@ -145,10 +149,10 @@ export function createApp(store, hub) {
     }
   });
 
-  app.use('/api', api);
+  site.use('/api', api);
 
   // --- Statische Dateien -----------------------------------------------------
-  app.use(
+  site.use(
     express.static(config.publicDir, {
       index: 'index.html',
       etag: true,
@@ -166,12 +170,27 @@ export function createApp(store, hub) {
     }),
   );
 
-  // Einstiegspunkt: alles andere zeigt die App (Codes stehen im URL-Fragment).
-  app.get(/^\/(?!api\/|ws$).*/, (req, res, next) => {
+  // Unbekannte Unterpfade landen auf der Startseite. Wichtig: umleiten statt
+  // index.html auszuliefern - die Seite laedt ihre Dateien relativ, und von
+  // "/chats/irgendwas" aus zeigten die Verweise ins Leere.
+  site.get(/^\/(?!api\/|ws$).*/, (req, res, next) => {
     if (req.method !== 'GET') return next();
-    res.setHeader('Cache-Control', 'no-cache');
-    res.sendFile(path.join(config.publicDir, 'index.html'));
+    res.redirect(302, `${base}/`);
   });
+
+  if (base) {
+    // "/chats" ohne Schraegstrich auf "/chats/" ziehen - sonst loesen die
+    // relativen Verweise der Seite gegen "/" statt gegen "/chats/" auf.
+    // Genauer Vergleich auf req.path: eine Route "/chats" wuerde in Express 5
+    // auch "/chats/" treffen und damit im Kreis umleiten.
+    app.use((req, res, next) => {
+      if (req.method === 'GET' && req.path === base) return res.redirect(302, `${base}/`);
+      return next();
+    });
+    app.use(base, site);
+  } else {
+    app.use(site);
+  }
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not_found', message: 'Nicht gefunden.' });

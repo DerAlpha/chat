@@ -39,7 +39,7 @@ test('Der Server bekommt nur unlesbare Daten zu sehen', async ({ browser }) => {
 
   // Und die Raum-ID ist tatsaechlich nur ein Hash des Codes.
   const roomId = await pageA.evaluate(async (value) => {
-    const module = await import('/js/crypto.js');
+    const module = await import('./js/crypto.js');
     return module.deriveRoomId(value);
   }, code);
   expect(roomId).toHaveLength(22);
@@ -50,7 +50,7 @@ test('Der Server bekommt nur unlesbare Daten zu sehen', async ({ browser }) => {
 });
 
 test('Ein falscher Code öffnet den Chat nicht', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('./');
   await page.getByRole('button', { name: /Code eingeben/i }).click();
   await page.locator('#code-input').fill('ZZZZ-ZZZZ-ZZZZ');
   await page.getByRole('button', { name: 'Beitreten', exact: true }).click();
@@ -134,7 +134,7 @@ test('Eine Sprachnachricht lässt sich aufnehmen und abspielen', async ({ browse
 });
 
 test('Sprache und Design lassen sich umschalten', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.getByRole('button', { name: /Neuen Chat starten/i })).toBeVisible();
 
   await page.locator('#btn-lang').click();
@@ -184,7 +184,7 @@ test('Die Oberfläche passt auf ein schmales Display', async ({ browser }) => {
   }
 
   // Auch die kleinen Chips auf der Startseite.
-  await page.goto('/');
+  await page.goto('./');
   for (const selector of ['#btn-lang', '#btn-theme', '#btn-about']) {
     const box = await page.locator(selector).boundingBox();
     expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(44);
@@ -197,7 +197,7 @@ test('Die Oberfläche passt auf ein schmales Display', async ({ browser }) => {
 test('Der Zurück-Knopf verdeckt die Überschrift nicht', async ({ browser }) => {
   const context = await browser.newContext({ ...MOBILE, viewport: { width: 320, height: 568 } });
   const page = await context.newPage();
-  await page.goto('/');
+  await page.goto('./');
   await page.getByRole('button', { name: /Code eingeben/i }).click();
   await expect(page.locator('#screen-join')).toBeVisible();
 
@@ -381,7 +381,7 @@ test('Ein Zweitgerät des gleichen Nutzers bekommt denselben Verlauf', async ({ 
   // Geräte-Link enthält Code und persönliches Token.
   const deviceUrl = await pageA.evaluate(() => {
     const session = JSON.parse(localStorage.getItem('fc:sessions:v1'))[0];
-    return `/#${encodeURIComponent(session.code)}.${encodeURIComponent(session.token)}`;
+    return `./#${encodeURIComponent(session.code)}.${encodeURIComponent(session.token)}`;
   });
 
   const contextA2 = await browser.newContext(MOBILE);

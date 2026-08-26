@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# systemd-Unit für Flüsterchat.
+#
+#   sudo cp deploy/fluesterchat.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fluesterchat
+#
+# Werte lassen sich ohne Änderung dieser Datei überschreiben:
+#   /etc/fluesterchat.env  (siehe .env.example)
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Flüsterchat – Ende-zu-Ende-verschlüsselter Chat unter /chats
+Documentation=https://github.com/DerAlpha/chat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fluesterchat
+Group=fluesterchat
+WorkingDirectory=/opt/fluesterchat
+ExecStart=/usr/bin/node server/index.js
+
+# Nur auf dem Loopback lauschen – erreichbar ist die App ausschließlich
+# über den Apache davor.
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8123
+Environment=BASE_PATH=/chats
+Environment=TRUST_PROXY=1
+Environment=DATA_DIR=/var/lib/fluesterchat
+Environment=LOG_LEVEL=info
+EnvironmentFile=-/etc/fluesterchat.env
+
+Restart=on-failure
+RestartSec=3
+# Sauberes Herunterfahren: der Dienst schreibt beim SIGTERM seinen Stand weg.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# --- Absicherung -----------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Einziger Ort, an den geschrieben werden darf.
+ReadWritePaths=/var/lib/fluesterchat
+# MemoryDenyWriteExecute bleibt bewusst aus: Node braucht seinen JIT.
+
+[Install]
+WantedBy=multi-user.target
