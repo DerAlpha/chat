@@ -16,6 +16,43 @@ Weg der Nachrichten ist ein anderer:
 Welches Backend läuft, merkt der Browser selbst (`/api/config`) – am Client ist
 nichts umzustellen.
 
+## Der kurze Weg: ein Befehl über SSH
+
+Wenn dein Tarif SSH kann (bei lima-city die bezahlten Pakete, Anmeldung nur
+per Schlüssel), reicht das hier:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh \
+  | sh -s -- --url https://fluester.4lima.de
+```
+
+Das Skript sucht den Document Root, lädt das Paket, legt den Datenordner
+**neben** dem Document Root an und prüft sich zum Schluss selbst. Es braucht
+weder root noch Node – nur `curl` (oder `wget`) und `tar`.
+
+Wer ein Skript nicht ungesehen ausführen möchte – und das ist die bessere
+Gewohnheit – lädt es erst herunter, liest es und startet es dann:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/DerAlpha/chat/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh
+less install-webspace.sh
+sh install-webspace.sh --url https://fluester.4lima.de
+```
+
+Nützliche Schalter:
+
+| Schalter | Wofür |
+| --- | --- |
+| `--docroot ~/html` | Verzeichnis selbst angeben, wenn die Suche danebenliegt |
+| `--url https://…` | Für die Schlussmeldung mit den richtigen Adressen |
+| `--data ~/woanders` | Anderer Ort für die Daten |
+| `--force` | Auch installieren, wenn im Verzeichnis schon etwas anderes liegt |
+
+Erneutes Ausführen aktualisiert. Eine eigene `api/lib/config.local.php` und
+der Datenordner bleiben dabei unangetastet – laufende Chats überleben das.
+
+Ohne SSH geht es genauso gut per FTP; das steht weiter unten.
+
 ## Schritt 1: PHP-Version prüfen
 
 Im lima-city-Panel unter **Domains → fluester.4lima.de → Details** die
@@ -25,7 +62,9 @@ einer klaren Meldung ab, statt seltsam kaputtzugehen.
 Dort steht auch das **Document Root** – der Ordner, in den alles kommt
 (meist `html`).
 
-## Schritt 2: Paket bauen
+## Der andere Weg: per FTP
+
+### Schritt 2: Paket bauen
 
 Mit Node zur Hand:
 
@@ -40,7 +79,7 @@ Ohne Node: Bei GitHub unter **Actions → „Webspace-Paket bauen" → Run workf
 starten und danach `fluesterchat-webspace` herunterladen – das ist derselbe
 Ordnerinhalt als ZIP.
 
-## Schritt 3: Hochladen
+### Schritt 3: Hochladen
 
 Zugangsdaten stehen im Panel unter **Webspace → FTP-Zugang**. Mit FileZilla
 (oder dem lima-city-Dateimanager) den **Inhalt** von `dist/webspace/` in das
@@ -71,7 +110,7 @@ Der Ordner für die Daten wird beim ersten Zugriff selbst angelegt – als
 erreichbar. Klappt das mangels Rechten nicht, weicht die App auf `api/data`
 aus und schützt den Ordner dort per `.htaccess`.
 
-## Schritt 4: Nachsehen, ob alles sitzt
+### Schritt 4: Nachsehen, ob alles sitzt
 
 ```
 https://fluester.4lima.de/api/setup-check.php
