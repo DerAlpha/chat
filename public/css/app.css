@@ -69,6 +69,10 @@ html, body {
   padding: 0;
   height: 100%;
   overscroll-behavior-y: none;
+  /* Die Seite selbst scrollt nie - das machen die Bildschirme in sich.
+     Ohne das rutscht ein Wisch auf dem Eingabefeld die ganze App nach oben
+     aus dem Bild, weil die Bewegung an das Dokument weitergereicht wird. */
+  overflow: hidden;
 }
 
 body {
@@ -498,6 +502,10 @@ button, input, textarea { font: inherit; color: inherit; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* Kein selbsttaetiges Nachjustieren durch den Browser: er sucht sich sonst
+     beim Nachladen von Bildern eine Zeile als Anker und verschiebt die
+     Ansicht dorthin - man landet mitten im Verlauf statt unten. */
+  overflow-anchor: none;
   padding: 14px calc(var(--safe-right) + 12px) 6px calc(var(--safe-left) + 12px);
   display: flex;
   flex-direction: column;
@@ -728,6 +736,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .composer-wrap {
   background: var(--bg-elevated);
   border-top: 1px solid var(--border);
+  overscroll-behavior: contain;
   padding-bottom: var(--safe-bottom);
   position: relative;
   z-index: 5;
@@ -754,6 +763,9 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--bg);
   resize: none;
   overflow-y: auto;
+  /* Ein Wisch auf dem Eingabefeld bleibt im Eingabefeld. Ohne das wandert
+     die Bewegung nach aussen weiter und nimmt die ganze Seite mit. */
+  overscroll-behavior: contain;
   font-size: 16px; /* verhindert das Hineinzoomen auf iOS */
   line-height: 1.35;
 }

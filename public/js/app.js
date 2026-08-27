@@ -616,6 +616,7 @@ function teardownChat() {
   app.groupAvatarVer = null;
   app.myRole = 'member';
   typingNode = null;
+  stopKeepAtBottom();
   clearTimeout(app.typingTimer);
   for (const member of app.members.values()) clearTimeout(member.typingTimer);
   forgetPresenceSound();
@@ -1047,6 +1048,7 @@ async function renderHistory(messages, { replace = false } = {}) {
   }
   redrawAll();
   scrollToBottom(true);
+  keepAtBottom();
 }
 
 async function onHistory(frame) {
@@ -1059,8 +1061,15 @@ async function onHistory(frame) {
   const entries = await Promise.all(frame.messages.map(toEntry));
   for (const entry of entries) insertEntry(entry);
   redrawAll();
-  // Scrollposition halten, damit einem der Inhalt nicht wegrutscht.
-  list.scrollTop = previousTop + (list.scrollHeight - previousHeight);
+  if (app.atBottom) {
+    // Wer unten stand, will unten bleiben - auch wenn oben etwas dazukam.
+    scrollToBottom(true);
+    return;
+  }
+  // Sonst die Ansicht halten, damit einem der Inhalt nicht wegrutscht.
+  // Ohne behavior 'instant' wuerde die CSS-Regel scroll-behavior daraus
+  // eine Animation machen, und man saehe den Verlauf davonrutschen.
+  list.scrollTo({ top: previousTop + (list.scrollHeight - previousHeight), behavior: 'instant' });
 }
 
 async function onIncomingMessage(message) {
@@ -1521,7 +1530,7 @@ function showChatScreen() {
   updatePeerStatus();
   redrawAll();
   scrollToBottom(true);
-  requestAnimationFrame(() => scrollToBottom(true));
+  keepAtBottom();
 }
 
 /**
@@ -1901,14 +1910,79 @@ async function toggleVoice(entry, view) {
 // Scrollen, Kopfzeile, Banner
 // ===========================================================================
 
+/**
+ * Wohin die App zuletzt von selbst gesprungen ist.
+ *
+ * Scroll-Ereignisse kommen nicht sofort, sondern erst zum naechsten
+ * Bildaufbau - und bis dahin kann die Liste hoeher geworden sein. Wer dann
+ * bloss den Abstand zum Ende ausrechnet, haelt einen fuer jemanden, der nach
+ * oben gewischt hat, und laesst einen nicht mehr automatisch mitlaufen.
+ * Deshalb wird der eigene Sprung gemerkt: steht die Liste noch genau dort,
+ * hat sich niemand geruehrt.
+ */
+let gesetzterStand = -1;
+
 function scrollToBottom(instant = false) {
   const list = el('messages');
   if (!list) return;
-  const behavior = instant ? 'auto' : 'smooth';
+  // "instant" heisst wirklich sofort. "auto" waere das Gegenteil: es
+  // uebernimmt die CSS-Regel scroll-behavior, und die steht hier auf
+  // smooth - der Sprung ans Ende wurde damit zu einer Reise durch den
+  // ganzen Verlauf, die unterwegs stehen blieb, sobald ein Bild die Hoehe
+  // aenderte. Genau so landete man mitten im Chat statt bei der neuesten
+  // Nachricht.
+  const behavior = instant ? 'instant' : 'smooth';
   list.scrollTo({ top: list.scrollHeight, behavior });
+  if (instant) gesetzterStand = list.scrollTop;
   app.atBottom = true;
   app.unread = 0;
   updateJumpButton();
+}
+
+/**
+ * Haelt die Ansicht unten, solange sie unten sein soll.
+ *
+ * Ein einmaliger Sprung ans Ende reicht nicht: Bilder, Vorschauen und
+ * Sprachnachrichten bekommen ihre endgueltige Hoehe erst, wenn sie geladen
+ * sind, und ein spaet entschluesselter Anhang kann das noch Minuten spaeter
+ * tun. Bis dahin ist das "Ende" gar nicht dort, wo es hinterher liegt - und
+ * man steht mitten im Verlauf statt bei der neuesten Nachricht.
+ *
+ * Deshalb wird nachgezogen, solange der Chat offen ist: einmal je Bild
+ * nachsehen, ob die Liste hoeher geworden ist, und nur dann etwas tun. Wer
+ * selbst nach oben wischt, setzt app.atBottom auf false und wird sofort in
+ * Ruhe gelassen.
+ */
+let bodenWache = null;
+function keepAtBottom() {
+  const list = el('messages');
+  if (!list) return;
+  cancelAnimationFrame(bodenWache);
+  let letzte = -1;
+  const nachziehen = () => {
+    if (currentScreen() !== 'chat') {
+      bodenWache = null;
+      return;
+    }
+    const hoehe = list.scrollHeight;
+    if (hoehe !== letzte) {
+      letzte = hoehe;
+      // Ausdruecklich ohne Weichzeichnen: die CSS-Regel scroll-behavior
+      // wuerde jeden dieser Spruenge animieren, und der naechste faenge
+      // mitten in der Animation des vorigen an.
+      if (app.atBottom) {
+        list.scrollTo({ top: hoehe, behavior: 'instant' });
+        gesetzterStand = list.scrollTop;
+      }
+    }
+    bodenWache = requestAnimationFrame(nachziehen);
+  };
+  bodenWache = requestAnimationFrame(nachziehen);
+}
+
+function stopKeepAtBottom() {
+  cancelAnimationFrame(bodenWache);
+  bodenWache = null;
 }
 
 function updateJumpButton() {
@@ -4381,6 +4455,11 @@ function wireStaticHandlers() {
 
   const messages = el('messages');
   messages.addEventListener('scroll', () => {
+    // Steht die Liste noch genau dort, wo die App sie zuletzt selbst
+    // hingesetzt hat, dann hat sich niemand geruehrt - egal, was der
+    // Abstand zum Ende inzwischen sagt.
+    if (messages.scrollTop === gesetzterStand) return;
+    gesetzterStand = -1;
     const distance = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
     const wasAtBottom = app.atBottom;
     app.atBottom = distance < 80;
@@ -4389,8 +4468,13 @@ function wireStaticHandlers() {
       if (!wasAtBottom) markRead();
     }
     updateJumpButton();
-    if (messages.scrollTop < 60 && app.hasMore) loadMore();
+    // Aeltere nachladen, wenn jemand nach oben wischt - nicht schon beim
+    // Oeffnen. In einem kurzen Chat liegt das Ende selbst innerhalb der
+    // ersten 60 Bildpunkte; ohne diese Bedingung zoege sich die App beim
+    // Betreten den ganzen Verlauf herein, den niemand sehen wollte.
+    if (messages.scrollTop < 60 && app.hasMore && !app.atBottom) loadMore();
   }, { passive: true });
+
 
   // --- Overlays ---
   el('sheet-backdrop').addEventListener('click', closeSheet);

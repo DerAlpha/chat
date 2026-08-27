@@ -11,7 +11,7 @@
  * Datei, aendert sich die Fassung - und dieser Worker raeumt seinen Speicher.
  * Ein Test wird rot, wenn der Stempel nicht mehr zum Inhalt passt.
  */
-const VERSION = '89871330c104';
+const VERSION = '60bd363d9055';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des

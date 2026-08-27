@@ -93,6 +93,20 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Für die Liste auf der Startseite bleibt eine winzige Fassung auf dem Gerät;
   sie braucht keine Verbindung zu zwanzig Räumen
 
+**Wo die Ansicht steht**
+- Ein Chat öffnet sich bei der neuesten Nachricht – mit einem Sprung, nicht
+  mit einer Reise durch den ganzen Verlauf. Das war der Fehler: `behavior:
+  'auto'` übernimmt die CSS-Regel `scroll-behavior: smooth`, und die weiche
+  Fahrt blieb unterwegs stehen, sobald ein Bild die Höhe änderte
+- Wer unten steht, bleibt unten – auch wenn Bilder erst später ihre Höhe
+  bekommen. Nachgezogen wird, solange der Chat offen ist
+- Ein Scroll-Ereignis, das erst zum nächsten Bildaufbau eintrifft, wird nicht
+  mehr für einen Wisch des Nutzers gehalten: die App merkt sich, wohin sie
+  selbst gesprungen ist
+- Älteres wird geladen, wenn jemand danach sucht – nicht schon beim Öffnen
+- Ein Wisch auf der Textzeile bleibt in der Textzeile. Die Seite selbst hat
+  nichts zu scrollen, und die Bewegung wird nicht nach außen weitergereicht
+
 **Wenn der Text nicht passt**
 - „zuletzt gesehen vor 3 Std." ist auf einem Telefon länger als die Zeile.
   Abgeschnitten fehlt genau die Angabe, um die es ging
@@ -426,7 +440,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 108 Tests am Smartphone + 15 am Rechner
+npm run test:e2e          # 112 Tests am Smartphone + 15 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -461,7 +475,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 123 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 127 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -470,6 +484,14 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   eigenen gültigen Token direkt auf und bekommt zweimal 403.
 - Beim Profilbild schneidet ein Test mit, was wirklich über die Leitung geht:
   weder PNG noch JPEG noch WebP – nichts, was ein Bildbetrachter öffnet.
+- Beim Scrollen wird nicht die Absicht geprüft, sondern das Ergebnis: ein
+  langer Chat mit Bildern wird geöffnet, und der Abstand zum unteren Ende
+  muss null sein und null bleiben. Ein zweiter Test zählt die
+  Zwischenstände – eine weiche Fahrt durch den Verlauf hinterlässt Dutzende,
+  ein Sprung keinen.
+- Der Wisch auf der Textzeile ist ein echter: der Test schickt Touch-Punkte
+  über das Eingabefeld und misst danach nach, dass Kopfzeile und App keinen
+  Bildpunkt verrutscht sind.
 - Bei der Laufschrift wird nicht die Klasse geprüft, sondern die Bewegung:
   dieselbe Stelle, zwei Zeitpunkte, und dazwischen muss sich etwas getan
   haben.
