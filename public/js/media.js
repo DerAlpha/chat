@@ -82,8 +82,10 @@ function pickImageType() {
 let preferredType = null;
 
 /**
- * Verkleinert ein Bild auf hoechstens 1600 px Kantenlaenge und erzeugt
- * zusaetzlich eine winzige Vorschau, die verschluesselt mitgeschickt wird.
+ * Verkleinert ein Bild auf hoechstens 1600 px Kantenlaenge, entfernt dabei
+ * saemtliche Metadaten und erzeugt zusaetzlich eine winzige Vorschau, die
+ * verschluesselt mitgeschickt wird.
+ *
  * @returns {Promise<{bytes: Uint8Array, mime: string, width: number, height: number, thumb: string}>}
  */
 export async function prepareImage(file) {
@@ -97,14 +99,16 @@ export async function prepareImage(file) {
   const width = Math.round(naturalWidth * scale);
   const height = Math.round(naturalHeight * scale);
 
+  // Der Umweg über die Leinwand ist hier der eigentliche Schutz: sie kennt nur
+  // Bildpunkte. Alles, was das Handy sonst noch in die Datei schreibt - GPS,
+  // Kameramodell, Seriennummer, Aufnahmezeit - bleibt dabei zurück.
+  //
+  // Frühere Fassungen reichten kleine Originale unverändert weiter, weil das
+  // ein paar Kilobyte sparte. Das kostete den Standort. Wird nicht wieder
+  // gemacht: es wird IMMER neu berechnet.
   const canvas = drawScaled(source, width, height);
-  let blob = await canvasToBlob(canvas, preferredType, JPEG_QUALITY);
-  // Bei sehr kleinen Bildern kann das Original kleiner sein als unser Re-Encode.
-  let mime = preferredType;
-  if (scale === 1 && file.size < blob.size && /^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
-    blob = file;
-    mime = file.type;
-  }
+  const blob = await canvasToBlob(canvas, preferredType, JPEG_QUALITY);
+  const mime = preferredType;
 
   const thumbScale = Math.min(1, THUMB_EDGE / Math.max(naturalWidth, naturalHeight));
   const thumbCanvas = drawScaled(source, naturalWidth * thumbScale, naturalHeight * thumbScale);
@@ -121,6 +125,11 @@ export async function prepareImage(file) {
 }
 
 /** Liest eine beliebige Datei roh ein. */
+/** Dateiendung zum Bildformat - fuer einen neutralen Namen ohne Handy-Spuren. */
+export function extensionFor(mime) {
+  return { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' }[mime] ?? 'jpg';
+}
+
 export async function readFileBytes(file) {
   return new Uint8Array(await file.arrayBuffer());
 }

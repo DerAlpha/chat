@@ -176,6 +176,31 @@ Das Zugangstoken, das der Server jedem der beiden Plätze gibt, reist im
 WebSocket-Subprotokoll statt im Query-String – Query-Strings landen in fast jedem
 Reverse-Proxy-Log, Header-Werte nicht.
 
+### Was in einem Bild sonst noch steckt
+
+Ein Foto vom Handy trägt mehr als das Motiv: GPS-Koordinaten, Kameramodell,
+Seriennummer, Aufnahmezeit. Beim Senden geht ein Bild deshalb über eine
+Zeichenfläche – die kennt nur Bildpunkte, alles andere bleibt zurück. Auch
+der Dateiname wird ersetzt, denn `IMG_20260826_143107.jpg` verrät die
+Aufnahmezeit.
+
+| | Bild aus Galerie oder Kamera | „Datei senden" |
+| --- | --- | --- |
+| Standort, Gerät, Seriennummer | **entfernt** | bleibt drin |
+| Dateiname | durch `bild.webp` ersetzt | bleibt |
+| Größe | auf 1600 px verkleinert | unverändert |
+
+**Videos und Dokumente gehen Byte für Byte hinaus.** Sie im Browser
+umzurechnen wäre langsam und verlustbehaftet, deshalb tut die App es nicht –
+und sagt es im Anhang-Menü auch dazu, statt Sicherheit vorzutäuschen. Wer den
+Aufnahmeort eines Videos nicht mitschicken will, entfernt ihn vorher.
+
+Ein Test schickt ein Foto mit echten GPS-Daten durch die Aufbereitung und
+prüft die Ausgabe Byte für Byte auf Rückstände. Der Grund dafür ist eine
+Optimierung, die es in diesem Projekt schon einmal gab: kleine Originale
+wurden unverändert weitergereicht, weil das ein paar Kilobyte sparte – und
+schickte den Standort gleich mit.
+
 ### Was der Server trotzdem weiß
 
 Ehrlichkeit gehört dazu. Der Server sieht:

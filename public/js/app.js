@@ -16,7 +16,7 @@ import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, ApiError } from './net.js';
-import { prepareImage, readFileBytes, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
+import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
 import {
   el, make, icon, showScreen, currentScreen, toast, busy, openSheet, closeSheet, sheetOpen,
   confirmSheet, promptSheet, openLightbox, closeLightbox, lightboxOpen,
@@ -1237,7 +1237,10 @@ async function prepareAndUpload(item) {
       const prepared = await prepareImage(item.file);
       bytes = prepared.bytes;
       item.media = {
-        name: item.file.name || 'bild.jpg',
+        // Bewusst nicht der Originalname: "IMG_20260826_143107.jpg" verrät
+        // Aufnahmezeit und Gerätehersteller. Das Bild selbst ist beim
+        // Verkleinern schon von allen Metadaten befreit worden.
+        name: `bild.${extensionFor(prepared.mime)}`,
         mime: prepared.mime,
         size: bytes.length,
         width: prepared.width,
@@ -1386,9 +1389,26 @@ async function finishRecording(send) {
 
 function openAttachSheet() {
   openSheet(t('attach'), [
-    { icon: 'i-image', label: t('fromGallery'), onClick: () => el('file-gallery').click() },
-    { icon: 'i-camera', label: t('fromCamera'), onClick: () => el('file-camera').click() },
-    { icon: 'i-file', label: t('anyFile'), onClick: () => el('file-any').click() },
+    {
+      icon: 'i-image',
+      label: t('fromGallery'),
+      hint: t('fromGalleryHint'),
+      onClick: () => el('file-gallery').click(),
+    },
+    {
+      icon: 'i-camera',
+      label: t('fromCamera'),
+      hint: t('fromGalleryHint'),
+      onClick: () => el('file-camera').click(),
+    },
+    {
+      // Ehrlich bleiben: eine Datei geht Byte für Byte raus. Bei einem Video
+      // steckt der Aufnahmeort oft mit drin, und daran ändert die App nichts.
+      icon: 'i-file',
+      label: t('anyFile'),
+      hint: t('anyFileHint'),
+      onClick: () => el('file-any').click(),
+    },
   ]);
 }
 

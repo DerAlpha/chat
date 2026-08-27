@@ -1,5 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect, devices } from '@playwright/test';
 import { createChat, joinChat, sendText, bubbles } from './helpers.js';
+
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 
 const MOBILE = { ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' };
 
@@ -84,6 +89,76 @@ test('Die Seite lädt ohne eine einzige fehlende Datei', async ({ page }) => {
   }
   expect(iconStatus.length).toBeGreaterThan(3);
   expect(broken, 'diese Dateien fehlen').toEqual([]);
+});
+
+test('Fotos verlieren beim Senden ihre Metadaten', async ({ page }) => {
+  // Das Testfoto trägt GPS-Koordinaten, Kameramodell, Seriennummer und
+  // Aufnahmezeit - genau wie ein Foto aus dem Handy. Es ist klein und
+  // verrauscht, denn in dieser Größe wurde das Original früher unverändert
+  // durchgereicht und der Standort ging mit.
+  const original = fs.readFileSync(path.join(fixtures, 'foto-mit-metadaten.jpg'));
+  const verraeter = ['TestKamera', 'MetadatenModell', 'SERIENNUMMER-TEST', 'Testperson', '2026:08:26'];
+
+  // Die Vorlage muss die Spuren wirklich enthalten, sonst prüft der Test nichts.
+  for (const wort of verraeter) {
+    expect(original.includes(wort), `Vorlage enthält "${wort}" nicht`).toBe(true);
+  }
+
+  await page.goto('./');
+  const prepared = await page.evaluate(async (data) => {
+    const media = await import('./js/media.js');
+    const file = new File([new Uint8Array(data)], 'IMG_20260826_143107.jpg', { type: 'image/jpeg' });
+    const result = await media.prepareImage(file);
+    return { bytes: Array.from(result.bytes), mime: result.mime, width: result.width, height: result.height };
+  }, Array.from(original));
+
+  const out = Buffer.from(prepared.bytes);
+  expect(out.equals(original), 'die Datei darf nicht unverändert durchgereicht werden').toBe(false);
+
+  const text = out.toString('latin1');
+  for (const wort of verraeter) {
+    expect(text.includes(wort), `"${wort}" steckt noch im gesendeten Bild`).toBe(false);
+  }
+  // Kein EXIF-Block mehr (JPEG-Segment APP1, eingeleitet mit "Exif\0\0").
+  expect(text.includes('Exif\u0000\u0000'), 'EXIF-Block ist noch da').toBe(false);
+  expect(out.indexOf(Buffer.from([0xff, 0xe1])), 'APP1-Segment ist noch da').toBe(-1);
+
+  // Das Bild selbst muss heil sein.
+  expect(prepared.width).toBe(320);
+  expect(prepared.height).toBe(240);
+  const wieder = await page.evaluate(async ({ data, mime }) => {
+    const blob = new Blob([new Uint8Array(data)], { type: mime });
+    const bitmap = await createImageBitmap(blob);
+    return { w: bitmap.width, h: bitmap.height };
+  }, { data: prepared.bytes, mime: prepared.mime });
+  expect(wieder).toEqual({ w: 320, h: 240 });
+});
+
+test('Der Dateiname eines Fotos verrät nichts über das Gerät', async ({ browser }) => {
+  const contextA = await browser.newContext(MOBILE);
+  const contextB = await browser.newContext(MOBILE);
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  const { link } = await createChat(pageA);
+  await joinChat(pageB, link);
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+
+  await pageA.locator('#file-gallery').setInputFiles({
+    name: 'IMG_20260826_143107.jpg',
+    mimeType: 'image/jpeg',
+    buffer: fs.readFileSync(path.join(fixtures, 'foto-mit-metadaten.jpg')),
+  });
+  await expect(pageA.locator('#btn-send')).toBeVisible();
+  await pageA.locator('#btn-send').click();
+
+  const bild = pageB.locator('#messages img.bubble__image').last();
+  await bild.waitFor({ timeout: 20_000 });
+  const name = await bild.getAttribute('data-name');
+  expect(name).not.toContain('IMG_2026');
+  expect(name).toMatch(/^bild\.(webp|jpg|png)$/);
+
+  await contextA.close();
+  await contextB.close();
 });
 
 test('Ein falscher Code öffnet den Chat nicht', async ({ page }) => {
