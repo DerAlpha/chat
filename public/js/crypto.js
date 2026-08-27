@@ -103,6 +103,85 @@ export async function deriveSecrets(code) {
 }
 
 /**
+ * Dasselbe fuer einen Gruppen-Code - nur mit anderem Ziel.
+ *
+ * Bei einem Zweierchat IST der Code der Raum: aus ihm entstehen Raum-ID und
+ * Schluessel, und beide Seiten rechnen dasselbe aus. In einer Gruppe geht das
+ * nicht. Dort hat jede Person ihren eigenen Code, und alle sollen trotzdem
+ * denselben Schluessel benutzen. Also zeigt ein Gruppen-Code nicht auf einen
+ * Raum, sondern auf einen PLATZ: dort liegt der gemeinsame Gruppenschluessel,
+ * verpackt mit einem Schluessel, den nur dieser eine Code hergibt.
+ *
+ * Der Server sieht den Platz und ein Paket, das er nicht oeffnen kann. Wer
+ * den Code hat, kann es oeffnen - genau einmal, danach ist der Platz weg.
+ *
+ * Eigener Salz-Text, damit aus demselben Code niemals derselbe Wert
+ * herauskommt wie bei einem Zweierchat: die beiden Welten sollen sich nicht
+ * ins Gehege kommen.
+ *
+ * @param {string} code
+ * @returns {Promise<{slotId: string, wrapKeyRaw: Uint8Array}>}
+ */
+export async function deriveSlot(code) {
+  const clean = normalizeCode(code);
+  const salt = await sha256(`fluesterchat:slot:v1:${clean}`);
+  const material = await crypto.subtle.importKey('raw', encoder.encode(clean), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    material,
+    DERIVED_BITS,
+  ));
+  return {
+    wrapKeyRaw: bits.slice(0, KEY_BYTES),
+    slotId: toBase64Url(bits.slice(KEY_BYTES, KEY_BYTES + ROOM_ID_BYTES)),
+  };
+}
+
+/**
+ * Ein frischer Gruppenschluessel.
+ *
+ * Bewusst gewuerfelt und nicht aus irgendeinem Code abgeleitet: kein
+ * einzelner Code darf den Schluessel der ganzen Gruppe hergeben. Wer einen
+ * Code abfaengt, bekommt einen Platz - nicht die Gruppe.
+ */
+export function generateGroupKey() {
+  return crypto.getRandomValues(new Uint8Array(KEY_BYTES));
+}
+
+/**
+ * Verpackt den Gruppenschluessel fuer genau einen Platz.
+ *
+ * Mit verpackt wird, wozu er gehoert: Raum und Name. So kann ein
+ * untergeschobener Server niemanden in einen fremden Raum lotsen - der
+ * Client vergleicht, was er auspackt, mit dem, was ihm der Server sagt.
+ *
+ * @param {Uint8Array} wrapKeyRaw Aus dem Code des Teilnehmers.
+ * @param {{key: Uint8Array, roomId: string, name: string}} inhalt
+ */
+export async function wrapGroupKey(wrapKeyRaw, { key, roomId, name }) {
+  const wrapper = await importKey(wrapKeyRaw);
+  return encryptJson(wrapper, { k: toBase64(key), r: roomId, n: name ?? '' });
+}
+
+/**
+ * Packt wieder aus. Gibt `null` zurueck, wenn das Paket nicht zu diesem Code
+ * gehoert - dann stimmt etwas nicht, und niemand sollte weitermachen.
+ *
+ * @returns {Promise<{key: Uint8Array, roomId: string, name: string}|null>}
+ */
+export async function unwrapGroupKey(wrapKeyRaw, packet) {
+  try {
+    const wrapper = await importKey(wrapKeyRaw);
+    const inhalt = await decryptJson(wrapper, packet);
+    const key = fromBase64(String(inhalt?.k ?? ''));
+    if (key.length !== KEY_BYTES || typeof inhalt?.r !== 'string' || !inhalt.r) return null;
+    return { key, roomId: inhalt.r, name: typeof inhalt.n === 'string' ? inhalt.n : '' };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Nur die Raum-ID. Kostet genauso viel wie `deriveSecrets` - wer beides
  * braucht, ruft besser einmal `deriveSecrets` auf.
  */

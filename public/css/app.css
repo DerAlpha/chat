@@ -1155,6 +1155,36 @@ body.is-calling { overflow: hidden; }
   .call[data-state="ringing"] .call__btn--accept { animation: none; }
 }
 
+/* =========================================================================
+   Aufforderung zum Aktualisieren
+   Liegt über allem, auch über einem laufenden Anruf: mit einer veralteten
+   Kopie weiterzumachen ist schlechter, als kurz stehen zu bleiben.
+   ========================================================================= */
+
+.update {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  padding-top: calc(24px + var(--safe-top));
+  padding-bottom: calc(24px + var(--safe-bottom));
+  background: var(--bg);
+  animation: fade .18s ease;
+}
+
+.update__box {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+.update__box h2 { margin: 0; font-size: 1.3rem; }
+.update__box p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+.update__box .btn { width: 100%; margin-top: 6px; }
+
+@media (min-width: 900px) {
+  .update__box { max-width: 440px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

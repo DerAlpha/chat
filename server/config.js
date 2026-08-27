@@ -64,7 +64,12 @@ export const config = {
   unclaimedRoomTtlMs: int('UNCLAIMED_ROOM_TTL_HOURS', 24) * HOUR,
   cleanupIntervalMs: int('CLEANUP_INTERVAL_MINUTES', 5) * MINUTE,
 
+  /** Ein Zweierchat: der Code verbindet genau zwei Geraete. */
   maxMembersPerRoom: 2,
+  /** So gross darf eine Gruppe hoechstens werden - einschliesslich der Person, die sie anlegt. */
+  maxRoomCapacity: int('MAX_ROOM_CAPACITY', 16),
+  /** Obergrenze fuer ein verpacktes Platzpaket (Base64 des Gruppenschluessels samt Raum und Name). */
+  maxWrappedKeyChars: int('MAX_WRAPPED_KEY_CHARS', 1024),
   // Wie viele Nachrichten beim Verbinden sofort mitkommen; aeltere holt der Client nach.
   welcomeHistory: int('WELCOME_HISTORY', 300),
   maxMessagesPerRoom: int('MAX_MESSAGES_PER_ROOM', 5000),

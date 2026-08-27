@@ -363,6 +363,23 @@
   <img id="lightbox-image" alt="">
 </div>
 
+<!-- --------------------------------------------------------- Aktualisieren -->
+<!-- Liegt über allem und lässt sich nicht wegklicken: eine veraltete Kopie
+     der App kann Nachrichten falsch darstellen oder gar nicht erst laden. -->
+<div class="update" id="update" hidden role="alertdialog" aria-modal="true"
+     aria-labelledby="update-title" aria-describedby="update-text">
+  <div class="update__box">
+    <div class="logo" aria-hidden="true"><svg><use href="#i-download"/></svg></div>
+    <h2 id="update-title" data-i18n="updateTitle"></h2>
+    <p id="update-text" data-i18n="updateText"></p>
+    <button class="btn btn--primary btn--lg" id="update-now" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+      <span data-i18n="updateNow"></span>
+    </button>
+    <p class="muted small" id="update-hint" data-i18n="updateHint"></p>
+  </div>
+</div>
+
 <p class="visually-hidden" id="live-region" aria-live="polite" aria-atomic="true"></p>
 <output class="toast" id="toast" hidden aria-live="polite"></output>
 <div class="busy" id="busy" hidden role="status"><span class="spinner" aria-hidden="true"></span><span id="busy-text"></span></div>

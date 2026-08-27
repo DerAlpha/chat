@@ -97,6 +97,9 @@ final class App
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/events$#', $route, $m) && $method === 'GET') {
             $this->events($m[1]);
         }
+        if (preg_match('#^/slots/([A-Za-z0-9_-]{22})/claim$#', $route, $m) && $method === 'POST') {
+            $this->claimSlot($m[1]);
+        }
         if ($route === '/gifs' && $method === 'GET') {
             $this->gifSearch();
         }
@@ -133,12 +136,38 @@ final class App
                 'maxBlobBytes' => $this->config->maxBlobBytes,
                 'maxCiphertextBytes' => $this->config->maxCiphertextBytes,
             ],
+            // Woran der Browser merkt, dass seine Kopie alt ist: dieselbe
+            // Fassung, die auch in der ausgelieferten js/version.js steht.
+            'version' => self::appVersion(),
             // Anrufe laufen zwischen den Browsern und werden immer angeboten;
             // was an Diensten fehlt, sagt die App als Hinweis dazu.
             'call' => Ice::support($this->config),
             // Ohne Giphy-Schlüssel bleibt die GIF-Suche unsichtbar statt kaputt.
             'gifs' => $this->config->giphyKey !== '',
         ]);
+    }
+
+    /**
+     * Welche Fassung dieser Webspace ausliefert.
+     *
+     * Gelesen aus derselben Datei, die auch der Browser bekommt. Damit können
+     * die beiden gar nicht auseinanderlaufen: hat der Browser eine andere
+     * Fassung im Speicher, ist seine Kopie alt.
+     */
+    private static function appVersion(): string
+    {
+        static $gemerkt = null;
+        if ($gemerkt !== null) {
+            return $gemerkt;
+        }
+        $datei = dirname(__DIR__) . '/js/version.js';
+        $roh = @file_get_contents($datei, false, null, 0, 4096);
+        $gemerkt = (is_string($roh) && preg_match("/const APP_VERSION = '([^']*)'/", $roh, $m) === 1)
+            ? $m[1]
+            // Keine Datei, keine Auskunft. Dann sagt die App lieber nichts,
+            // als den Nutzer mit einer erfundenen Fassung auszusperren.
+            : '';
+        return $gemerkt;
     }
 
     /**
@@ -196,20 +225,148 @@ final class App
     private function createRoom(): never
     {
         $this->limit('create', $this->config->createRoomPerHour, 3600);
-        $body = Http::jsonBody(2048);
+        // Für eine Gruppe kommen die Einmal-Plätze gleich mit; die brauchen
+        // mehr Platz im Rumpf als eine blosse Raum-ID.
+        $body = Http::jsonBody(2048 + $this->config->maxRoomCapacity * 2048);
         $roomId = (string) ($body['roomId'] ?? '');
         if (!preg_match(Store::ROOM_ID_RE, $roomId)) {
             Http::fail(400, 'bad_room_id', 'Ungueltige Raum-ID.');
         }
-        $room = $this->store->createRoom($roomId);
+        $slots = $this->readSlots($body['slots'] ?? []);
+        $room = $this->store->createRoom($roomId, $slots);
         if ($room === null) {
             Http::fail(409, 'room_exists', 'Dieser Code ist bereits vergeben.');
         }
-        Http::json([
+
+        $antwort = [
             'roomId' => $roomId,
             'createdAt' => $room['createdAt'] * 1000,
+            'capacity' => (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom),
             'expiresInMs' => $this->config->unclaimedRoomTtl * 1000,
-        ], 201);
+        ];
+        if ($slots !== []) {
+            // Wer eine Gruppe anlegt, hat selbst keinen Code - die hat er
+            // gerade für die anderen erzeugt. Sein Platz wird hier besetzt.
+            $anleger = $this->store->mutate($roomId, function (array $raum): array {
+                if (count((array) ($raum['members'] ?? [])) > 0) {
+                    return [$raum, null];
+                }
+                $mitglied = [
+                    'id' => Http::randomId(9),
+                    'token' => Http::randomId(24),
+                    'joinedAt' => time(),
+                    'lastSeen' => time(),
+                    'nickCt' => null,
+                    'readSeq' => 0,
+                    'slotId' => null,
+                ];
+                $raum['members'][$mitglied['id']] = $mitglied;
+                return [$raum, $mitglied];
+            });
+            if ($anleger !== null) {
+                $antwort['you'] = ['id' => $anleger['id'], 'token' => $anleger['token']];
+            }
+        }
+        Http::json($antwort, 201);
+    }
+
+    /**
+     * Prüft die Plätze, die beim Anlegen einer Gruppe mitkommen.
+     *
+     * @return list<array{id: string, wrapped: string}>
+     */
+    private function readSlots(mixed $roh): array
+    {
+        if (!is_array($roh) || $roh === []) {
+            return [];
+        }
+        if (count($roh) > $this->config->maxRoomCapacity - 1) {
+            Http::fail(400, 'too_many_slots', 'So gross darf eine Gruppe nicht sein.');
+        }
+        $slots = [];
+        $gesehen = [];
+        foreach ($roh as $eintrag) {
+            $id = is_array($eintrag) ? (string) ($eintrag['id'] ?? '') : '';
+            $wrapped = is_array($eintrag) ? (string) ($eintrag['wrapped'] ?? '') : '';
+            if (!preg_match(Store::ROOM_ID_RE, $id)) {
+                Http::fail(400, 'bad_slot_id', 'Ungueltige Platzkennung.');
+            }
+            if ($wrapped === '' || strlen($wrapped) > $this->config->maxWrappedKeyChars) {
+                Http::fail(400, 'bad_slot', 'Ungueltiges Platzpaket.');
+            }
+            // Zwei gleiche Kennungen hiessen: zwei Teilnehmer mit demselben Code.
+            if (isset($gesehen[$id]) || is_file($this->store->slotPath($id))) {
+                Http::fail(400, 'slot_exists', 'Diese Platzkennung ist schon vergeben.');
+            }
+            $gesehen[$id] = true;
+            $slots[] = ['id' => $id, 'wrapped' => $wrapped];
+        }
+        return $slots;
+    }
+
+    /**
+     * Löst einen Einmal-Platz ein.
+     *
+     * Der Beitretende kennt nur seinen Code, nicht den Raum. Aus dem Code
+     * rechnet sein Browser die Platzkennung; die legt er hier vor und bekommt
+     * dafür das verpackte Paket und einen Platz im Raum.
+     *
+     * Ein zweiter Versuch ist erlaubt, SOLANGE sich noch niemand damit
+     * verbunden hat: reisst die Leitung dazwischen ab, wäre die Person sonst
+     * für immer ausgesperrt und der Platz für immer tot.
+     */
+    private function claimSlot(string $slotId): never
+    {
+        $this->limit('join', $this->config->joinAttemptsPerHour, 3600);
+        $verweis = @file_get_contents($this->store->slotPath($slotId));
+        $roomId = is_string($verweis) ? trim($verweis) : '';
+        if (!preg_match(Store::ROOM_ID_RE, $roomId) || $this->store->loadRoom($roomId) === null) {
+            // Bewusst dieselbe Antwort wie für einen verbrauchten Platz: sonst
+            // liesse sich daran ablesen, welche Codes es einmal gegeben hat.
+            Http::fail(404, 'slot_unknown', 'Dieser Code gilt nicht (mehr).');
+        }
+
+        $ergebnis = $this->store->mutate($roomId, function (array $room) use ($slotId): array {
+            $slot = $room['slots'][$slotId] ?? null;
+            if ($slot === null) {
+                return [$room, ['error' => 'slot_unknown']];
+            }
+            $bekannt = $slot['claimedBy'] !== null ? ($room['members'][$slot['claimedBy']] ?? null) : null;
+            if ($slot['claimedBy'] !== null) {
+                if (($slot['settled'] ?? false) || $bekannt === null) {
+                    return [$room, ['error' => 'slot_used']];
+                }
+                return [$room, ['slot' => $slot, 'member' => $bekannt]];
+            }
+            $mitglied = [
+                'id' => Http::randomId(9),
+                'token' => Http::randomId(24),
+                'joinedAt' => time(),
+                'lastSeen' => time(),
+                'nickCt' => null,
+                'readSeq' => 0,
+                'slotId' => $slotId,
+            ];
+            $room['members'][$mitglied['id']] = $mitglied;
+            $room['slots'][$slotId]['claimedBy'] = $mitglied['id'];
+            $room['slots'][$slotId]['claimedAt'] = time();
+            $room['lastActivity'] = time();
+            return [$room, ['slot' => $room['slots'][$slotId], 'member' => $mitglied]];
+        });
+
+        if (($ergebnis['error'] ?? null) === 'slot_unknown') {
+            Http::fail(404, 'slot_unknown', 'Dieser Code gilt nicht (mehr).');
+        }
+        if (($ergebnis['error'] ?? null) === 'slot_used') {
+            Http::fail(410, 'slot_used', 'Dieser Code wurde schon eingeloest.');
+        }
+        $room = $this->store->loadRoom($roomId) ?? [];
+        Http::json([
+            'roomId' => $roomId,
+            'wrapped' => (string) $ergebnis['slot']['wrapped'],
+            'capacity' => (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom),
+            'you' => ['id' => $ergebnis['member']['id'], 'token' => $ergebnis['member']['token']],
+        ]);
     }
 
     private function roomStatus(string $roomId): never
@@ -220,12 +377,16 @@ final class App
             Http::fail(404, 'room_unknown', 'Diesen Chat gibt es nicht (mehr).');
         }
         $members = count((array) ($room['members'] ?? []));
+        // Die Kapazität steht am Raum, nicht in der Konfiguration: ein
+        // Zweierchat hat zwei Plätze, eine Gruppe so viele wie Codes.
+        $capacity = (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom);
         Http::json([
             'roomId' => $roomId,
             'createdAt' => $room['createdAt'] * 1000,
             'members' => $members,
-            'capacity' => $this->config->maxMembersPerRoom,
-            'full' => $members >= $this->config->maxMembersPerRoom,
+            'capacity' => $capacity,
+            'group' => ((array) ($room['slots'] ?? [])) !== [],
+            'full' => $members >= $capacity,
         ]);
     }
 
@@ -244,10 +405,23 @@ final class App
                     [$room] = $this->store->appendEvent($roomId, $room, [
                         't' => 'presence', 'from' => (string) $id, 'online' => true, 'lastSeen' => time() * 1000,
                     ]);
+                    // Wer sich mit einem eingelösten Platz verbindet, verbraucht
+                    // ihn damit endgültig. Bis hierhin war ein zweiter Versuch
+                    // erlaubt - für den Fall, dass die Leitung dazwischen abriss.
+                    $slotId = (string) ($member['slotId'] ?? '');
+                    if ($slotId !== '' && isset($room['slots'][$slotId])) {
+                        $room['slots'][$slotId]['settled'] = true;
+                    }
                     return [$room, ['id' => (string) $id, 'token' => $member['token'], 'returning' => true]];
                 }
             }
-            if (count($members) >= $this->config->maxMembersPerRoom) {
+            // In einer Gruppe kommt man nur über einen eingelösten Platz herein.
+            // Sonst könnte jeder, der die Raum-ID kennt, sich die freien Plätze
+            // nehmen - bei zwei Personen ein enges Fenster, bei zwölf eine Tür.
+            if (((array) ($room['slots'] ?? [])) !== []) {
+                Http::fail(403, 'need_slot', 'Fuer diese Gruppe brauchst du einen eigenen Code.');
+            }
+            if (count($members) >= (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom)) {
                 Http::fail(403, 'room_full', 'Dieser Chat ist schon voll.');
             }
             $id = Http::randomId(12);
@@ -281,7 +455,8 @@ final class App
                 'id' => $roomId,
                 'createdAt' => $room['createdAt'] * 1000,
                 'seq' => (int) ($room['seq'] ?? 0),
-                'capacity' => $this->config->maxMembersPerRoom,
+                'capacity' => (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom),
+                'group' => ((array) ($room['slots'] ?? [])) !== [],
                 'limits' => [
                     'maxBlobBytes' => $this->config->maxBlobBytes,
                     'maxCiphertextBytes' => $this->config->maxCiphertextBytes,

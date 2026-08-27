@@ -17,7 +17,8 @@
     "icons": "node scripts/make-icons.mjs",
     "test:e2e:subpath": "E2E_BASE_PATH=/chats E2E_PORT=3202 playwright test",
     "test:e2e:php": "E2E_BACKEND=php E2E_PORT=3203 playwright test",
-    "php:dev": "node scripts/php-dev.mjs"
+    "php:dev": "node scripts/php-dev.mjs",
+    "stamp": "node scripts/version.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

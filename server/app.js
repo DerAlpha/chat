@@ -1,6 +1,7 @@
 import express from 'express';
 import { config } from './config.js';
 import { callSupport, iceServers } from './ice.js';
+import { appVersion } from './version.js';
 import { PAGE_SIZE, fetchMedia, searchGifs, verifyRef } from './gifs.js';
 import { serverSecret } from './secrets.js';
 import { log } from './logger.js';
@@ -68,6 +69,8 @@ export function createApp(store, hub) {
     res.json({
       realtime: 'ws',
       backend: 'node',
+      // Woran der Browser merkt, dass seine Kopie alt ist.
+      version: appVersion(config.publicDir),
       capacity: config.maxMembersPerRoom,
       limits: {
         maxBlobBytes: config.maxBlobBytes,
@@ -92,18 +95,68 @@ export function createApp(store, hub) {
   });
 
   // --- Raum anlegen. Der Client schickt nur den Hash des Codes. ---------------
-  api.post('/rooms', express.json({ limit: '1kb' }), (req, res) => {
+  // Fuer eine Gruppe kommen die Einmal-Plaetze gleich mit: je Teilnehmer eine
+  // Kennung und der Gruppenschluessel, verpackt fuer genau dessen Code. Dieser
+  // Server kann keines dieser Pakete oeffnen.
+  api.post('/rooms', express.json({ limit: `${8 + config.maxRoomCapacity * 2}kb` }), (req, res) => {
     if (!limits.create.take(clientKey(req))) return tooMany(res, limits.create, clientKey(req));
     const roomId = String(req.body?.roomId ?? '');
     if (!ROOM_ID_RE.test(roomId)) {
       return res.status(400).json({ error: 'bad_room_id', message: 'Ungueltige Raum-ID.' });
     }
-    const room = store.createRoom(roomId);
+    const slots = Array.isArray(req.body?.slots) ? req.body.slots : [];
+    let room;
+    try {
+      room = store.createRoom(roomId, { slots });
+    } catch (error) {
+      if (error instanceof BadRequest) {
+        return res.status(400).json({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
     if (!room) {
       return res.status(409).json({ error: 'room_exists', message: 'Dieser Code ist bereits vergeben.' });
     }
-    log.debug(`Raum ${roomId} angelegt.`);
-    res.status(201).json({ roomId: room.id, createdAt: room.createdAt, expiresInMs: config.unclaimedRoomTtlMs });
+    // Wer eine Gruppe anlegt, hat selbst keinen Code - die hat er gerade fuer
+    // die anderen erzeugt. Sein Platz wird deshalb hier gleich besetzt.
+    const creator = store.seatCreator(room);
+    log.debug(`Raum ${roomId} angelegt (${room.capacity} Plaetze).`);
+    res.status(201).json({
+      roomId: room.id,
+      createdAt: room.createdAt,
+      capacity: room.capacity,
+      expiresInMs: config.unclaimedRoomTtlMs,
+      ...(creator ? { you: { id: creator.id, token: creator.token } } : {}),
+    });
+  });
+
+  // --- Einen Einmal-Platz einloesen. -----------------------------------------
+  // Der Beitretende kennt nur seinen Code, nicht den Raum. Aus dem Code
+  // rechnet sein Browser die Platzkennung; die legt er hier vor und bekommt
+  // dafuer das verpackte Paket und einen Platz im Raum. Danach ist der Code
+  // verbraucht.
+  api.post('/slots/:slotId/claim', (req, res) => {
+    if (!limits.join.take(clientKey(req))) return tooMany(res, limits.join, clientKey(req));
+    const { slotId } = req.params;
+    if (!ROOM_ID_RE.test(slotId)) {
+      return res.status(400).json({ error: 'bad_slot_id', message: 'Ungueltige Platzkennung.' });
+    }
+    const ergebnis = store.claimSlot(slotId);
+    if (ergebnis.error === 'slot_unknown') {
+      // Bewusst dieselbe Antwort wie fuer einen verbrauchten Platz: sonst
+      // liesse sich daran ablesen, welche Codes es einmal gegeben hat.
+      return res.status(404).json({ error: 'slot_unknown', message: 'Dieser Code gilt nicht (mehr).' });
+    }
+    if (ergebnis.error === 'slot_used') {
+      return res.status(410).json({ error: 'slot_used', message: 'Dieser Code wurde schon eingeloest.' });
+    }
+    const { room, slot, member } = ergebnis;
+    res.json({
+      roomId: room.id,
+      wrapped: slot.wrapped,
+      capacity: room.capacity,
+      you: { id: member.id, token: member.token },
+    });
   });
 
   // --- Existenz pruefen, bevor der Client die WebSocket oeffnet. --------------
@@ -119,8 +172,11 @@ export function createApp(store, hub) {
       roomId: room.id,
       createdAt: room.createdAt,
       members: room.members.size,
-      capacity: config.maxMembersPerRoom,
-      full: room.members.size >= config.maxMembersPerRoom,
+      // Die Kapazitaet steht am Raum, nicht in der Konfiguration: ein
+      // Zweierchat hat zwei Plaetze, eine Gruppe so viele wie Codes.
+      capacity: room.capacity,
+      group: room.slots.size > 0,
+      full: room.members.size >= room.capacity,
     });
   });
 

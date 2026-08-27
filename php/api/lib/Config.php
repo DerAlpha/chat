@@ -19,6 +19,10 @@ final class Config
     public int $unclaimedRoomTtl = 24 * 3600;
 
     public int $maxMembersPerRoom = 2;
+    /** So gross darf eine Gruppe hoechstens werden - einschliesslich der Person, die sie anlegt. */
+    public int $maxRoomCapacity = 16;
+    /** Obergrenze fuer ein verpacktes Platzpaket. */
+    public int $maxWrappedKeyChars = 1024;
     public int $maxMessagesPerRoom = 5000;
     public int $maxEvents = 800;
     public int $welcomeHistory = 300;

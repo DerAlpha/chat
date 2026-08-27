@@ -32,6 +32,16 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Beliebige Dateien
 - Antworten mit Zitat, Reaktionen, Nachrichten bearbeiten und für beide Seiten löschen
 
+**Gruppen (im Bau)**
+- Beim Anlegen einer Gruppe entsteht für jede Person ein eigener Einmal-Code
+- Alle teilen sich einen Gruppenschlüssel; der liegt für jeden Code einzeln
+  verpackt auf dem Server – öffnen kann ihn nur, wer den passenden Code hat
+- Ein Code gibt einen Platz her, nicht die Gruppe: wer einen abfängt, kommt
+  an die Pakete der anderen nicht heran
+- In eine Gruppe kommt niemand allein über die Raum-ID – nur über einen
+  eingelösten Platz
+- Der Unterbau steht und ist geprüft; die Bedienoberfläche fehlt noch
+
 **Sprechen statt tippen**
 - Sprach- und Videoanrufe zwischen den beiden Geräten, direkt im Browser
 - Die Aushandlung ist genauso verschlüsselt wie eine Nachricht – der Server
@@ -57,6 +67,10 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - GIF-Suche über das eigene Backend – Giphy sieht den Server, nie die Nutzer
 - Reaktionen aus allen gängigen Emoji, mit Suche auf Deutsch und Englisch
 - Fragt nach einem Namen, wenn noch keiner feststeht – überspringbar
+- In der Übersicht steht, wie das Gegenüber heißt – und wer will, gibt einem
+  Chat einen eigenen Namen („Mama", „Verein"), der nur auf dem eigenen Gerät liegt
+- Liegt auf dem Server eine neue Fassung, legt sich ein Fenster über alles, das
+  sich nicht wegklicken lässt; ein Knopf holt die App komplett frisch
 - „Chat löschen" räumt sofort alles ab – bei beiden und auf dem Server
 
 **Fürs Smartphone gemacht**
@@ -287,8 +301,11 @@ public/
   js/framecrypto.js Die zweite Schicht über Ton und Bild
   js/call-worker.js Eigener Faden, in dem sie angewendet wird
   js/ui.js      Screens, Sheets, Toasts, Zeitangaben
+  js/version.js Die Fassung - gestempelt, nicht von Hand gezählt
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
+scripts/
+  version.mjs   Rechnet die Fassung aus dem Inhalt und stempelt sie ein
 turn/
   stun.js       STUN/TURN-Nachrichten lesen und schreiben (RFC 5389/5766)
   server.js     Der eigene Relaisdienst für Anrufe
@@ -303,14 +320,20 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 200 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe)
-npm run test:e2e          # 48 Tests am Smartphone + 12 am Rechner
+npm test                  # 224 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Fassung)
+npm run test:e2e          # 58 Tests am Smartphone + 12 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
 ```
 
 Für die E2E-Tests einmalig `npx playwright install chromium`.
+
+Wer etwas an `public/` ändert, lässt danach `npm run stamp` laufen: die Fassung
+der App ist ein Fingerabdruck über alles Ausgelieferte, und ein Test wird rot,
+solange der Stempel nicht dazu passt. Damit kann niemand vergessen, sie
+hochzuzählen – und niemand bleibt auf einer alten Fassung sitzen, ohne es zu
+merken.
 
 Ein paar Dinge, die dabei tatsächlich geprüft werden:
 
@@ -333,7 +356,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 60 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 70 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
   `mod_php` und der mitgelieferten `.htaccess` durchgetestet. Dabei fiel auf,

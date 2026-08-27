@@ -15,6 +15,7 @@ import { qrSvg } from './qr.js';
 import { CallSession, mediaCryptoAvailable } from './call.js';
 import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
+import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
@@ -48,6 +49,8 @@ const app = {
   features: { gifs: false, call: { calls: false, discovery: false, relay: false } },
   /** Der laufende Anruf, falls einer läuft. */
   call: null,
+  /** Die Anmeldung des Service Workers - über sie kommt die Update-Meldung. */
+  swRegistration: null,
   me: null,
   peer: null,
   messages: new Map(),
@@ -76,6 +79,7 @@ const app = {
 // ===========================================================================
 
 function boot() {
+  dropCacheBuster();
   app.prefs = getPrefs();
   setLanguage(detectLanguage(app.prefs.lang));
   applyTheme(app.prefs.theme);
@@ -93,14 +97,16 @@ function boot() {
   }
 
   registerServiceWorker();
+  watchForUpdates();
   // Was diese Installation kann, entscheidet der Server. Nebenher holen,
   // damit der Start dadurch nicht langsamer wird.
   void serverConfig().then((remote) => {
     app.features = {
       gifs: remote?.gifs === true,
-      call: remote?.call ?? { calls: false, discovery: false, relay: false },
+      call: remote?.call ?? { discovery: false, relay: false, calls: false },
     };
     updateCallButtons();
+    compareVersion(remote?.version);
   }).catch(() => {});
   route();
   window.addEventListener('hashchange', route);
@@ -178,6 +184,9 @@ async function startNewChat() {
         memberId: null,
         nick: app.prefs.nick ?? '',
         peerNick: '',
+        // Selbst vergebene Bezeichnung. Bleibt auf diesem Gerät und geht nie
+        // an den Server - sie ist nur dafür da, die eigene Liste zu ordnen.
+        label: '',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         unread: 0,
@@ -237,6 +246,9 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       memberId: known?.memberId ?? null,
       nick: known?.nick ?? app.prefs.nick ?? '',
       peerNick: known?.peerNick ?? '',
+      // Muss mitgenommen werden: sonst wäre die eigene Bezeichnung jedes Mal
+      // weg, wenn man den Chat wieder betritt.
+      label: known?.label ?? '',
       createdAt: known?.createdAt ?? Date.now(),
       lastActivity: Date.now(),
       unread: 0,
@@ -453,6 +465,10 @@ async function onWelcome(frame) {
   const peerRaw = frame.members.find((member) => member.id !== frame.you.id) ?? null;
   app.peer = peerRaw ? { ...peerRaw, typing: false } : null;
   if (app.peer?.nickCt) app.peer.nick = await safeDecrypt(app.peer.nickCt).then((value) => value?.n ?? '');
+  // Und gleich merken. Ohne das war der Name nur so lange bekannt, wie der
+  // Chat offen stand - in der Übersicht stand danach wieder "Gegenüber",
+  // bei jedem Chat, und keiner liess sich vom anderen unterscheiden.
+  rememberPeerNick(app.peer?.nick);
 
   if (app.session.nick) sendNick(app.session.nick);
 
@@ -673,8 +689,21 @@ async function onNick(frame) {
   const nick = value?.n ?? '';
   if (!app.peer) app.peer = { id: frame.from, online: true };
   app.peer.nick = nick;
-  patchSession(app.session.roomId, { peerNick: nick });
+  rememberPeerNick(nick);
   updatePeerStatus();
+}
+
+/**
+ * Merkt sich, wie das Gegenüber heisst - für die Übersicht auf der
+ * Startseite. Ein leerer Name überschreibt keinen bekannten: wer seinen
+ * Namen wieder löscht, soll nicht dafür sorgen, dass die eigene Liste
+ * plötzlich wieder aus lauter "Gegenüber" besteht.
+ */
+function rememberPeerNick(nick) {
+  const sauber = (nick ?? '').trim();
+  if (!sauber || !app.session || app.session.peerNick === sauber) return;
+  app.session = patchSession(app.session.roomId, { peerNick: sauber }) ?? { ...app.session, peerNick: sauber };
+  renderChatList();
 }
 
 function onPresence(frame) {
@@ -1085,7 +1114,21 @@ function updateJumpButton() {
   badge.textContent = String(Math.min(99, app.unread));
 }
 
+/**
+ * Wie ein Chat heisst - in der Übersicht wie in der Kopfzeile.
+ *
+ * Reihenfolge mit Absicht: eine selbst vergebene Bezeichnung gewinnt immer,
+ * denn sie ist die ausdrückliche Ansage des Nutzers. Danach der Name, den
+ * das Gegenüber sich gegeben hat. Und erst wenn beides fehlt, das blasse
+ * "Gegenüber" - das dann hoffentlich nur noch bei einem einzigen Chat steht.
+ */
+function chatTitle(session) {
+  return (session?.label || '').trim() || (session?.peerNick || '').trim() || t('partner');
+}
+
 function peerName() {
+  const eigene = (app.session?.label || '').trim();
+  if (eigene) return eigene;
   return app.peer?.nick || app.session?.peerNick || t('partner');
 }
 
@@ -2147,6 +2190,13 @@ function openChatMenu() {
 
   openSheet(t('menu'), [
     { icon: 'i-users', label: t('yourName'), value: app.session?.nick || '–', onClick: changeNick },
+    {
+      icon: 'i-edit',
+      label: t('renameChat'),
+      hint: t('renameChatHint'),
+      value: app.session?.label || '–',
+      onClick: () => void renameChat(app.session.roomId),
+    },
       { icon: 'i-qr', label: t('showCode'), onClick: () => showInvite(app.session, { fromChat: true }) },
     {
       icon: 'i-link',
@@ -2375,11 +2425,17 @@ function renderChatList() {
       button.classList.add('is-active');
       button.setAttribute('aria-current', 'true');
     }
-    const name = session.peerNick || t('partner');
+    const name = chatTitle(session);
     const avatar = make('div', 'avatar avatar--sm', initial(name));
     const text = make('div', 'chat-list__text');
     text.appendChild(make('span', 'chat-list__name', name));
-    text.appendChild(make('span', 'chat-list__meta', `${session.code} · ${relativeTime(session.lastActivity)}`));
+    // Zweite Zeile: was zusätzlich weiterhilft. Steht schon ein Name oben,
+    // ist das der echte Name des Gegenübers (falls die Bezeichnung eine
+    // eigene war); sonst der Code, damit man den wartenden Chat wiederfindet.
+    const zusatz = (session.peerNick || '').trim();
+    const hinweis = zusatz && zusatz !== name ? zusatz : (zusatz ? '' : session.code);
+    const meta = hinweis ? `${hinweis} · ${relativeTime(session.lastActivity)}` : relativeTime(session.lastActivity);
+    text.appendChild(make('span', 'chat-list__meta', meta));
     button.append(avatar, text);
     if (session.unread > 0) button.appendChild(make('span', 'pill', String(session.unread)));
     button.appendChild(icon('i-chevron-down'));
@@ -2391,12 +2447,33 @@ function renderChatList() {
 }
 
 function openSessionMenu(session) {
-  openSheet(session.code, [
-    { icon: 'i-copy', label: t('copyCode'), onClick: async () => {
+  openSheet(chatTitle(session), [
+    { icon: 'i-edit', label: t('renameChat'), hint: t('renameChatHint'), onClick: () => void renameChat(session.roomId) },
+    { icon: 'i-copy', label: t('copyCode'), value: session.code, onClick: async () => {
       toast(await copyText(session.code) ? t('copied') : t('copyFailed'));
     } },
     { icon: 'i-close', label: t('leaveChat'), danger: true, onClick: () => void leaveSession(session.roomId) },
   ]);
+}
+
+/**
+ * Gibt einem Chat einen eigenen Namen. Bleibt auf diesem Gerät: der Server
+ * bekommt ihn nie zu sehen, und das Gegenüber auch nicht.
+ */
+async function renameChat(roomId) {
+  const session = getSession(roomId) ?? (app.session?.roomId === roomId ? app.session : null);
+  if (!session) return;
+  const next = await promptSheet(t('renameChat'), {
+    value: session.label ?? '',
+    placeholder: session.peerNick || t('renameChatPlaceholder'),
+    note: t('renameChatHint'),
+    maxLength: 40,
+  });
+  if (next == null) return;
+  const gespeichert = patchSession(roomId, { label: next.trim() });
+  if (app.session?.roomId === roomId) app.session = gespeichert ?? { ...app.session, label: next.trim() };
+  renderChatList();
+  if (currentScreen() === 'chat') updatePeerStatus();
 }
 
 // ===========================================================================
@@ -2459,6 +2536,7 @@ function wireStaticHandlers() {
     showScreen('join');
     setTimeout(() => el('code-input').focus(), 60);
   });
+  el('update-now').addEventListener('click', () => void applyUpdate());
   el('btn-lang').addEventListener('click', cycleLanguage);
   el('btn-theme').addEventListener('click', cycleTheme);
   el('btn-about').addEventListener('click', showAbout);
@@ -2620,9 +2698,140 @@ function registerServiceWorker() {
   if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register(appUrl('sw.js'), { scope: basePath })
+      // updateViaCache: 'none' - der Worker selbst darf nie aus dem
+      // Zwischenspeicher kommen. Sonst prüft der Browser mit einer alten
+      // Kopie, ob es eine neue gibt, und findet natürlich keine.
+      .register(appUrl('sw.js'), { scope: basePath, updateViaCache: 'none' })
+      .then((registration) => {
+        app.swRegistration = registration;
+        // Steht schon einer bereit, war die Seite beim letzten Mal offen.
+        if (registration.waiting && navigator.serviceWorker.controller) showUpdateScreen();
+        registration.addEventListener('updatefound', () => {
+          const kommend = registration.installing;
+          if (!kommend) return;
+          kommend.addEventListener('statechange', () => {
+            // "installed" bei vorhandenem Controller heisst: eine neue
+            // Fassung liegt bereit, die alte läuft noch.
+            if (kommend.state === 'installed' && navigator.serviceWorker.controller) showUpdateScreen();
+          });
+        });
+        void registration.update().catch(() => {});
+      })
       .catch(() => {});
   });
+}
+
+// ===========================================================================
+// Aktualisieren
+// ===========================================================================
+
+/** So oft wird nachgesehen, ob es eine neue Fassung gibt. */
+const UPDATE_CHECK_INTERVAL = 15 * 60 * 1000;
+
+/**
+ * Hält Ausschau nach einer neuen Fassung.
+ *
+ * Zwei Wege, weil keiner allein reicht: der Service Worker meldet sich, wenn
+ * er eine neue Hülle geholt hat - das ist der Normalfall. Gibt es keinen
+ * (kein HTTPS, abgeschaltet, alter Browser), bleibt der Vergleich mit dem
+ * Server: der liefert dieselbe Fassung aus, die auch in der ausgelieferten
+ * version.js steht. Weichen die ab, ist die Kopie im Browser alt.
+ */
+function watchForUpdates() {
+  const nachsehen = () => {
+    void app.swRegistration?.update().catch(() => {});
+    void serverConfig().then((remote) => compareVersion(remote?.version)).catch(() => {});
+  };
+  setInterval(nachsehen, UPDATE_CHECK_INTERVAL);
+  // Wer die App nach Stunden wieder hervorholt, soll nicht erst warten.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') nachsehen();
+  });
+}
+
+/**
+ * Vergleicht die Fassung des Servers mit der eigenen.
+ *
+ * Bewusst nur bei einem eindeutigen Unterschied. Kommt keine Auskunft -
+ * Netz weg, alte Auslieferung ohne Angabe -, passiert nichts: niemand soll
+ * wegen eines Netzfehlers aus seinem Chat ausgesperrt werden.
+ */
+function compareVersion(serverVersion) {
+  const dort = String(serverVersion ?? '').trim();
+  if (!dort || !APP_VERSION || dort === APP_VERSION) return;
+  showUpdateScreen();
+}
+
+/** Zeigt die Aufforderung. Sie lässt sich nicht wegklicken - mit Absicht. */
+function showUpdateScreen() {
+  const screen = el('update');
+  if (!screen || !screen.hidden) return;
+  screen.hidden = false;
+  // Was gerade läuft, wird beendet: mit einer veralteten Kopie
+  // weiterzutelefonieren hilft niemandem.
+  app.call?.dispose();
+  app.call = null;
+  closeCallScreen();
+  closeSheet();
+  el('update-now')?.focus({ preventScroll: true });
+}
+
+/**
+ * Holt alles neu - so gründlich, wie es Strg+Umschalt+R täte, und das auch
+ * auf dem Handy, wo es diese Tastenkombination gar nicht gibt.
+ *
+ * Der Reihe nach: den wartenden Worker übernehmen lassen, jeden
+ * Zwischenspeicher leeren, die Worker abmelden. Danach holt der Browser
+ * alles wieder vom Server. Die Chats liegen im localStorage und bleiben
+ * davon unberührt.
+ */
+async function applyUpdate() {
+  const knopf = el('update-now');
+  if (knopf) {
+    knopf.disabled = true;
+    const beschriftung = knopf.querySelector('span');
+    if (beschriftung) beschriftung.textContent = t('updateWorking');
+  }
+  try {
+    const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+    for (const registration of registrations) {
+      registration.waiting?.postMessage({ type: 'skipWaiting' });
+    }
+    if (typeof caches !== 'undefined') {
+      const namen = await caches.keys();
+      await Promise.all(namen.map((name) => caches.delete(name)));
+    }
+    // Erst abmelden, wenn die Speicher leer sind - sonst legt ein noch
+    // laufender Worker sie beim Abmelden gleich wieder an.
+    await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
+  } catch {
+    // Auch wenn das Aufräumen scheitert: neu laden ist besser als bleiben.
+  }
+  reloadFromServer();
+}
+
+/**
+ * Neu laden, ohne dass der Browser aus seinem eigenen Zwischenspeicher
+ * bedient. `location.reload(true)` gibt es nicht mehr; verlässlich ist ein
+ * Aufruf derselben Adresse mit einem einmaligen Anhängsel - danach wird der
+ * Anhang gleich wieder entfernt, damit keine Spur in der Adresszeile bleibt.
+ */
+function reloadFromServer() {
+  const ziel = new URL(location.href);
+  ziel.searchParams.set('frisch', Date.now().toString(36));
+  location.replace(ziel.toString());
+}
+
+/**
+ * Beim Start: das Anhängsel von oben wieder loswerden. Es hat seinen Zweck
+ * erfüllt, sobald die Seite geladen ist, und hätte in einem geteilten Link
+ * nichts verloren.
+ */
+function dropCacheBuster() {
+  if (!location.search.includes('frisch=')) return;
+  const ziel = new URL(location.href);
+  ziel.searchParams.delete('frisch');
+  history.replaceState(null, '', ziel.pathname + ziel.search + ziel.hash);
 }
 
 boot();

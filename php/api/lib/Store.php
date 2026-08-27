@@ -60,6 +60,25 @@ final class Store
         return $this->roomsDir() . '/' . $roomId;
     }
 
+    private function slotsDir(): string
+    {
+        return $this->config->dataDir . '/slots';
+    }
+
+    /**
+     * Wo der Verweis von einer Platzkennung auf ihren Raum liegt.
+     *
+     * Der Beitretende kennt nur seinen Code. Daraus rechnet sein Browser die
+     * Platzkennung - und erst über diesen Verweis findet er den Raum. Die
+     * Datei enthält nichts als die Raum-ID; das Paket mit dem Schlüssel liegt
+     * im Raum und ist verschlüsselt.
+     */
+    public function slotPath(string $slotId): string
+    {
+        $this->ensureDir($this->slotsDir());
+        return $this->slotsDir() . '/' . $slotId;
+    }
+
     private function ensureDir(string $path): void
     {
         if (!is_dir($path) && !@mkdir($path, 0770, true) && !is_dir($path)) {
@@ -188,7 +207,17 @@ final class Store
     }
 
     /** @return array<string,mixed>|null null, wenn die ID schon vergeben ist. */
-    public function createRoom(string $roomId): ?array
+    /**
+     * Legt einen Raum an.
+     *
+     * Ohne Plätze entsteht ein Zweierchat wie bisher. Mit Plätzen eine
+     * Gruppe: je Teilnehmer eine Kennung (aus seinem Code gerechnet, den
+     * dieser Server nie sieht) und der Gruppenschlüssel, verpackt für genau
+     * diesen Code. Öffnen kann der Server keines dieser Pakete.
+     *
+     * @param list<array{id: string, wrapped: string}> $slots
+     */
+    public function createRoom(string $roomId, array $slots = []): ?array
     {
         if (!preg_match(self::ROOM_ID_RE, $roomId)) {
             Http::fail(400, 'bad_room_id', 'Ungueltige Raum-ID.');
@@ -208,11 +237,30 @@ final class Store
                 'members' => [],
                 'blobs' => [],
                 'blobBytes' => 0,
+                // Ein Zweierchat hat zwei Plätze, eine Gruppe so viele, wie
+                // beim Anlegen Codes erzeugt wurden - plus den der Person,
+                // die sie anlegt.
+                'capacity' => $slots === [] ? $this->config->maxMembersPerRoom : count($slots) + 1,
+                'slots' => [],
             ];
+            foreach ($slots as $slot) {
+                $room['slots'][$slot['id']] = [
+                    'id' => $slot['id'],
+                    'wrapped' => $slot['wrapped'],
+                    'claimedBy' => null,
+                    'claimedAt' => null,
+                    'settled' => false,
+                ];
+            }
             $this->saveRoom($roomId, $room);
             $this->writeJson($this->roomDir($roomId) . '/messages.json', []);
             $this->writeJson($this->roomDir($roomId) . '/events.json', []);
             $this->writeAtomic($this->roomDir($roomId) . '/eventseq', '0');
+            // Ein Verweis je Platz: der Beitretende kennt nur seinen Code,
+            // nicht den Raum. Über diesen Verweis findet er ihn.
+            foreach ($room['slots'] as $slot) {
+                $this->writeAtomic($this->slotPath($slot['id']), $roomId);
+            }
             return $room;
         } finally {
             $this->unlock($handle);
@@ -223,6 +271,12 @@ final class Store
     {
         if (!preg_match(self::ROOM_ID_RE, $roomId)) {
             return;
+        }
+        // Erst die Verweise auf die Plätze, dann den Raum: sonst zeigten sie
+        // ins Leere und ein Code führte zu einer irreführenden Fehlermeldung.
+        $room = $this->loadRoom($roomId);
+        foreach ((array) ($room['slots'] ?? []) as $slot) {
+            @unlink($this->slotPath((string) ($slot['id'] ?? '')));
         }
         if ($tombstone) {
             // Damit das Gegenüber beim nächsten Abholen erfährt, dass der Chat

@@ -87,6 +87,10 @@ export class Hub {
     const result = this.store.joinRoom(room, token || null);
     if (result.error) return ws.close(CLOSE.ROOM_FULL, result.error);
     const member = result.member;
+    // Wer sich mit einem eingeloesten Platz verbindet, verbraucht ihn damit
+    // endgueltig. Bis hierhin war ein zweiter Versuch erlaubt - fuer den
+    // Fall, dass die Leitung zwischen Einloesen und Verbinden abriss.
+    this.store.settleSlot(room, member.id);
 
     const sockets = this.socketsFor(roomId, member.id);
     if (sockets.size >= config.maxSocketsPerMember) {
@@ -113,7 +117,8 @@ export class Hub {
         id: room.id,
         createdAt: room.createdAt,
         seq: room.seq,
-        capacity: config.maxMembersPerRoom,
+        capacity: room.capacity,
+        group: room.slots.size > 0,
         limits: {
           maxBlobBytes: config.maxBlobBytes,
           maxCiphertextBytes: config.maxCiphertextBytes,

@@ -5,7 +5,13 @@
  * die (verschluesselten) Inhalte, und die gehoeren nicht in einen Cache.
  */
 
-const VERSION = 'v5';
+/**
+ * Die Fassung wird gestempelt, nicht gezaehlt: scripts/version.mjs rechnet
+ * sie aus dem Inhalt aller ausgelieferten Dateien. Aendert sich eine einzige
+ * Datei, aendert sich die Fassung - und dieser Worker raeumt seinen Speicher.
+ * Ein Test wird rot, wenn der Stempel nicht mehr zum Inhalt passt.
+ */
+const VERSION = '4d7c3a406f09';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
@@ -33,6 +39,7 @@ const SHELL = [
   'js/qr.js',
   'js/session.js',
   'js/ui.js',
+  'js/version.js',
   'manifest.webmanifest',
   'img/icon.svg',
   'img/icon-192.png',
@@ -40,11 +47,16 @@ const SHELL = [
 ].map((path) => BASE + path);
 
 self.addEventListener('install', (event) => {
+  // Bewusst OHNE skipWaiting: laeuft schon eine aeltere Fassung, wartet die
+  // neue, bis der Nutzer im Fenster auf "Jetzt aktualisieren" tippt. Sonst
+  // taeuschte der Browser eine Aktualisierung vor, waehrend die offene Seite
+  // weiter mit altem Code arbeitet - genau die Verwirrung, die das hier
+  // verhindern soll. Beim allerersten Mal gibt es nichts zu warten: ohne
+  // vorherigen Worker wird sofort aktiviert.
   event.waitUntil(
     caches.open(SHELL_CACHE)
       .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting()),
+      .catch(() => { /* Offline installiert sich eben nichts vor. */ }),
   );
 });
 
@@ -95,5 +107,8 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'skip-waiting') self.skipWaiting();
+  // Zwei Schreibweisen, damit eine aeltere Seite im Browser denselben
+  // Worker auch dann noch wecken kann, wenn sie die neue nicht kennt.
+  const wunsch = typeof event.data === 'string' ? event.data : event.data?.type;
+  if (wunsch === 'skip-waiting' || wunsch === 'skipWaiting') self.skipWaiting();
 });
