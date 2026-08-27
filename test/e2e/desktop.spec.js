@@ -4,7 +4,7 @@
  * mit Maus statt Finger.
  */
 import { test, expect, devices } from '@playwright/test';
-import { createChat, joinChat, sendText, bubbles } from './helpers.js';
+import { createChat, joinChat, sendText, bubbles, longClick } from './helpers.js';
 
 /** Rechner und Handy an einem Code - der Rechner ist Seite A. */
 async function pairUp(browser) {
@@ -131,4 +131,86 @@ test('Ein schmales Fenster fällt zurück auf einen Bildschirm nach dem anderen'
 
   await contextA.close();
   await contextB.close();
+});
+
+test('Nach einem langen Drücken bleibt die Maus voll benutzbar', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageB, 'Erst halten, dann weiterarbeiten');
+  const message = bubbles(pageA).last();
+  await expect(message).toContainText('Erst halten');
+
+  // Auslöser: die linke Taste lange auf der Blase halten - etwa um eine
+  // Textmarkierung anzusetzen. Danach muss alles weiter funktionieren.
+  await longClick(pageA, message.locator('.bubble'));
+  await expect(pageA.locator('#sheet')).toBeVisible();
+  await pageA.keyboard.press('Escape');
+  await expect(pageA.locator('#sheet')).toBeHidden();
+
+  // Der Weg von der Blase zum ⋯-Knopf führt zwangsläufig über ein
+  // pointerleave. Das darf keinen Fanghaken über das Fenster legen.
+  await message.locator('.bubble').hover();
+  await pageA.locator('#peer-name').hover();
+  await message.hover();
+  await message.locator('.msg__more').click();
+  await expect(pageA.locator('#sheet')).toBeVisible();
+  await pageA.keyboard.press('Escape');
+
+  // Und die rechte Maustaste öffnet das Menü weiterhin - auf derselben Blase.
+  await message.locator('.bubble').click({ button: 'right' });
+  await expect(pageA.locator('#sheet')).toBeVisible();
+  await expect(pageA.getByRole('button', { name: 'Antworten' })).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Ein Klick weit weg von der gehaltenen Stelle geht nicht verloren', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageB, 'Halten und woanders hinklicken');
+  const message = bubbles(pageA).last();
+  await expect(message).toContainText('Halten und');
+
+  await longClick(pageA, message.locator('.bubble'));
+  await expect(pageA.locator('#sheet')).toBeVisible();
+  // Sofort - innerhalb der Frist für den Geisterklick - auf den Griff oben
+  // im Menü. Der liegt weit von der gehaltenen Stelle entfernt und muss
+  // deshalb ankommen.
+  await pageA.locator('#sheet-backdrop').click({ position: { x: 10, y: 10 } });
+  await expect(pageA.locator('#sheet')).toBeHidden();
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Der Mauszeiger allein macht keinen Klick unwirksam', async ({ page }) => {
+  // Der Weg in die Falle: onLongPress hängt auch an pointerleave, und das
+  // feuert bei der Maus schon ohne gedrückte Taste. Wer dort den Fanghaken
+  // für den Geisterklick setzt, macht für 400 ms genau die Stelle taub, auf
+  // die man als Nächstes klicken will.
+  await createChat(page);
+  await page.locator('#invite-back').click();
+  await expect(page.locator('#screen-empty')).toBeVisible();
+
+  const eintrag = page.locator('#chat-list .chat-list__item').first();
+  const box = await eintrag.boundingBox();
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+
+  // Lange auf den Listeneintrag drücken öffnet dessen Menü.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  await expect(page.locator('#sheet')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Der Zeiger stand während des Menüs auf dessen Hintergrund. Also erst
+  // wieder auf den Eintrag (pointerenter), dann herunter (pointerleave -
+  // hier schnappt die Falle zu) und sofort zurück zum Klicken.
+  await page.mouse.move(x, y - 200);
+  await page.mouse.move(x, y);
+  await page.mouse.move(x, y - 200);
+  await page.mouse.move(x, y);
+  await page.mouse.click(x, y);
+  await expect(page.locator('#screen-empty')).toBeHidden({ timeout: 15_000 });
 });

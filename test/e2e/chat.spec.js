@@ -249,3 +249,20 @@ test('Langes Drücken öffnet das Menü, statt Text zu markieren', async ({ brow
   await contextA.close();
   await contextB.close();
 });
+
+test('Rutscht der Finger weg, bleibt der nächste Tipp trotzdem wirksam', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageA, 'Reaktion drauf');
+  await expect(bubbles(pageB).last()).toContainText('Reaktion drauf');
+
+  // Halten, dann noch am Bildschirm entlangrutschen: Chromium schickt danach
+  // keinen Geisterklick mehr. Wer blind auf einen wartet, verschluckt
+  // stattdessen den nächsten echten Tipp - hier das Reaktions-Emoji.
+  await longPress(pageB, bubbles(pageB).last().locator('.bubble'), { ms: 650, slideY: -25 });
+  await expect(pageB.locator('#sheet')).toBeVisible();
+  await pageB.locator('.emoji-row button').first().click();
+  await expect(bubbles(pageA).last().locator('.reaction')).toHaveText('👍', { timeout: 10_000 });
+
+  await contextA.close();
+  await contextB.close();
+});

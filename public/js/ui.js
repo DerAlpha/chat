@@ -306,22 +306,42 @@ export function initial(name) {
 
 // ------------------------------------------------------------- Langes Druecken
 
+/** Wie weit und wie lange nach dem Loslassen ein Geisterklick zaehlt. */
+const GHOST_RADIUS = 24;
+const GHOST_WINDOW = 400;
+/** So lange nach einem ausgeloesten Langdruck gehoert ein contextmenu noch dazu. */
+const CONTEXT_GRACE = 700;
+
 /**
  * Nach dem Loslassen schickt der Browser noch einen Klick hinterher - auch
  * nach langem Druecken. Der landet auf dem Hintergrund des eben geoeffneten
  * Menues und wuerde es sofort wieder schliessen. Bisher hat der Browser den
  * Klick von sich aus verschluckt, weil er beim Halten zu markieren anfing;
  * seit das unterbunden ist, muessen wir das selbst tun.
+ *
+ * Geschluckt wird ausschliesslich der Klick, der zu genau diesem Druck gehoert:
+ * dieselbe Stelle, kurze Frist. Kommt gar keiner - der Browser laesst ihn aus,
+ * sobald der Finger zu weit gerutscht ist -, darf der naechste echte Tipp
+ * trotzdem durch. Ein Fanghaken, der blind den ersten Klick frisst, macht die
+ * halbe Oberflaeche fuer einen Moment taub.
  */
-function swallowNextClick() {
-  const swallow = (event) => {
-    event.stopPropagation();
-    event.preventDefault();
+function swallowGhostClick(x, y) {
+  let done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
     clearTimeout(timer);
+    window.removeEventListener('click', swallow, true);
   };
-  window.addEventListener('click', swallow, { capture: true, once: true });
-  // Kommt gar kein Klick, muss der Fanghaken trotzdem wieder weg.
-  const timer = setTimeout(() => window.removeEventListener('click', swallow, true), 600);
+  const swallow = (event) => {
+    if (Math.abs(event.clientX - x) <= GHOST_RADIUS && Math.abs(event.clientY - y) <= GHOST_RADIUS) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    stop();
+  };
+  window.addEventListener('click', swallow, true);
+  const timer = setTimeout(stop, GHOST_WINDOW);
 }
 
 /**
@@ -332,7 +352,17 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
   let timer = null;
   let startX = 0;
   let startY = 0;
-  let fired = false;
+  /** Wann der Langdruck zuletzt ausgeloest hat - 0 heisst: in dieser Geste nicht. */
+  let firedAt = 0;
+  /**
+   * Wann zuletzt ein Langdruck *mit dem Finger* ausgeloest hat. Nur dann
+   * schickt das Betriebssystem noch ein eigenes contextmenu hinterher, das
+   * unterdrueckt werden muss. Ein langer Druck mit der Maus erzeugt keines -
+   * dort darf die rechte Maustaste sofort wieder das Menue oeffnen.
+   */
+  let touchMenuAt = 0;
+  let pressing = false;
+  let armed = false;
   let byTouch = false;
 
   const clear = () => {
@@ -342,13 +372,16 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
 
   const down = (event) => {
     if (event.button != null && event.button !== 0 && event.pointerType === 'mouse') return;
-    fired = false;
+    firedAt = 0;
+    armed = false;
+    pressing = true;
     byTouch = event.pointerType !== 'mouse';
     startX = event.clientX;
     startY = event.clientY;
     clear();
     timer = setTimeout(() => {
-      fired = true;
+      firedAt = Date.now();
+      if (byTouch) touchMenuAt = firedAt;
       if (navigator.vibrate) navigator.vibrate(12);
       handler(event);
     }, delay);
@@ -359,15 +392,36 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
     if (Math.abs(event.clientX - startX) > 12 || Math.abs(event.clientY - startY) > 12) clear();
   };
 
-  const up = () => {
+  /** Losgelassen: erst hier - und nur hier - kann ein Geisterklick folgen. */
+  const release = () => {
     clear();
-    if (fired) swallowNextClick();
+    if (pressing && firedAt && !armed) {
+      armed = true;
+      swallowGhostClick(startX, startY);
+    }
+    pressing = false;
     byTouch = false;
   };
 
+  /**
+   * Der Zeiger verlaesst die Blase. Das passiert mit der Maus schon beim
+   * blossen Darueberfahren, ganz ohne gedrueckte Taste - hier darf deshalb
+   * nur der angefangene Druck abgebrochen werden, sonst nichts.
+   */
+  const leave = () => clear();
+
   const contextmenu = (event) => {
     event.preventDefault();
-    if (!fired) handler(event);
+    // Genau ein contextmenu gehoert noch zum eben gehaltenen Finger - das
+    // wird verschluckt, damit das Menue nicht zweimal aufgeht. Jedes weitere
+    // oeffnet es wieder, sonst waere die rechte Maustaste auf dieser Blase
+    // hinterher dauerhaft tot.
+    if (touchMenuAt && Date.now() - touchMenuAt < CONTEXT_GRACE) {
+      touchMenuAt = 0;
+      return;
+    }
+    touchMenuAt = 0;
+    handler(event);
   };
 
   // Mit dem Finger soll erst gar keine Markierung entstehen. Mit der Maus
@@ -383,9 +437,9 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
 
   node.addEventListener('pointerdown', down);
   node.addEventListener('pointermove', move);
-  node.addEventListener('pointerup', up);
-  node.addEventListener('pointercancel', up);
-  node.addEventListener('pointerleave', up);
+  node.addEventListener('pointerup', release);
+  node.addEventListener('pointercancel', release);
+  node.addEventListener('pointerleave', leave);
   node.addEventListener('contextmenu', contextmenu);
   node.addEventListener('selectstart', selectstart);
 
@@ -393,9 +447,9 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
     clear();
     node.removeEventListener('pointerdown', down);
     node.removeEventListener('pointermove', move);
-    node.removeEventListener('pointerup', up);
-    node.removeEventListener('pointercancel', up);
-    node.removeEventListener('pointerleave', up);
+    node.removeEventListener('pointerup', release);
+    node.removeEventListener('pointercancel', release);
+    node.removeEventListener('pointerleave', leave);
     node.removeEventListener('contextmenu', contextmenu);
     node.removeEventListener('selectstart', selectstart);
   };

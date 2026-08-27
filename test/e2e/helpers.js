@@ -84,15 +84,35 @@ export const bubbles = (page) => page.locator('#messages .msg');
  * hier die Touch-Ereignisse direkt - nur so entstehen Zeiger-Ereignisse mit
  * pointerType "touch", und nur die loesen im Browser das Markieren aus.
  */
-export async function longPress(page, locator, ms = 700) {
+export async function longPress(page, locator, { ms = 700, slideY = 0 } = {}) {
   const box = await locator.boundingBox();
   const x = Math.round(box.x + box.width / 2);
   const y = Math.round(box.y + box.height / 2);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
   await page.waitForTimeout(ms);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  if (slideY) {
+    // Rutscht der Finger nach dem Auslösen weiter, schickt Chromium hinterher
+    // gar keinen Klick mehr - ein Fanghaken, der blind wartet, träfe dann den
+    // nächsten echten Tipp.
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + slideY }] });
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } else {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
   await cdp.detach();
+}
+
+/** Langes Drücken mit der Maus - am Rechner der Weg in dieselbe Falle. */
+export async function longClick(page, locator, ms = 700) {
+  const box = await locator.boundingBox();
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.waitForTimeout(ms);
+  await page.mouse.up();
 }
 
 /** Liefert die Rohdaten, die der Server gespeichert hat. */
