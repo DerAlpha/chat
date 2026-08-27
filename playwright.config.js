@@ -58,7 +58,11 @@ function phpWebServer() {
 export default defineConfig({
   testDir: './test/e2e',
   timeout: 45_000,
-  expect: { timeout: 10_000 },
+  // Beim PHP-Backend holt der Browser Nachrichten per Abfrage ab, statt sie
+  // über einen offenen Kanal zugestellt zu bekommen. Das dauert von Haus aus
+  // länger, und unter der Last einer ganzen Suite deutlich länger - eine
+  // knappe Frist würde hier echte Zusicherungen zu Zufallstreffern machen.
+  expect: { timeout: BACKEND === 'php' ? 25_000 : 10_000 },
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

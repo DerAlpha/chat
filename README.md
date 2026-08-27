@@ -39,6 +39,8 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Zweites eigenes Gerät per Geräte-Link dazuschalten
 - Als App installierbar (PWA), offline lauffähige Oberfläche, Benachrichtigungen
 - Hell/Dunkel/Automatisch, Deutsch und Englisch
+- Reaktionen aus allen gängigen Emoji, mit Suche auf Deutsch und Englisch
+- Fragt nach einem Namen, wenn noch keiner feststeht – überspringbar
 - „Chat löschen" räumt sofort alles ab – bei beiden und auf dem Server
 
 **Fürs Smartphone gemacht**
@@ -264,6 +266,7 @@ public/
   js/media.js   Bilder verkleinern, Ton aufnehmen
   js/session.js Was das Gerät sich merkt
   js/i18n.js    Deutsch und Englisch
+  js/emoji.js   Mitgelieferter Emoji-Katalog samt Suche
   js/ui.js      Screens, Sheets, Toasts, Zeitangaben
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
@@ -276,8 +279,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 81 Unit-Tests (Server, Krypto, QR, i18n, Installer)
-npm run test:e2e          # 29 Tests am Smartphone + 6 am Rechner
+npm test                  # 91 Unit-Tests (Server, Krypto, QR, i18n, Installer)
+npm run test:e2e          # 35 Tests am Smartphone + 9 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all

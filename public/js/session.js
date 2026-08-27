@@ -12,6 +12,8 @@ const DEFAULT_PREFS = {
   theme: 'auto',
   sound: true,
   notifications: false,
+  /** Zuletzt als Reaktion benutzte Emoji, neuestes zuerst. */
+  recentEmoji: [],
 };
 
 function readJson(key, fallback) {

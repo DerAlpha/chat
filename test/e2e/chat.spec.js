@@ -1,4 +1,5 @@
-import { test, expect, devices } from '@playwright/test';
+import { test, expect, devices } from './fixtures.js';
+import { ohneNamen } from './fixtures.js';
 import { makePng, createChat, joinChat, sendText, bubbles, longPress } from './helpers.js';
 
 /** Zwei Geraete, ein Code. */
@@ -263,6 +264,95 @@ test('Rutscht der Finger weg, bleibt der nächste Tipp trotzdem wirksam', async 
   await pageB.locator('.emoji-row button').first().click();
   await expect(bubbles(pageA).last().locator('.reaction')).toHaveText('👍', { timeout: 10_000 });
 
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Eigene Emoji als Reaktion: suchen, wählen, gemerkt bekommen', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageA, 'Worauf reagiert wird');
+  await expect(bubbles(pageB).last()).toContainText('Worauf reagiert wird');
+
+  await bubbles(pageB).last().locator('.bubble').dispatchEvent('contextmenu');
+  await pageB.locator('.emoji-more').click();
+
+  // Suche auf Deutsch findet, was die Vorgabereihe nicht hergibt.
+  await pageB.locator('.emoji-search').fill('einhorn');
+  const treffer = pageB.locator('.emoji-picker .emoji-grid:not([hidden]) button').first();
+  await expect(treffer).toHaveText('🦄');
+  await treffer.click();
+
+  await expect(bubbles(pageA).last().locator('.reaction')).toHaveText('🦄', { timeout: 10_000 });
+
+  // Beim nächsten Mal steht es vorn in der Schnellreihe.
+  await bubbles(pageB).last().locator('.bubble').dispatchEvent('contextmenu');
+  await expect(pageB.locator('.emoji-row button').first()).toHaveText('🦄');
+  await pageB.keyboard.press('Escape');
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Ein eingefügtes Emoji lässt sich ohne Katalog verschicken', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageA, 'Etwas Ausgefallenes');
+  await expect(bubbles(pageB).last()).toContainText('Etwas Ausgefallenes');
+
+  await bubbles(pageB).last().locator('.bubble').dispatchEvent('contextmenu');
+  await pageB.locator('.emoji-more').click();
+  // Steht so nicht im mitgelieferten Katalog.
+  await pageB.locator('.emoji-search').fill('🫎');
+  const treffer = pageB.locator('.emoji-picker .emoji-grid:not([hidden]) button').first();
+  await expect(treffer).toHaveText('🫎');
+  await treffer.click();
+
+  await expect(bubbles(pageA).last().locator('.reaction')).toHaveText('🫎', { timeout: 10_000 });
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Die Emoji-Suche kennt auch Englisch', async ({ browser }) => {
+  const { pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageB, 'Egal was');
+  await bubbles(pageB).last().locator('.bubble').dispatchEvent('contextmenu');
+  await pageB.locator('.emoji-more').click();
+  await pageB.locator('.emoji-search').fill('rocket');
+  await expect(pageB.locator('.emoji-picker .emoji-grid:not([hidden]) button').first()).toHaveText('🚀');
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Ohne eigenen Namen fragt die App beim ersten Chat danach', async ({ browser }) => {
+  const contextA = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const contextB = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  // Bewusst ohne Namen: genau dann soll gefragt werden.
+  await ohneNamen(pageA);
+  await ohneNamen(pageB);
+  const { link } = await createChat(pageA, { nick: null });
+  await joinChat(pageB, link, { nick: null });
+
+  const sheet = pageB.locator('#sheet');
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await expect(sheet).toContainText(/Dein Name/i);
+  await sheet.locator('input').fill('Mara');
+  await sheet.getByRole('button', { name: /Speichern/i }).click();
+  await expect(sheet).toBeHidden();
+
+  // Der Name steht beim Gegenüber und bleibt für den nächsten Chat gemerkt.
+  await expect(pageA.locator('#peer-name')).toHaveText('Mara', { timeout: 15_000 });
+  expect(await pageB.evaluate(() => JSON.parse(localStorage.getItem('fc:prefs:v1')).nick)).toBe('Mara');
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Wer schon einen Namen hat, wird nicht gefragt', async ({ browser }) => {
+  const { pageB, contextA, contextB } = await pairUp(browser);
+  await expect(bubbles(pageB)).toHaveCount(0);
+  await expect(pageB.locator('#sheet')).toBeHidden();
   await contextA.close();
   await contextB.close();
 });

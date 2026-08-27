@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, expect, devices } from '@playwright/test';
+import { test, expect, devices } from './fixtures.js';
 import { createChat, joinChat, sendText, bubbles } from './helpers.js';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');

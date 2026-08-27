@@ -177,7 +177,7 @@ export function confirmSheet(title, text, confirmLabel, { danger = true } = {}) 
 }
 
 /** Einzeiliges Eingabefeld als Sheet. */
-export function promptSheet(title, { value = '', placeholder = '', maxLength = 40, confirmLabel } = {}) {
+export function promptSheet(title, { value = '', placeholder = '', maxLength = 40, confirmLabel, note } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (result) => {
@@ -211,7 +211,7 @@ export function promptSheet(title, { value = '', placeholder = '', maxLength = 4
       }
     });
 
-    openSheet(title, [field], { onClose: () => finish(null) });
+    openSheet(title, note ? [make('p', 'sheet-note', note), field] : [field], { onClose: () => finish(null) });
     requestAnimationFrame(() => {
       input.focus();
       input.select();

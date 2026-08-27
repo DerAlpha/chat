@@ -12,6 +12,7 @@ import {
   toBase64, fromBase64, randomId,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
+import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
@@ -29,6 +30,9 @@ const MAX_ATTACHMENTS = 4;
 const PENDING_SEQ_BASE = Number.MAX_SAFE_INTEGER - 1_000_000;
 let pendingCounter = 0;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+/** So viele zuletzt benutzte Emoji stehen in der Schnellreihe und im Merker. */
+const QUICK_REACTIONS = 6;
+const RECENT_EMOJI_MAX = 24;
 const TYPING_INTERVAL = 2500;
 const TYPING_TIMEOUT = 4000;
 
@@ -242,6 +246,36 @@ async function openSession(session, { screen = 'chat' } = {}) {
   else showChatScreen();
 
   await connect();
+  // Erst fragen, wenn der Aufrufer seinen Ladeschleier abgeräumt hat - sonst
+  // liegt der über dem Dialog und schluckt jeden Tastendruck.
+  setTimeout(() => void askForName(), 0);
+}
+
+/** In diesem Seitenaufruf schon gefragt? Einmal reicht. */
+let nameAsked = false;
+
+/**
+ * Wer sich noch keinen Namen gegeben hat, wird beim Betreten eines Chats
+ * einmal danach gefragt. Wer ablehnt, wird nicht weiter behelligt - beim
+ * nächsten Aufruf der Seite kommt die Frage wieder, bis ein Name steht.
+ */
+async function askForName() {
+  if (nameAsked) return;
+  if ((app.session?.nick ?? '').trim() || (app.prefs.nick ?? '').trim()) return;
+  nameAsked = true;
+  const opened = app.session.roomId;
+  const next = await promptSheet(t('yourName'), {
+    placeholder: t('namePlaceholder'),
+    note: t('askNameHint'),
+    maxLength: 32,
+  });
+  // Während der Frage kann der Chat längst verlassen worden sein. Verglichen
+  // wird die Raum-ID, nicht das Objekt: app.session wird bei jeder Änderung
+  // durch ein neues ersetzt, ein Identitätsvergleich wäre immer ungleich.
+  if (!next || app.session?.roomId !== opened) return;
+  app.session = patchSession(app.session.roomId, { nick: next }) ?? app.session;
+  app.prefs = setPrefs({ nick: next });
+  sendNick(next);
 }
 
 /**
@@ -250,6 +284,7 @@ async function openSession(session, { screen = 'chat' } = {}) {
  */
 async function connect() {
   const opened = app.session;
+  const openedRoom = opened.roomId;
   handleConnectionStatus('connecting');
   const connection = await createConnection({
     roomId: opened.roomId,
@@ -259,7 +294,9 @@ async function connect() {
     onFatal: handleFatalClose,
   });
   // Während des Aufbaus kann der Chat schon wieder verlassen worden sein.
-  if (app.session !== opened) {
+  // Auch hier zählt die Raum-ID: das Sitzungsobjekt selbst wird ausgetauscht,
+  // sobald sich irgendeine Kleinigkeit daran ändert.
+  if (app.session?.roomId !== openedRoom) {
     connection.close();
     return;
   }
@@ -754,7 +791,7 @@ function buildMessageNode(entry, sameSender) {
     for (const [memberId, emoji] of reactions) {
       const chip = make('button', `reaction${memberId === app.me?.id ? ' is-mine' : ''}`, emoji);
       chip.type = 'button';
-      chip.addEventListener('click', () => toggleReaction(entry, emoji));
+      chip.addEventListener('click', () => pickReaction(entry, emoji));
       row.appendChild(chip);
     }
     wrapper.appendChild(row);
@@ -1463,19 +1500,141 @@ function openMessageMenu(entry) {
   openSheet(formatClock(entry.ts), items);
 }
 
+/**
+ * Die Schnellreihe: erst das zuletzt Benutzte, dann die Vorgaben zum
+ * Auffüllen - und am Ende der Weg zu allen übrigen Emoji.
+ */
+function quickReactions() {
+  const recent = (app.prefs.recentEmoji ?? []).filter((emoji) => typeof emoji === 'string');
+  const list = [...recent];
+  for (const emoji of REACTIONS) {
+    if (list.length >= QUICK_REACTIONS) break;
+    if (!list.includes(emoji)) list.push(emoji);
+  }
+  return list.slice(0, QUICK_REACTIONS);
+}
+
+function rememberEmoji(emoji) {
+  const recent = [emoji, ...(app.prefs.recentEmoji ?? []).filter((item) => item !== emoji)];
+  app.prefs = setPrefs({ recentEmoji: recent.slice(0, RECENT_EMOJI_MAX) });
+}
+
 function buildReactionRow(entry) {
   const row = make('div', 'emoji-row');
-  for (const emoji of REACTIONS) {
-    const button = make('button', null, emoji);
-    button.type = 'button';
-    button.setAttribute('aria-label', emoji);
-    button.addEventListener('click', () => {
+  for (const emoji of quickReactions()) {
+    row.appendChild(emojiButton(emoji, () => {
       closeSheet();
-      toggleReaction(entry, emoji);
-    });
-    row.appendChild(button);
+      pickReaction(entry, emoji);
+    }));
   }
+  const more = make('button', 'emoji-more');
+  more.type = 'button';
+  more.setAttribute('aria-label', t('moreEmoji'));
+  more.appendChild(icon('i-plus'));
+  more.addEventListener('click', () => openEmojiPicker(entry));
+  row.appendChild(more);
   return row;
+}
+
+/** Ausgeschrieben, damit die Übersetzungsprüfung die Schlüssel auch findet. */
+function groupTitle(id) {
+  switch (id) {
+    case 'smileys': return t('groupSmileys');
+    case 'gestures': return t('groupGestures');
+    case 'people': return t('groupPeople');
+    case 'nature': return t('groupNature');
+    case 'food': return t('groupFood');
+    case 'activity': return t('groupActivity');
+    case 'travel': return t('groupTravel');
+    default: return t('groupObjects');
+  }
+}
+
+function emojiButton(emoji, onClick) {
+  const button = make('button', null, emoji);
+  button.type = 'button';
+  button.setAttribute('aria-label', emoji);
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function pickReaction(entry, emoji) {
+  rememberEmoji(emoji);
+  void toggleReaction(entry, emoji);
+}
+
+/**
+ * Alle Emoji zur Auswahl - mit Suche und einem Feld für alles, was die
+ * mitgelieferte Liste nicht kennt.
+ */
+function openEmojiPicker(entry) {
+  const choose = (emoji) => {
+    closeSheet();
+    pickReaction(entry, emoji);
+  };
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'emoji-search';
+  search.placeholder = t('searchEmoji');
+  search.autocomplete = 'off';
+  search.setAttribute('aria-label', t('searchEmoji'));
+
+  const results = make('div', 'emoji-grid');
+  const groups = make('div', 'emoji-groups');
+
+  const paint = () => {
+    const query = search.value.trim();
+    if (!query) {
+      results.hidden = true;
+      groups.hidden = false;
+      return;
+    }
+    groups.hidden = true;
+    results.hidden = false;
+    results.replaceChildren();
+    const found = searchEmoji(query);
+    if (!found.length) {
+      // Auch ein eingefügtes Emoji ist eine gültige Antwort auf die Suche.
+      if (looksLikeEmoji(query)) {
+        results.appendChild(emojiButton(query, () => choose(query)));
+        return;
+      }
+      results.appendChild(make('p', 'sheet-note', t('noEmojiFound')));
+      return;
+    }
+    for (const emoji of found.slice(0, 120)) {
+      results.appendChild(emojiButton(emoji, () => choose(emoji)));
+    }
+  };
+  search.addEventListener('input', paint);
+  search.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const first = results.querySelector('button');
+    if (first) first.click();
+  });
+
+  const recent = (app.prefs.recentEmoji ?? []).slice(0, 16);
+  if (recent.length) {
+    groups.appendChild(make('h4', 'emoji-group__title', t('recentEmoji')));
+    const grid = make('div', 'emoji-grid');
+    for (const emoji of recent) grid.appendChild(emojiButton(emoji, () => choose(emoji)));
+    groups.appendChild(grid);
+  }
+  for (const group of emojiGroups()) {
+    groups.appendChild(make('h4', 'emoji-group__title', groupTitle(group.id)));
+    const grid = make('div', 'emoji-grid');
+    for (const emoji of group.emoji) grid.appendChild(emojiButton(emoji, () => choose(emoji)));
+    groups.appendChild(grid);
+  }
+
+  const box = make('div', 'emoji-picker');
+  box.append(search, results, groups);
+  results.hidden = true;
+
+  openSheet(t('chooseEmoji'), [box]);
+  requestAnimationFrame(() => search.focus({ preventScroll: true }));
 }
 
 async function toggleReaction(entry, emoji) {

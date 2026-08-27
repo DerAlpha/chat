@@ -54,8 +54,23 @@ export function makePng(width = 240, height = 160) {
   ]);
 }
 
+/**
+ * Gibt dem Gerät vorab einen Namen. Ohne einen fragt die App beim Betreten
+ * eines Chats danach - richtig so, aber für die meisten Tests nur im Weg.
+ */
+export async function withName(page, nick = 'Testkind') {
+  await page.addInitScript((value) => {
+    try {
+      const key = 'fc:prefs:v1';
+      const prefs = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...prefs, nick: value }));
+    } catch { /* ohne Speicher fragt die App eben */ }
+  }, nick);
+}
+
 /** Startet einen neuen Chat und liefert Code und Einladungslink. */
-export async function createChat(page) {
+export async function createChat(page, { nick = 'Testkind' } = {}) {
+  if (nick) await withName(page, nick);
   await page.goto('./');
   await page.getByRole('button', { name: /Neuen Chat starten/i }).click();
   const codeNode = page.locator('#code-display');
@@ -66,7 +81,8 @@ export async function createChat(page) {
 }
 
 /** Tritt einem Chat ueber den Einladungslink bei. */
-export async function joinChat(page, link) {
+export async function joinChat(page, link, { nick = 'Gegenüber' } = {}) {
+  if (nick) await withName(page, nick);
   await page.goto(link);
   await expect(page.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
 }

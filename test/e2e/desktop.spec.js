@@ -3,7 +3,7 @@
  * rechts die Unterhaltung. Diese Datei laeuft deshalb im Projekt "Rechner"
  * mit Maus statt Finger.
  */
-import { test, expect, devices } from '@playwright/test';
+import { test, expect, devices } from './fixtures.js';
 import { createChat, joinChat, sendText, bubbles, longClick } from './helpers.js';
 
 /** Rechner und Handy an einem Code - der Rechner ist Seite A. */
