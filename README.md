@@ -270,6 +270,11 @@ public/
   js/ui.js      Screens, Sheets, Toasts, Zeitangaben
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
+turn/
+  stun.js       STUN/TURN-Nachrichten lesen und schreiben (RFC 5389/5766)
+  server.js     Der eigene Relaisdienst für Anrufe
+  credentials.js Kurzlebige Zugangsdaten, die auch PHP ausstellen kann
+  index.js      Startbefehl samt Schaltern
 ```
 
 Keine Build-Kette, kein Bundler, kein Framework: Der Browser lädt die ES-Module direkt.
@@ -279,7 +284,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 104 Unit-Tests (Server, Krypto, QR, i18n, Installer, Langdruck)
+npm test                  # 136 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN)
 npm run test:e2e          # 36 Tests am Smartphone + 12 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend

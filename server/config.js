@@ -30,6 +30,13 @@ function basePath(name) {
   return `/${segments.join('/')}`;
 }
 
+/** Kommagetrennte Liste aus der Umgebung, Leerraum wird weggeworfen. */
+function list(name, fallback) {
+  const raw = (process.env[name] ?? '').trim();
+  if (!raw) return fallback;
+  return raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
 function bool(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -73,6 +80,17 @@ export const config = {
   joinAttemptsPerHour: int('JOIN_ATTEMPTS_PER_HOUR', 300),
   uploadsPerHour: int('UPLOADS_PER_HOUR', 400),
   messagesPerMinute: int('MESSAGES_PER_MINUTE', 240),
+
+  // --- Anrufe -------------------------------------------------------------
+  // Adressen der Aushandlungs- und Relaisdienste. Mehrere durch Komma trennen.
+  // Ohne Relais gehen Anrufe nur, wenn sich beide Geräte direkt finden.
+  stunUrls: list('STUN_URLS', []),
+  turnUrls: list('TURN_URLS', []),
+  /** Gemeinsames Geheimnis mit dem Relaisdienst (siehe turn/index.js). */
+  turnSecret: process.env.TURN_SECRET || '',
+  turnRealm: process.env.TURN_REALM || 'fluesterchat',
+  /** So lange gelten ausgegebene Zugangsdaten für den Relaisdienst. */
+  turnTtlSeconds: int('TURN_TTL_SECONDS', 2 * 60 * 60),
 
   heartbeatIntervalMs: 25 * 1000,
   persistDebounceMs: int('PERSIST_DEBOUNCE_MS', 1500),

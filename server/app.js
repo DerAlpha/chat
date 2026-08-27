@@ -1,5 +1,6 @@
 import express from 'express';
 import { config } from './config.js';
+import { callSupport, iceServers } from './ice.js';
 import { log } from './logger.js';
 import { BadRequest, BLOB_ID_RE, ROOM_ID_RE, safeEqual } from './store.js';
 import { perHour } from './ratelimit.js';
@@ -67,6 +68,9 @@ export function createApp(store, hub) {
         maxBlobBytes: config.maxBlobBytes,
         maxCiphertextBytes: config.maxCiphertextBytes,
       },
+      // Ob Anrufe überhaupt angeboten werden, hängt daran, ob ein
+      // Aushandlungs- oder Relaisdienst eingetragen ist.
+      call: callSupport(config),
     });
   });
 
@@ -111,6 +115,21 @@ export function createApp(store, hub) {
       capacity: config.maxMembersPerRoom,
       full: room.members.size >= config.maxMembersPerRoom,
     });
+  });
+
+  // --- Dienste fuer einen Anruf, mit kurzlebigen Zugangsdaten. ---------------
+  // Nur fuer Mitglieder des Raums: sonst waere der Relaisdienst fuer jeden,
+  // der die Adresse kennt, eine kostenlose Datenschleuder.
+  api.get('/rooms/:roomId/ice', (req, res) => {
+    const { room } = authenticate(req, res, store);
+    if (!room) return;
+    const support = callSupport(config);
+    if (!support.calls) {
+      return res.status(503).json({ error: 'no_call_service', message: 'Fuer diese Installation sind keine Anrufdienste eingetragen.' });
+    }
+    // Die Kennung landet im Benutzernamen und taucht im Protokoll des
+    // Relaisdienstes auf - deshalb der Raum nur gekuerzt und gehasht.
+    res.json({ ...iceServers(config, { label: room.id.slice(0, 8) }), ...support });
   });
 
   // --- Verschluesselten Anhang hochladen. ------------------------------------

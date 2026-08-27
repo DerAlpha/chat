@@ -48,6 +48,31 @@ final class Config
     /** Wie oft (im Mittel) beim Zugriff aufgeräumt wird: 1 von N Anfragen. */
     public int $cleanupChance = 200;
 
+    // --- Anrufe --------------------------------------------------------
+    // Adressen der Aushandlungs- und Relaisdienste, z. B.
+    //   'stunUrls' => ['stun:anruf.meine-domain.de:3478'],
+    //   'turnUrls' => ['turn:anruf.meine-domain.de:3478?transport=udp'],
+    //   'turnSecret' => '<dasselbe wie TURN_SECRET beim Relaisdienst>',
+    // Der Relaisdienst selbst läuft NICHT auf diesem Webspace - er braucht
+    // einen dauerhaften Prozess und eigene Ports. Dieses Backend stellt nur
+    // die kurzlebigen Zugangsdaten dafür aus; dazu genügt eine HMAC-Rechnung.
+
+    /** @var string[] */
+    public array $stunUrls = [];
+    /** @var string[] */
+    public array $turnUrls = [];
+    public string $turnSecret = '';
+    public string $turnRealm = 'fluesterchat';
+    public int $turnTtlSeconds = 7200;
+
+    // --- GIF-Suche -----------------------------------------------------
+    // Ohne Schlüssel bleibt die Suche unsichtbar statt kaputt. Der Schlüssel
+    // bleibt hier auf dem Server: Anfragen laufen über dieses Backend, damit
+    // Giphy weder die IP-Adresse noch das Gerät der Nutzer zu sehen bekommt.
+    public string $giphyKey = '';
+    /** Bewertungsstufe, die Giphy höchstens ausliefern soll. */
+    public string $giphyRating = 'pg-13';
+
     public function __construct()
     {
         // Standard: ein Ordner NEBEN dem Docroot, damit nichts davon je

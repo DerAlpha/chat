@@ -15,6 +15,7 @@ require __DIR__ . '/lib/Store.php';
 require __DIR__ . '/lib/RateLimit.php';
 require __DIR__ . '/lib/Frames.php';
 require __DIR__ . '/lib/Presence.php';
+require __DIR__ . '/lib/Ice.php';
 
 if (PHP_VERSION_ID < 80100) {
     http_response_code(500);
@@ -95,6 +96,9 @@ final class App
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/events$#', $route, $m) && $method === 'GET') {
             $this->events($m[1]);
         }
+        if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/ice$#', $route, $m) && $method === 'GET') {
+            $this->ice($m[1]);
+        }
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/blobs$#', $route, $m) && $method === 'POST') {
             $this->uploadBlob($m[1]);
         }
@@ -122,7 +126,27 @@ final class App
                 'maxBlobBytes' => $this->config->maxBlobBytes,
                 'maxCiphertextBytes' => $this->config->maxCiphertextBytes,
             ],
+            // Ob Anrufe angeboten werden, hängt daran, ob ein Aushandlungs-
+            // oder Relaisdienst eingetragen ist.
+            'call' => Ice::support($this->config),
         ]);
+    }
+
+    /**
+     * Dienste für einen Anruf, mit kurzlebigen Zugangsdaten. Nur für
+     * Mitglieder des Raums - sonst wäre der Relaisdienst für jeden, der die
+     * Adresse kennt, eine kostenlose Datenschleuder.
+     */
+    private function ice(string $roomId): never
+    {
+        [$room] = $this->authenticate($roomId);
+        $support = Ice::support($this->config);
+        if (!$support['calls']) {
+            Http::fail(503, 'no_call_service', 'Fuer diese Installation sind keine Anrufdienste eingetragen.');
+        }
+        // Die Kennung landet im Benutzernamen und taucht im Protokoll des
+        // Relaisdienstes auf - deshalb der Raum nur gekürzt.
+        Http::json(Ice::servers($this->config, substr((string) ($room['id'] ?? $roomId), 0, 8)) + $support);
     }
 
     private function createRoom(): never
