@@ -91,6 +91,50 @@ test('Erneut ausführen aktualisiert am gemerkten Ort, ohne Eigenes zu zerstöre
   assert.deepEqual(fs.readdirSync(path.join(home, 'html')), []);
 });
 
+test('Ohne Merkdatei findet der Installer die vorhandene Installation an ihrer Markierung', () => {
+  const home = makeHome();
+  const source = makeSource();
+  // Ein Name, den weder die Suchliste kennt noch jemand erraten wuerde.
+  const docroot = path.join(home, 'empty-install');
+  fs.mkdirSync(docroot);
+  install(home, source, ['--docroot', docroot]);
+
+  // Wie bei einer Installation aus der Zeit vor der Merkdatei.
+  fs.rmSync(path.join(home, '.fluesterchat-install.conf'));
+  fs.writeFileSync(path.join(docroot, 'js/uralt.js'), 'alt');
+
+  const output = install(home, source);
+  assert.match(output, /vorhandene Installation gefunden/);
+  assert.ok(!fs.existsSync(path.join(docroot, 'js/uralt.js')), 'die alte Fassung blieb liegen');
+  // Und nicht etwa daneben ins naheliegende html/ installiert.
+  assert.deepEqual(fs.readdirSync(path.join(home, 'html')), []);
+  assert.ok(fs.existsSync(path.join(home, '.fluesterchat-install.conf')), 'Merkdatei nachgeholt');
+});
+
+test('Zwei Installationen nebeneinander werden nicht stillschweigend verwechselt', () => {
+  const home = makeHome();
+  const source = makeSource();
+  const erste = path.join(home, 'seite-eins');
+  const zweite = path.join(home, 'seite-zwei');
+  fs.mkdirSync(erste);
+  fs.mkdirSync(zweite);
+  install(home, source, ['--docroot', erste]);
+  install(home, source, ['--docroot', zweite]);
+  fs.rmSync(path.join(home, '.fluesterchat-install.conf'));
+
+  let failed = false;
+  try {
+    install(home, source);
+  } catch (error) {
+    failed = true;
+    const text = String(error.stdout) + String(error.stderr);
+    assert.match(text, /Es gibt mehrere Installationen/);
+    assert.match(text, /seite-eins/);
+    assert.match(text, /seite-zwei/);
+  }
+  assert.ok(failed, 'Der Installer hätte nachfragen müssen');
+});
+
 test('Der Aktualisierer bricht sauber ab, wenn nichts installiert ist', () => {
   const home = makeHome();
   const source = makeSource();

@@ -27,7 +27,9 @@ curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/claude/cha
 
 Das Skript sucht den Document Root, lädt das Paket, legt den Datenordner
 **neben** dem Document Root an, trägt den Pfad ein und prüft zum Schluss, ob
-wirklich alles liegt. Es braucht weder root noch Node – nur eine Shell,
+wirklich alles liegt. Steht schon eine Installation, findet er sie an ihrer
+Markierungsdatei `.fluesterchat` – verlässlicher als am Ordnernamen zu raten,
+denn den vergibt jeder Hoster anders. Es braucht weder root noch Node – nur eine Shell,
 `curl` (oder `wget`) und `tar`.
 
 Der `refs/heads/`-Teil in der Adresse ist nötig, weil der Branchname selbst
@@ -61,6 +63,7 @@ ssh DEINNUTZER@DEINHOST 'mkdir -p ~/fc \
 | Schalter | Wofür |
 | --- | --- |
 | `--docroot ~/html` | Verzeichnis selbst angeben, wenn die Suche danebenliegt |
+| | *(nur nötig beim allerersten Mal – danach steht es in der Merkdatei)* |
 | `--url https://…` | Für die Schlussmeldung mit den richtigen Adressen |
 | `--source ~/ordner` | Aus einem entpackten Paket statt von GitHub |
 | `--archive ~/paket.tar.gz` | Direkt aus `.tar.gz` oder `.zip` |

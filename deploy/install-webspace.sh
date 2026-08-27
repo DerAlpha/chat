@@ -85,7 +85,9 @@ say "Entpacken mit tar"
 
 # --- Document Root ---------------------------------------------------------
 step "Document Root"
-[ "$KNOWN" -eq 1 ] && say "aus $CONF übernommen"
+if [ "$KNOWN" -eq 1 ]; then
+    say "aus $CONF übernommen"
+fi
 
 # Zeigt, was im Home liegt - damit man beim Nachbessern nicht raten muss.
 list_candidates() {
@@ -105,6 +107,26 @@ list_candidates() {
     printf '\nDen richtigen Namen nennt das Panel des Hosters als "Document Root".\n'
     printf 'Dann erneut mit:  --docroot %s/NAME\n' "$HOME"
 }
+
+# Steht schon eine Installation? Dann ist die Frage nach dem Verzeichnis
+# beantwortet - die Markierung liegt genau dort. Das ist verlaesslicher als
+# jedes Raten am Ordnernamen, denn den vergibt jeder Hoster anders.
+if [ -z "$DOCROOT" ]; then
+    for entry in "$HOME"/*/ "$HOME"/*/*/; do
+        [ -f "$entry$MARKER" ] || continue
+        if [ -n "$DOCROOT" ]; then
+            printf '\nEs gibt mehrere Installationen:\n'
+            for other in "$HOME"/*/ "$HOME"/*/*/; do
+                [ -f "$other$MARKER" ] && printf '    %s\n' "${other%/}"
+            done
+            die "Bitte mit --docroot sagen, welche gemeint ist."
+        fi
+        DOCROOT="${entry%/}"
+    done
+    if [ -n "$DOCROOT" ]; then
+        say "vorhandene Installation gefunden"
+    fi
+fi
 
 if [ -z "$DOCROOT" ]; then
     # "default-website" ist der Vorgabename bei lima-city.
