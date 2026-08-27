@@ -29,7 +29,13 @@ Das Skript sucht den Document Root, lädt das Paket, legt den Datenordner
 **neben** dem Document Root an, trägt den Pfad ein und prüft zum Schluss, ob
 wirklich alles liegt. Steht schon eine Installation, findet er sie an ihrer
 Markierungsdatei `.fluesterchat` – verlässlicher als am Ordnernamen zu raten,
-denn den vergibt jeder Hoster anders. Es braucht weder root noch Node – nur eine Shell,
+denn den vergibt jeder Hoster anders. In der Markierung steht auch, wohin
+installiert wurde: eine Sicherungskopie des Verzeichnisses trägt sie zwar mit,
+verrät sich damit aber als Kopie und wird übergangen.
+
+Bevor irgendetwas angefasst wird, stellt das Skript den neuen Stand vollständig
+daneben und prüft ihn. Ein abgebrochener Download kann eine laufende
+Installation so gar nicht erst berühren. Es braucht weder root noch Node – nur eine Shell,
 `curl` (oder `wget`) und `tar`.
 
 Der `refs/heads/`-Teil in der Adresse ist nötig, weil der Branchname selbst
@@ -70,6 +76,7 @@ ssh DEINNUTZER@DEINHOST 'mkdir -p ~/fc \
 | `--data ~/woanders` | Anderer Ort für die Daten |
 | `--force` | Auch installieren, wenn im Verzeichnis schon etwas anderes liegt |
 | `--update` | Nur der Deutlichkeit halber – gemerkte Werte gelten ohnehin |
+| `--help` | Diesen Text ausgeben |
 
 Nach dem ersten Mal braucht keiner dieser Schalter mehr angegeben zu werden:
 ein bloßes erneutes Ausführen nimmt die gemerkten Werte. Ein trotzdem
@@ -92,9 +99,14 @@ sh ~/fluesterchat-update.sh
 ```
 
 Der Aktualisierer holt sich jedes Mal die neueste Fassung des Installers – so
-wandern auch Verbesserungen am Installer selbst mit. Eine eigene
-`api/lib/config.local.php`, der Datenordner und fremde Dateien im Verzeichnis
-bleiben unangetastet; laufende Chats überleben das Update.
+wandern auch Verbesserungen am Installer selbst mit. Sind mehrere
+Installationen vermerkt, arbeitet er alle ab.
+
+**Was dabei angefasst wird:** ausschließlich Dateien, die beim letzten Mal
+selbst installiert wurden. Der Installer führt darüber in `.fluesterchat` im
+Document Root Buch. Alles andere bleibt liegen – eine eigene
+`api/lib/config.local.php`, der Datenordner, gespeicherte Chats und jede
+Datei, die du selbst dazugelegt hast.
 
 Danach im Browser einmal hart neu laden (Strg+Umschalt+R), sonst hält der
 Service Worker noch kurz die alte Fassung.

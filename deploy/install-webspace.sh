@@ -7,16 +7,19 @@
 #
 #   sh install-webspace.sh --archive ~/fluesterchat-webspace.zip
 #   sh install-webspace.sh --source ~/entpacktes-paket
-#   sh install-webspace.sh                      # laedt von GitHub (oeffentliches Repo)
+#   sh install-webspace.sh                      # laedt von GitHub
 #
 # Weitere Schalter: --docroot ~/html, --url https://…, --data ~/…, --force
 #
-# Erneut ausführen = aktualisieren. Eine eigene api/lib/config.local.php
-# und der Datenordner bleiben dabei unangetastet. Der Installer merkt sich
-# Docroot, Datenordner und Adresse in ~/.fluesterchat-install.conf und legt
+# Erneut ausführen = aktualisieren. Der Installer merkt sich Document Root,
+# Datenordner und Adresse in ~/.fluesterchat-install.conf und legt
 # ~/fluesterchat-update.sh an - danach genuegt zum Aktualisieren:
 #
 #   ssh BENUTZER@SERVER 'sh ~/fluesterchat-update.sh'
+#
+# Angetastet wird ausschliesslich, was beim letzten Mal selbst installiert
+# wurde. Gespeicherte Chats, eine eigene api/lib/config.local.php und alles
+# Fremde im Verzeichnis bleiben, wo sie sind.
 # ---------------------------------------------------------------------------
 set -eu
 
@@ -25,17 +28,30 @@ REPO_URL="https://codeload.github.com/DerAlpha/chat/tar.gz/refs/heads/$BRANCH"
 INSTALLER_URL="https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/$BRANCH/deploy/install-webspace.sh"
 CONF="$HOME/.fluesterchat-install.conf"
 UPDATER="$HOME/fluesterchat-update.sh"
+MARKER=".fluesterchat"
+TAB=$(printf '\t')
+
+# Ohne diese Dateien ist die Installation unvollstaendig.
+REQUIRED="index.html .htaccess .user.ini api/index.php img/icon.svg js/app.js"
+
 DOCROOT=""
 SITE_URL=""
 DATA_DIR=""
 ARCHIVE=""
 SOURCE=""
 FORCE=0
-MARKER=".fluesterchat"
 
 say()  { printf '  %s\n' "$*"; }
+warn() { printf '  ! %s\n' "$*"; }
 step() { printf '\n== %s ==\n' "$*"; }
 die()  { printf '\nFEHLER: %s\n' "$*" >&2; exit 1; }
+
+# Die Hilfe ist der Kommentarblock oben - bis zur naechsten Trennlinie und
+# keine Zeile weiter. Die fruehere Fassung zaehlte feste Zeilennummern ab und
+# druckte nach einer Erweiterung des Textes den Anfang des Programms mit aus.
+usage() {
+    awk 'NR <= 2 { next } /^# -{10,}/ { exit } { sub(/^# ?/, ""); print }' "$0"
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -47,25 +63,51 @@ while [ $# -gt 0 ]; do
         --force)   FORCE=1; shift ;;
         # --update ist nur noch Hoeflichkeit: gemerkte Werte gelten ohnehin.
         --update)  shift ;;
-        -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
         *) die "Unbekannte Option: $1" ;;
     esac
 done
 
-# --- Was beim letzten Mal galt ----------------------------------------------
-# Gesetzte Schalter haben Vorrang; alles andere kommt aus der Merkdatei.
-# So ist ein blosses erneutes Ausfuehren schon die Aktualisierung.
-if [ -f "$CONF" ]; then
-    OLD_DOCROOT=""; OLD_DATA_DIR=""; OLD_SITE_URL=""
-    # shellcheck disable=SC1090
-    . "$CONF" 2>/dev/null || true
-    [ -n "$DOCROOT" ]  || DOCROOT="$OLD_DOCROOT"
-    [ -n "$DATA_DIR" ] || DATA_DIR="$OLD_DATA_DIR"
-    [ -n "$SITE_URL" ] || SITE_URL="$OLD_SITE_URL"
-    KNOWN=1
-else
-    KNOWN=0
-fi
+# ---------------------------------------------------------------------------
+# Merkdatei
+#
+# Bewusst kein Shell-Format. Frueher wurde sie mit `.` eingelesen - dann
+# entscheidet ein einzelnes Apostroph im Pfad ueber Erfolg oder wortlosen
+# Abbruch, und eine verfaelschte Datei kann Variablen des Installers setzen,
+# bis hin zu FORCE. Jetzt sind es schlichte, durch Tabulatoren getrennte
+# Felder, die niemand interpretiert:
+#
+#   install<TAB>docroot<TAB>datenordner<TAB>adresse
+# ---------------------------------------------------------------------------
+
+conf_entries() {
+    [ -f "$CONF" ] || return 0
+    grep "^install$TAB" "$CONF" 2>/dev/null || true
+}
+
+conf_field() { printf '%s\n' "$1" | cut -d"$TAB" -f"$2"; }
+
+# Ein Pfad mit Tabulator oder Zeilenumbruch sprengt jedes Zeilenformat -
+# lieber gleich und deutlich ablehnen als spaeter still danebengreifen.
+check_plain() {
+    case "$1" in
+        *"$TAB"*) die "$2 enthält einen Tabulator - damit kommt der Installer nicht klar." ;;
+    esac
+    [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = "0" ] || die "$2 enthält einen Zeilenumbruch."
+}
+
+# ---------------------------------------------------------------------------
+# Markierung im Docroot
+#
+# Sie haelt fest, wohin installiert wurde und welche Dateien dabei entstanden
+# sind. Der Pfad darin ist wichtig: eine Sicherungskopie des Docroots traegt
+# die Markierung mit, nennt darin aber den urspruenglichen Ort. Nur daran ist
+# eine Kopie zu erkennen - sonst greift die Suche nach vorhandenen
+# Installationen daneben und raeumt die Sicherung ab.
+# ---------------------------------------------------------------------------
+
+marker_docroot() { sed -n 's/^docroot=//p' "$1" 2>/dev/null | head -1; }
+marker_files()   { sed -n 's/^datei=//p'   "$1" 2>/dev/null; }
 
 # --- Werkzeuge -------------------------------------------------------------
 step "Werkzeuge"
@@ -85,9 +127,6 @@ say "Entpacken mit tar"
 
 # --- Document Root ---------------------------------------------------------
 step "Document Root"
-if [ "$KNOWN" -eq 1 ]; then
-    say "aus $CONF übernommen"
-fi
 
 # Zeigt, was im Home liegt - damit man beim Nachbessern nicht raten muss.
 list_candidates() {
@@ -108,23 +147,48 @@ list_candidates() {
     printf 'Dann erneut mit:  --docroot %s/NAME\n' "$HOME"
 }
 
-# Steht schon eine Installation? Dann ist die Frage nach dem Verzeichnis
-# beantwortet - die Markierung liegt genau dort. Das ist verlaesslicher als
-# jedes Raten am Ordnernamen, denn den vergibt jeder Hoster anders.
-if [ -z "$DOCROOT" ]; then
+# Echte Installationen an ihrer Markierung finden - Kopien uebergehen.
+find_installed() {
     for entry in "$HOME"/*/ "$HOME"/*/*/; do
         [ -f "$entry$MARKER" ] || continue
-        if [ -n "$DOCROOT" ]; then
-            printf '\nEs gibt mehrere Installationen:\n'
-            for other in "$HOME"/*/ "$HOME"/*/*/; do
-                [ -f "$other$MARKER" ] && printf '    %s\n' "${other%/}"
-            done
-            die "Bitte mit --docroot sagen, welche gemeint ist."
+        here=${entry%/}
+        recorded=$(marker_docroot "$entry$MARKER")
+        # Ohne vermerkten Pfad: Markierung aus einer aelteren Fassung, die
+        # zaehlt mit. Steht dort ein anderer Pfad, ist es eine Kopie.
+        if [ -n "$recorded" ] && [ "$recorded" != "$here" ]; then
+            continue
         fi
-        DOCROOT="${entry%/}"
+        printf '%s\n' "$here"
     done
-    if [ -n "$DOCROOT" ]; then
+}
+
+if [ -z "$DOCROOT" ]; then
+    entries=$(conf_entries)
+    count=$(printf '%s' "$entries" | grep -c . || true)
+    if [ "$count" = "1" ]; then
+        DOCROOT=$(conf_field "$entries" 2)
+        [ -n "$DATA_DIR" ] || DATA_DIR=$(conf_field "$entries" 3)
+        [ -n "$SITE_URL" ] || SITE_URL=$(conf_field "$entries" 4)
+        say "aus $CONF übernommen"
+    elif [ "$count" != "0" ]; then
+        printf '\nEs sind mehrere Installationen vermerkt:\n'
+        printf '%s\n' "$entries" | while IFS= read -r line; do
+            [ -n "$line" ] && printf '    %s\n' "$(conf_field "$line" 2)"
+        done
+        die "Bitte mit --docroot sagen, welche gemeint ist."
+    fi
+fi
+
+if [ -z "$DOCROOT" ]; then
+    installed=$(find_installed)
+    count=$(printf '%s' "$installed" | grep -c . || true)
+    if [ "$count" = "1" ]; then
+        DOCROOT="$installed"
         say "vorhandene Installation gefunden"
+    elif [ "$count" != "0" ]; then
+        printf '\nEs gibt mehrere Installationen:\n'
+        printf '%s\n' "$installed" | sed 's/^/    /'
+        die "Bitte mit --docroot sagen, welche gemeint ist."
     fi
 fi
 
@@ -141,6 +205,7 @@ if [ -z "$DOCROOT" ]; then
         fi
     done
 fi
+
 if [ -z "$DOCROOT" ]; then
     list_candidates
     die "Kein Document Root gefunden."
@@ -148,11 +213,18 @@ fi
 [ -d "$DOCROOT" ] || die "$DOCROOT gibt es nicht."
 [ -w "$DOCROOT" ] || die "In $DOCROOT darf nicht geschrieben werden."
 DOCROOT=$(cd "$DOCROOT" && pwd)
+check_plain "$DOCROOT" "Der Document Root"
 say "$DOCROOT"
 
-# Nichts Fremdes überschreiben.
-if [ ! -f "$DOCROOT/$MARKER" ] && [ "$FORCE" -eq 0 ]; then
-    unexpected=$(ls -A "$DOCROOT" 2>/dev/null | grep -v -E '^(index\.html?|\.ftpquota|\.well-known|cgi-bin)$' || true)
+# Nichts Fremdes überschreiben. Die Markierung allein genuegt dafuer nicht:
+# sie ist eine Punktdatei, die beim Leerraeumen per FTP gern stehenbleibt.
+# Erst zusammen mit einer erkennbar eigenen Datei heisst sie "das ist unseres".
+OURS=0
+if [ -f "$DOCROOT/$MARKER" ] && [ -f "$DOCROOT/api/index.php" ]; then
+    OURS=1
+fi
+if [ "$OURS" -eq 0 ] && [ "$FORCE" -eq 0 ]; then
+    unexpected=$(ls -A "$DOCROOT" 2>/dev/null | grep -v -E "^(index\.html?|\.ftpquota|\.well-known|cgi-bin|$MARKER)$" || true)
     if [ -n "$unexpected" ]; then
         printf '\nIn %s liegt schon etwas anderes:\n' "$DOCROOT"
         printf '%s\n' "$unexpected" | sed 's/^/    /'
@@ -162,14 +234,56 @@ fi
 
 # --- Datenordner -----------------------------------------------------------
 step "Datenordner"
-[ -n "$DATA_DIR" ] || DATA_DIR="$(dirname "$DOCROOT")/fluesterchat-data"
-if mkdir -p "$DATA_DIR" 2>/dev/null && [ -w "$DATA_DIR" ]; then
+if [ -z "$DATA_DIR" ]; then
+    parent=$(dirname "$DOCROOT")
+    # Nur wenn der Docroot unmittelbar im Home liegt, ist sein Elternordner
+    # verlaesslich ausserhalb des Webs. Bei einer Installation im Unterordner
+    # einer bestehenden Seite waere er sonst schlicht abrufbar.
+    if [ "$parent" = "$HOME" ]; then
+        DATA_DIR="$parent/fluesterchat-data"
+    else
+        DATA_DIR="$HOME/fluesterchat-data"
+    fi
+    # Eine zweite Installation darf sich den Datenordner nicht mit der ersten
+    # teilen - sonst sieht eine Testinstanz die echten Chats und loescht beim
+    # Aufraeumen darin mit.
+    for line in $(conf_entries | tr ' ' '\001'); do
+        line=$(printf '%s' "$line" | tr '\001' ' ')
+        [ "$(conf_field "$line" 3)" = "$DATA_DIR" ] || continue
+        [ "$(conf_field "$line" 2)" = "$DOCROOT" ] && continue
+        DATA_DIR="$DATA_DIR-$(basename "$DOCROOT")"
+        say "Datenordner bereits von einer anderen Installation belegt"
+        break
+    done
+fi
+check_plain "$DATA_DIR" "Der Datenordner"
+
+DATA_INSIDE=0
+case "$DATA_DIR/" in
+    "$DOCROOT"/*) DATA_INSIDE=1 ;;
+esac
+
+DATA_OUTSIDE=0
+if [ "$DATA_INSIDE" -eq 1 ]; then
+    warn "$DATA_DIR liegt INNERHALB des Document Roots."
+    warn "Dort schützt ihn nur .htaccess - auf Servern ohne AllowOverride ist"
+    warn "er von außen abrufbar. Besser --data auf einen Ordner außerhalb setzen."
+    mkdir -p "$DATA_DIR" 2>/dev/null || true
+elif mkdir -p "$DATA_DIR" 2>/dev/null && [ -w "$DATA_DIR" ]; then
     chmod 770 "$DATA_DIR" 2>/dev/null || true
-    say "$DATA_DIR (ausserhalb des Docroots - gut)"
+    say "$DATA_DIR (außerhalb des Docroots - gut)"
     DATA_OUTSIDE=1
 else
     say "Neben dem Docroot ist kein Schreiben möglich - die App legt sich später api/data an."
-    DATA_OUTSIDE=0
+fi
+
+# Riegel sofort vorlegen, nicht erst beim ersten Zugriff der App.
+if [ -d "$DATA_DIR" ] && [ -w "$DATA_DIR" ] && [ ! -f "$DATA_DIR/.htaccess" ]; then
+    {
+        printf '# Von Flüsterchat angelegt: hier liegen verschlüsselte Chats.\n'
+        printf 'Require all denied\n'
+        printf '<IfModule !mod_authz_core.c>\n  Order allow,deny\n  Deny from all\n</IfModule>\n'
+    } > "$DATA_DIR/.htaccess" 2>/dev/null || true
 fi
 
 # --- Quelle beschaffen -----------------------------------------------------
@@ -218,88 +332,85 @@ else
 fi
 say "$(du -sh "$TMP/src" 2>/dev/null | cut -f1), Form: $LAYOUT"
 
-# --- Eigene Einstellungen retten -------------------------------------------
-KEEP_CONFIG=""
-if [ -f "$DOCROOT/api/lib/config.local.php" ]; then
-    KEEP_CONFIG="$TMP/config.local.php"
-    cp "$DOCROOT/api/lib/config.local.php" "$KEEP_CONFIG"
-    say "Vorhandene config.local.php wird behalten"
+# --- Neuen Stand zusammenstellen -------------------------------------------
+# Erst vollstaendig danebenlegen und pruefen, dann anfassen. Ein halb
+# heruntergeladenes oder beschnittenes Paket darf eine laufende Installation
+# nicht einmal beruehren.
+NEW="$TMP/neu"
+mkdir -p "$NEW"
+if [ "$LAYOUT" = "repo" ]; then
+    cp -R "$TMP/src/public/." "$NEW/"
+    mkdir -p "$NEW/api"
+    cp -R "$TMP/src/php/api/." "$NEW/api/"
+    cp "$TMP/src/php/site/.htaccess" "$NEW/.htaccess"
+    cp "$TMP/src/php/site/.user.ini" "$NEW/.user.ini"
+else
+    cp -R "$TMP/src/." "$NEW/"
+    rm -f "$NEW/install-webspace.sh"
 fi
+for needed in $REQUIRED; do
+    [ -f "$NEW/$needed" ] || die "In der Quelle fehlt $needed - da stimmt etwas nicht. Es wurde nichts verändert."
+done
+
+# Was jetzt ausgeliefert wird - relativ zum Docroot, eine Zeile je Datei.
+( cd "$NEW" && find . -type f | sed 's|^\./||' | sort ) > "$TMP/dateien.neu"
 
 # --- Installieren ----------------------------------------------------------
 step "Installieren"
-# Alte Fassungen unserer eigenen Ordner weg, damit keine Reste liegenbleiben.
-for dir in css js img api; do
-    rm -rf "$DOCROOT/$dir"
-done
-if [ "$LAYOUT" = "repo" ]; then
-    cp -R "$TMP/src/public/." "$DOCROOT/"
-    mkdir -p "$DOCROOT/api"
-    cp -R "$TMP/src/php/api/." "$DOCROOT/api/"
-    cp "$TMP/src/php/site/.htaccess" "$DOCROOT/.htaccess"
-    cp "$TMP/src/php/site/.user.ini" "$DOCROOT/.user.ini"
-else
-    cp -R "$TMP/src/." "$DOCROOT/"
-    rm -f "$DOCROOT/install-webspace.sh"
+
+# Was beim letzten Mal von uns kam. Ohne diese Liste - etwa bei einer
+# Installation aus einer aelteren Fassung - wird nichts geloescht: lieber eine
+# verwaiste Datei zu viel als eine fremde zu wenig.
+: > "$TMP/dateien.alt"
+if [ -f "$DOCROOT/$MARKER" ]; then
+    marker_files "$DOCROOT/$MARKER" | sort > "$TMP/dateien.alt"
 fi
-[ -n "$KEEP_CONFIG" ] && cp "$KEEP_CONFIG" "$DOCROOT/api/lib/config.local.php"
+
+# Darüberkopieren statt vorher abzuräumen. Das ist der Kern der Sache: frueher
+# loeschte der Installer api/ vollstaendig und traf damit api/data - dort legt
+# die App alle Chats ab, wenn neben dem Docroot nicht geschrieben werden darf.
+# Der Aktualisierer versprach im selben Atemzug das Gegenteil.
+cp -R "$NEW/." "$DOCROOT/"
+
+# Verwaistes aus der letzten Fassung entfernen - ausschliesslich Dateien, die
+# nachweislich von uns stammen und heute nicht mehr dazugehoeren.
+if [ -s "$TMP/dateien.alt" ]; then
+    entfernt=0
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        grep -qxF "$rel" "$TMP/dateien.neu" && continue
+        if [ -f "$DOCROOT/$rel" ]; then
+            rm -f "$DOCROOT/$rel"
+            entfernt=$((entfernt + 1))
+        fi
+    done < "$TMP/dateien.alt"
+    [ "$entfernt" -eq 0 ] || say "$entfernt Datei(en) aus der alten Fassung entfernt"
+    # Leergewordene eigene Ordner aufräumen, die tiefsten zuerst.
+    for dir in css js img api/lib api; do
+        if [ -d "$DOCROOT/$dir" ]; then
+            rmdir "$DOCROOT/$dir" 2>/dev/null || true
+        fi
+    done
+fi
 
 if [ "$DATA_OUTSIDE" -eq 1 ] && [ ! -f "$DOCROOT/api/lib/config.local.php" ]; then
     printf "<?php\nreturn [\n    'dataDir' => '%s',\n];\n" "$DATA_DIR" > "$DOCROOT/api/lib/config.local.php"
     say "Datenpfad in api/lib/config.local.php eingetragen"
 fi
 
-date > "$DOCROOT/$MARKER"
-chmod 644 "$DOCROOT/.htaccess" "$DOCROOT/.user.ini" 2>/dev/null || true
-say "$(find "$DOCROOT" -type f | wc -l | tr -d ' ') Dateien liegen bereit"
-
-# --- Fuers naechste Mal merken ---------------------------------------------
-step "Aktualisieren vorbereiten"
-# Beim naechsten Mal soll niemand mehr Pfade heraussuchen muessen.
 {
-    printf '# Von install-webspace.sh angelegt. Wird beim Aktualisieren gelesen.\n'
-    printf "OLD_DOCROOT='%s'\n"  "$DOCROOT"
-    printf "OLD_DATA_DIR='%s'\n" "$DATA_DIR"
-    printf "OLD_SITE_URL='%s'\n" "$SITE_URL"
-} > "$CONF"
-chmod 600 "$CONF" 2>/dev/null || true
-say "$CONF geschrieben"
+    printf '# Von install-webspace.sh angelegt. Nicht von Hand ändern.\n'
+    printf 'docroot=%s\n' "$DOCROOT"
+    printf 'zeit=%s\n' "$(date)"
+    sed 's/^/datei=/' "$TMP/dateien.neu"
+} > "$DOCROOT/$MARKER"
 
-# Der Aktualisierer holt sich jedes Mal den aktuellen Installer - so wandern
-# auch Verbesserungen am Installer selbst mit.
-cat > "$UPDATER" <<UPDATER_EOF
-#!/bin/sh
-# Flüsterchat aktualisieren - angelegt von install-webspace.sh.
-#
-#   sh ~/fluesterchat-update.sh
-#
-# Holt die neueste Fassung und legt sie über die vorhandene Installation.
-# Docroot und Datenordner stehen in ~/.fluesterchat-install.conf; die eigene
-# api/lib/config.local.php und alle gespeicherten Chats bleiben unangetastet.
-set -eu
-[ -f "\$HOME/.fluesterchat-install.conf" ] || {
-    printf 'Keine Installation gefunden (%s fehlt).\n' "\$HOME/.fluesterchat-install.conf" >&2
-    exit 1
-}
-TMP=\$(mktemp -d 2>/dev/null || mktemp -d -t fluesterchat)
-trap 'rm -rf "\$TMP"' EXIT INT TERM
-if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "\$TMP/install.sh" '$INSTALLER_URL'
-elif command -v wget >/dev/null 2>&1; then
-    wget -qO "\$TMP/install.sh" '$INSTALLER_URL'
-else
-    printf 'Weder curl noch wget vorhanden.\n' >&2
-    exit 1
-fi
-[ -s "\$TMP/install.sh" ] || { printf 'Der Installer kam leer an.\n' >&2; exit 1; }
-sh "\$TMP/install.sh" --update "\$@"
-UPDATER_EOF
-chmod 755 "$UPDATER" 2>/dev/null || true
-say "$UPDATER angelegt"
+chmod 644 "$DOCROOT/.htaccess" "$DOCROOT/.user.ini" 2>/dev/null || true
+say "$(wc -l < "$TMP/dateien.neu" | tr -d ' ') Dateien liegen bereit"
 
 # --- Nachsehen -------------------------------------------------------------
 step "Kurze Kontrolle"
-for needed in index.html .htaccess .user.ini api/index.php img/icon.svg js/app.js; do
+for needed in $REQUIRED; do
     [ -f "$DOCROOT/$needed" ] || die "$needed fehlt - die Installation ist unvollständig."
 done
 say "Alle erwarteten Dateien sind da"
@@ -315,6 +426,95 @@ if command -v php >/dev/null 2>&1; then
     fi
 fi
 
+# --- Fuers naechste Mal merken ---------------------------------------------
+# Ab hier ist die Installation fertig und benutzbar. Was jetzt noch schiefgeht,
+# darf den Lauf nicht als gescheitert dastehen lassen - sonst greift jemand in
+# eine intakte Seite ein.
+step "Aktualisieren vorbereiten"
+UPDATER_OK=0
+OTHERS=$(conf_entries)
+if {
+    printf '# Von install-webspace.sh angelegt. Ein Eintrag je Installation:\n'
+    printf '# install<TAB>docroot<TAB>datenordner<TAB>adresse\n'
+    printf '%s\n' "$OTHERS" | while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        [ "$(conf_field "$line" 2)" = "$DOCROOT" ] || printf '%s\n' "$line"
+    done
+    printf 'install%s%s%s%s%s%s\n' "$TAB" "$DOCROOT" "$TAB" "$DATA_DIR" "$TAB" "$SITE_URL"
+} > "$CONF.neu" 2>/dev/null && mv "$CONF.neu" "$CONF" 2>/dev/null; then
+    chmod 600 "$CONF" 2>/dev/null || true
+    say "$CONF geschrieben"
+    UPDATER_OK=1
+else
+    rm -f "$CONF.neu" 2>/dev/null || true
+    warn "$CONF liess sich nicht schreiben (Home nicht beschreibbar?)."
+    warn "Die Installation ist trotzdem in Ordnung - zum Aktualisieren"
+    warn "einfach denselben Befehl noch einmal ausführen."
+fi
+
+# Der Aktualisierer holt sich jedes Mal den aktuellen Installer - so wandern
+# auch Verbesserungen am Installer selbst mit. Er arbeitet alle vermerkten
+# Installationen ab, damit eine zweite Instanz die erste nicht verdraengt.
+if [ "$UPDATER_OK" -eq 1 ]; then
+    if cat > "$UPDATER.neu" <<UPDATER_EOF
+#!/bin/sh
+# Flüsterchat aktualisieren - angelegt von install-webspace.sh.
+#
+#   sh ~/fluesterchat-update.sh
+#
+# Holt die neueste Fassung und legt sie über jede vermerkte Installation.
+# Angetastet wird nur, was beim letzten Mal selbst installiert wurde: die
+# eigene api/lib/config.local.php und alle gespeicherten Chats bleiben.
+set -eu
+CONF="\$HOME/.fluesterchat-install.conf"
+[ -f "\$CONF" ] || {
+    printf 'Keine Installation gefunden (%s fehlt).\n' "\$CONF" >&2
+    exit 1
+}
+TMP=\$(mktemp -d 2>/dev/null || mktemp -d -t fluesterchat)
+trap 'rm -rf "\$TMP"' EXIT INT TERM
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "\$TMP/install.sh" '$INSTALLER_URL'
+elif command -v wget >/dev/null 2>&1; then
+    wget -qO "\$TMP/install.sh" '$INSTALLER_URL'
+else
+    printf 'Weder curl noch wget vorhanden.\n' >&2
+    exit 1
+fi
+# Eine Fehlerseite mit Rueckgabewert 200 ist noch lange kein Installer.
+head -1 "\$TMP/install.sh" | grep -q '^#!/bin/sh' || {
+    printf 'Der geladene Installer sieht nicht wie ein Shell-Skript aus.\n' >&2
+    exit 1
+}
+TAB=\$(printf '\t')
+grep "^install\$TAB" "\$CONF" > "\$TMP/liste" || {
+    printf 'In %s steht keine Installation.\n' "\$CONF" >&2
+    exit 1
+}
+FEHLER=0
+while IFS= read -r zeile; do
+    [ -n "\$zeile" ] || continue
+    ziel=\$(printf '%s\n' "\$zeile" | cut -d"\$TAB" -f2)
+    daten=\$(printf '%s\n' "\$zeile" | cut -d"\$TAB" -f3)
+    adresse=\$(printf '%s\n' "\$zeile" | cut -d"\$TAB" -f4)
+    if [ ! -d "\$ziel" ]; then
+        printf '\nÜbersprungen (gibt es nicht mehr): %s\n' "\$ziel" >&2
+        continue
+    fi
+    sh "\$TMP/install.sh" --update --docroot "\$ziel" --data "\$daten" --url "\$adresse" "\$@" || FEHLER=1
+done < "\$TMP/liste"
+exit \$FEHLER
+UPDATER_EOF
+    then
+        mv "$UPDATER.neu" "$UPDATER" 2>/dev/null || true
+        chmod 755 "$UPDATER" 2>/dev/null || true
+        say "$UPDATER angelegt"
+    else
+        rm -f "$UPDATER.neu" 2>/dev/null || true
+        warn "$UPDATER liess sich nicht anlegen."
+    fi
+fi
+
 printf '\n%s\n' '---------------------------------------------------------------'
 printf 'Fertig.\n\n'
 if [ -n "$SITE_URL" ]; then
@@ -326,8 +526,10 @@ else
 fi
 printf '\nDie Prüfseite sagt, ob PHP-Version, Rechte und .htaccess passen.\n'
 printf 'Wenn dort "Alles bereit" steht, kann api/setup-check.php weg.\n'
-printf '\nSpäter aktualisieren - ein Befehl, mehr nicht:\n'
-printf '    sh ~/fluesterchat-update.sh\n'
-printf 'oder vom eigenen Rechner aus, ohne sich anzumelden:\n'
-printf "    ssh BENUTZER@SERVER 'sh ~/fluesterchat-update.sh'\n"
+if [ "$UPDATER_OK" -eq 1 ]; then
+    printf '\nSpäter aktualisieren - ein Befehl, mehr nicht:\n'
+    printf '    sh ~/fluesterchat-update.sh\n'
+    printf 'oder vom eigenen Rechner aus, ohne sich anzumelden:\n'
+    printf "    ssh BENUTZER@SERVER 'sh ~/fluesterchat-update.sh'\n"
+fi
 printf '%s\n' '---------------------------------------------------------------'
