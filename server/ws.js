@@ -8,7 +8,10 @@ const WELCOME_HISTORY = config.welcomeHistory;
 export const SUBPROTOCOL = 'fluesterchat';
 const TOKEN_PREFIX = 't.';
 /** Leichte Frames sollen echte Nachrichten nicht aus dem Budget draengen. */
-const FRAME_COST = { ping: 0, typing: 0.1, read: 0.1, history: 0.5 };
+// Beim Aushandeln eines Anrufs kommen die Kandidaten in Schwällen - zwei
+// Dutzend kleine Pakete in wenigen Sekunden. Die dürfen das Kontingent für
+// echte Nachrichten nicht auffressen; gross werden können sie ohnehin nicht.
+const FRAME_COST = { ping: 0, typing: 0.1, read: 0.1, sig: 0.2, history: 0.5 };
 const MAX_HISTORY_PAGE = 300;
 
 /** Schliess-Codes im privaten Bereich (4000-4999). */
@@ -238,6 +241,18 @@ export class Hub {
         member.nickCt = ct;
         this.store.markDirty();
         return this.broadcast(room.id, { t: 'nick', from: member.id, ct }, ws);
+      }
+
+      case 'sig': {
+        // Aushandlung eines Anrufs. Der Inhalt ist schon im Browser
+        // verschlüsselt - dieser Server reicht ihn weiter, ohne zu wissen,
+        // worum es geht. Damit ist auch die Aushandlung Ende-zu-Ende
+        // geschützt, nicht nur das Gespräch selbst.
+        const ct = String(frame.ct ?? '');
+        if (!ct || Buffer.byteLength(ct, 'utf8') > 16 * 1024) {
+          throw new BadRequest('bad_signal', 'Ungueltiges Aushandlungspaket.');
+        }
+        return this.broadcast(room.id, { t: 'sig', from: member.id, ct }, ws);
       }
 
       case 'history': {

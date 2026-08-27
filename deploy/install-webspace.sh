@@ -32,7 +32,7 @@ MARKER=".fluesterchat"
 TAB=$(printf '\t')
 
 # Ohne diese Dateien ist die Installation unvollstaendig.
-REQUIRED="index.html .htaccess .user.ini api/index.php img/icon.svg js/app.js"
+REQUIRED="index.html .htaccess .user.ini api/index.php img/icon.svg js/app.js js/call-worker.js"
 
 DOCROOT=""
 SITE_URL=""

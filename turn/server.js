@@ -9,9 +9,10 @@
  *
  * Was er dabei zu sehen bekommt: verschlüsselte Pakete und die IP-Adressen
  * der beiden Seiten. Den Ton oder das Bild sieht er nicht - der Medienstrom
- * ist zweifach verschlüsselt (DTLS-SRTP von WebRTC, darunter noch einmal mit
- * dem Chatschlüssel). Deshalb ist es auch vertretbar, ihn auf einer fremden
- * Maschine laufen zu lassen; nötig ist es nicht.
+ * ist mit DTLS-SRTP verschlüsselt, und den Schlüssel dafür handeln die
+ * beiden Geräte über einen Kanal aus, den auch der Webserver nicht mitlesen
+ * kann. Deshalb ist es vertretbar, diesen Dienst auf einer fremden Maschine
+ * laufen zu lassen; nötig ist es nicht.
  *
  * Umgesetzt ist der Teil von RFC 5389 und RFC 5766, den WebRTC benutzt:
  * Binding, Allocate, Refresh, CreatePermission, ChannelBind, Send und Data.

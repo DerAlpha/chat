@@ -9,8 +9,10 @@
  * er selbst nie laufen könnte.
  *
  * Die Zugangsdaten schützen vor Fremdnutzung der Bandbreite, nicht vor
- * Mithören: der Medienstrom ist zweifach verschlüsselt, bevor er den Dienst
- * überhaupt erreicht.
+ * Mithören: der Medienstrom ist mit DTLS-SRTP verschlüsselt, bevor er den
+ * Dienst überhaupt erreicht - der Schlüssel dafür entsteht zwischen den
+ * beiden Geräten, und die Aushandlung darüber läuft nicht im Klartext über
+ * diesen Server, sondern verschlüsselt wie jede Nachricht.
  */
 import { makeCredentials } from '../turn/credentials.js';
 
@@ -48,8 +50,15 @@ export function callSupport(config) {
   const hasStun = (config.stunUrls ?? []).length > 0;
   const hasTurn = (config.turnUrls ?? []).length > 0 && Boolean(config.turnSecret);
   return {
-    /** Anrufe anbieten? Ohne STUN findet sich draussen niemand. */
-    calls: hasStun || hasTurn,
+    /**
+     * Anrufe laufen zwischen den Geräten - der Server handelt nur aus. Im
+     * selben Netz klappt das ohne jede Einrichtung, deshalb wird die
+     * Möglichkeit immer angeboten. Was fehlt, sagt die App dann dazu; eine
+     * versteckte Funktion ist schlechter als eine mit ehrlichem Hinweis.
+     */
+    calls: true,
+    /** Erfährt ein Gerät seine öffentliche Adresse? Ohne das nur im selben Netz. */
+    discovery: hasStun || hasTurn,
     /** Gibt es einen Weg für Gegenstellen hinter strengen Routern? */
     relay: hasTurn,
   };

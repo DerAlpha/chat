@@ -55,6 +55,7 @@ final class Frames
             'read' => $this->read($frame),
             'typing' => $this->typing($frame),
             'nick' => $this->nick($frame),
+            'sig' => $this->signal($frame),
             'history' => $this->history($frame),
             'burn' => $this->burn(),
             default => $this->error('unknown_frame', 'Unbekannter Typ: ' . $frame['t'], $frame['cid'] ?? null),
@@ -265,6 +266,28 @@ final class Frames
             $room['members'][$memberId]['nickCt'] = $ct;
             [$room] = $this->store->appendEvent($this->roomId, $room, [
                 't' => 'nick', 'from' => $memberId, 'ct' => $ct,
+            ]);
+            return [$room, null];
+        });
+    }
+
+    /**
+     * Aushandlung eines Anrufs. Der Inhalt ist schon im Browser verschlüsselt -
+     * dieser Server reicht ihn weiter, ohne zu wissen, worum es geht. Damit
+     * ist auch die Aushandlung selbst Ende-zu-Ende geschützt, nicht nur der
+     * Gesprächsinhalt: ein untergeschobener Server kann sich nicht
+     * dazwischenschalten, ohne dass es auffällt.
+     */
+    private function signal(array $frame): void
+    {
+        $ct = (string) ($frame['ct'] ?? '');
+        if ($ct === '' || strlen($ct) > 16384) {
+            Http::fail(400, 'bad_signal', 'Ungueltiges Aushandlungspaket.');
+        }
+        $memberId = $this->memberId;
+        $this->store->mutate($this->roomId, function (array $room) use ($ct, $memberId): array {
+            [$room] = $this->store->appendEvent($this->roomId, $room, [
+                't' => 'sig', 'from' => $memberId, 'ct' => $ct,
             ]);
             return [$room, null];
         });

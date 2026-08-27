@@ -18,6 +18,7 @@ import {
 } from '../../turn/stun.js';
 import { makeCredentials } from '../../turn/credentials.js';
 import { createTurnServer } from '../../turn/server.js';
+import { callSupport } from '../../server/ice.js';
 
 const SECRET = 'ein-geheimnis-das-beide-seiten-kennen';
 const REALM = 'fluesterchat-test';
@@ -495,13 +496,47 @@ test('Ein anderes Geheimnis im Webspace sperrt aus', { skip: phpVorhanden ? fals
   }
 });
 
-test('Ohne eingetragene Dienste werden gar keine Anrufe angeboten', { skip: phpVorhanden ? false : 'PHP nicht vorhanden' }, () => {
+/** Fragt das PHP-Backend, was es an Anrufmoeglichkeiten meldet. */
+function phpSupport(zeilen = '') {
   const wurzel = path.resolve(import.meta.dirname, '../..');
   const ausgabe = execFileSync('php', ['-r', `
     require ${JSON.stringify(path.join(wurzel, 'php/api/lib/Config.php'))};
     require ${JSON.stringify(path.join(wurzel, 'php/api/lib/Ice.php'))};
     $config = (new ReflectionClass("Config"))->newInstanceWithoutConstructor();
+    ${zeilen}
     echo json_encode(Ice::support($config));
   `], { encoding: 'utf8' });
-  assert.deepEqual(JSON.parse(ausgabe), { calls: false, relay: false });
+  return JSON.parse(ausgabe);
+}
+
+/**
+ * Anrufe laufen zwischen den Browsern - dafuer muss auf dem Server nichts
+ * eingetragen sein. Im selben WLAN funktioniert das sogar voellig ohne
+ * Dienste. Angeboten wird die Moeglichkeit deshalb immer; was fehlt, sagt
+ * `discovery` und `relay`, damit die App einen ehrlichen Hinweis anzeigen
+ * kann, statt die Funktion stillschweigend zu verstecken.
+ */
+test('Ohne eingetragene Dienste bleiben Anrufe moeglich, aber ohne Adresssuche', { skip: phpVorhanden ? false : 'PHP nicht vorhanden' }, () => {
+  assert.deepEqual(phpSupport(), { calls: true, discovery: false, relay: false });
+  assert.deepEqual(callSupport({}), { calls: true, discovery: false, relay: false });
+});
+
+test('Ein eingetragener STUN-Dienst bringt die Adresssuche, aber kein Relais', { skip: phpVorhanden ? false : 'PHP nicht vorhanden' }, () => {
+  const erwartet = { calls: true, discovery: true, relay: false };
+  assert.deepEqual(phpSupport('$config->stunUrls = ["stun:beispiel:3478"];'), erwartet);
+  assert.deepEqual(callSupport({ stunUrls: ['stun:beispiel:3478'] }), erwartet);
+});
+
+test('Erst ein Relaisdienst mit Geheimnis zaehlt als Relais - in beiden Backends', { skip: phpVorhanden ? false : 'PHP nicht vorhanden' }, () => {
+  // Adresse ohne Geheimnis nuetzt nichts: ausstellen liesse sich damit nichts.
+  const halb = { calls: true, discovery: false, relay: false };
+  assert.deepEqual(phpSupport('$config->turnUrls = ["turn:beispiel:3478"];'), halb);
+  assert.deepEqual(callSupport({ turnUrls: ['turn:beispiel:3478'] }), halb);
+
+  const ganz = { calls: true, discovery: true, relay: true };
+  assert.deepEqual(
+    phpSupport('$config->turnUrls = ["turn:beispiel:3478"]; $config->turnSecret = "geheim";'),
+    ganz,
+  );
+  assert.deepEqual(callSupport({ turnUrls: ['turn:beispiel:3478'], turnSecret: 'geheim' }), ganz);
 });

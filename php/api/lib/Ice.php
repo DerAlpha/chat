@@ -15,8 +15,9 @@ declare(strict_types=1);
  *   Passwort     = base64(HMAC-SHA1(geheimnis, benutzername))
  *
  * Diese Zugangsdaten schützen den Dienst vor Fremdnutzung, nicht das
- * Gespräch: der Medienstrom ist zweifach verschlüsselt, bevor er dort
- * ankommt.
+ * Gespräch: der Medienstrom ist mit DTLS-SRTP verschlüsselt, bevor er dort
+ * ankommt - der Schlüssel dafür entsteht zwischen den beiden Geräten, und
+ * die Aushandlung darüber läuft verschlüsselt über diesen Server.
  */
 final class Ice
 {
@@ -49,16 +50,21 @@ final class Ice
     }
 
     /**
-     * Kann überhaupt angerufen werden? Ohne jeden Dienst finden sich zwei
-     * Geräte nur im selben Netz - das sollte man nicht als Anruf anbieten,
-     * ohne es dazuzusagen.
+     * Anrufe laufen zwischen den Geräten - dieser Server handelt nur aus. Im
+     * selben Netz klappt das ohne jede Einrichtung, deshalb wird die
+     * Möglichkeit immer angeboten. Was fehlt, sagt die App dazu; eine
+     * versteckte Funktion ist schlechter als eine mit ehrlichem Hinweis.
      *
-     * @return array{calls: bool, relay: bool}
+     * @return array{calls: bool, discovery: bool, relay: bool}
      */
     public static function support(Config $config): array
     {
         $hasStun = $config->stunUrls !== [];
         $hasTurn = $config->turnUrls !== [] && $config->turnSecret !== '';
-        return ['calls' => $hasStun || $hasTurn, 'relay' => $hasTurn];
+        return [
+            'calls' => true,
+            'discovery' => $hasStun || $hasTurn,
+            'relay' => $hasTurn,
+        ];
     }
 }

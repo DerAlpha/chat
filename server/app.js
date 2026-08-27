@@ -50,7 +50,9 @@ export function createApp(store, hub) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Permissions-Policy', 'geolocation=(), payment=(), interest-cohort=()');
+    // Kamera und Mikrofon ausdruecklich nur fuer die eigene Seite: Anrufe
+    // brauchen beides, eingebettete Fremdinhalte gibt es hier ohnehin nicht.
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), display-capture=(), geolocation=(), payment=(), interest-cohort=()');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     next();
@@ -71,8 +73,8 @@ export function createApp(store, hub) {
         maxBlobBytes: config.maxBlobBytes,
         maxCiphertextBytes: config.maxCiphertextBytes,
       },
-      // Ob Anrufe überhaupt angeboten werden, hängt daran, ob ein
-      // Aushandlungs- oder Relaisdienst eingetragen ist.
+      // Anrufe laufen zwischen den Browsern und werden immer angeboten;
+      // was an Diensten fehlt, sagt die App als Hinweis dazu.
       call: callSupport(config),
       // Ohne Giphy-Schlüssel bleibt die GIF-Suche unsichtbar statt kaputt.
       gifs: Boolean(config.giphyKey),
@@ -172,9 +174,6 @@ export function createApp(store, hub) {
     const { room } = authenticate(req, res, store);
     if (!room) return;
     const support = callSupport(config);
-    if (!support.calls) {
-      return res.status(503).json({ error: 'no_call_service', message: 'Fuer diese Installation sind keine Anrufdienste eingetragen.' });
-    }
     // Die Kennung landet im Benutzernamen und taucht im Protokoll des
     // Relaisdienstes auf - deshalb der Raum nur gekuerzt und gehasht.
     res.json({ ...iceServers(config, { label: room.id.slice(0, 8) }), ...support });

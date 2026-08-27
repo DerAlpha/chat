@@ -5,7 +5,7 @@
  * die (verschluesselten) Inhalte, und die gehoeren nicht in einen Cache.
  */
 
-const VERSION = 'v3';
+const VERSION = 'v5';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
@@ -22,7 +22,11 @@ const SHELL = [
   'css/app.css',
   'js/app.js',
   'js/base.js',
+  'js/call.js',
+  'js/call-worker.js',
   'js/crypto.js',
+  'js/emoji.js',
+  'js/framecrypto.js',
   'js/i18n.js',
   'js/media.js',
   'js/net.js',

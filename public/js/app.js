@@ -12,11 +12,12 @@ import {
   toBase64, fromBase64, randomId,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
+import { CallSession, mediaCryptoAvailable } from './call.js';
 import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
-import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, ApiError } from './net.js';
+import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
@@ -44,7 +45,9 @@ const app = {
   conn: null,
   limits: { maxBlobBytes: 12 * 1024 * 1024 },
   /** Was diese Installation anbietet - kommt von GET api/config. */
-  features: { gifs: false, call: { calls: false, relay: false } },
+  features: { gifs: false, call: { calls: false, discovery: false, relay: false } },
+  /** Der laufende Anruf, falls einer läuft. */
+  call: null,
   me: null,
   peer: null,
   messages: new Map(),
@@ -95,8 +98,9 @@ function boot() {
   void serverConfig().then((remote) => {
     app.features = {
       gifs: remote?.gifs === true,
-      call: remote?.call ?? { calls: false, relay: false },
+      call: remote?.call ?? { calls: false, discovery: false, relay: false },
     };
+    updateCallButtons();
   }).catch(() => {});
   route();
   window.addEventListener('hashchange', route);
@@ -315,6 +319,11 @@ async function connect() {
 }
 
 function teardownChat() {
+  // Erst auflegen, dann die Leitung kappen - sonst erfährt das Gegenüber nie,
+  // dass hier niemand mehr dran ist.
+  app.call?.dispose();
+  app.call = null;
+  closeCallScreen();
   app.conn?.close();
   app.conn = null;
   app.mediaObserver?.disconnect();
@@ -422,6 +431,7 @@ function handleFrame(frame) {
     case 'read': return onRead(frame);
     case 'typing': return onTyping(frame);
     case 'nick': return onNick(frame);
+    case 'sig': return onSignal(frame);
     case 'presence': return onPresence(frame);
     case 'history': return onHistory(frame);
     case 'burned': return onBurned();
@@ -672,7 +682,12 @@ function onPresence(frame) {
   if (!app.peer) app.peer = { id: frame.from, readSeq: 0 };
   app.peer.online = frame.online;
   app.peer.lastSeen = frame.lastSeen;
-  if (!frame.online) app.peer.typing = false;
+  if (!frame.online) {
+    app.peer.typing = false;
+    // Wer weg ist, kann nicht mehr reden. Lieber ehrlich beenden, als eine
+    // tote Leitung offen stehen lassen.
+    if (app.call?.busy) app.call.finish('remote_hangup');
+  }
   if (currentScreen() === 'invite' && frame.online) {
     setInviteWaiting(true);
     if (!app.inviteFromChat) {
@@ -693,6 +708,7 @@ function showChatScreen() {
   // Am Rechner steht die Liste daneben und soll den offenen Chat hervorheben.
   renderChatList();
   showScreen('chat');
+  updateCallButtons();
   updatePeerStatus();
   redrawAll();
   scrollToBottom(true);
@@ -1244,6 +1260,347 @@ function sendNick(nick) {
   encryptJson(app.key, { n: nick })
     .then((ct) => app.conn?.send({ t: 'nick', ct }))
     .catch(() => {});
+}
+
+// ===========================================================================
+// Anrufe
+// ===========================================================================
+
+/**
+ * Ein- und ausgehende Signale werden je in einer Reihe abgearbeitet.
+ * Verschlüsseln ist asynchron, und ohne Reihe könnte ein Adresskandidat vor
+ * dem Angebot ankommen, zu dem er gehört.
+ */
+let signalOut = Promise.resolve();
+let signalIn = Promise.resolve();
+let callTicker = null;
+let ringTone = null;
+let lastRemoteStream = null;
+let lastLocalStream = null;
+/** Klingelt es gerade? Nur der Wechsel löst eine Benachrichtigung aus. */
+let ringing = false;
+
+/** Verschickt ein Aushandlungspaket - verschlüsselt wie jede Nachricht. */
+function sendSignal(payload) {
+  // Schlüssel und Verbindung jetzt festhalten, nicht erst gleich: bis das
+  // Paket verschlüsselt ist, kann längst ein anderer Chat offen sein - und
+  // dann ginge es mit dem falschen Schlüssel an den falschen Raum.
+  const key = app.key;
+  const conn = app.conn;
+  if (!key || !conn) return;
+  signalOut = signalOut
+    .then(async () => {
+      conn.send({ t: 'sig', ct: await encryptJson(key, payload) });
+    })
+    .catch(() => {});
+}
+
+/** Ein Aushandlungspaket vom Gegenüber. */
+function onSignal(frame) {
+  // Beim Abholen per HTTP kommen eigene Frames zurück - die sind hier nichts wert.
+  if (frame.from === app.me?.id) return;
+  signalIn = signalIn
+    .then(async () => {
+      const payload = await safeDecrypt(frame.ct);
+      // In der Zwischenzeit kann der Chat verlassen worden sein.
+      if (!payload || !app.session || !app.key) return;
+      // Erst beim ersten echten Signal eine Sitzung anlegen: sonst fragt jeder
+      // Seitenaufruf nach Mikrofonrechten, bevor überhaupt jemand anruft.
+      await ensureCall().receive(payload);
+    })
+    .catch(() => {});
+}
+
+function ensureCall() {
+  if (app.call) return app.call;
+  const roomId = app.session.roomId;
+  app.call = new CallSession({
+    send: sendSignal,
+    ice: async () => {
+      const body = await iceConfig(roomId, app.session.token);
+      return { iceServers: body?.iceServers ?? [] };
+    },
+    onChange: renderCall,
+    // Die Raum-ID hängt am Code, den nur diese beiden kennen. Damit lassen
+    // sich Prüfzeichen nicht aus einem anderen Gespräch herüberkopieren.
+    salt: roomId,
+    // Grundlage für die zweite Schicht über Ton und Bild. Der Schlüssel
+    // steckt im Code und war nie auf dem Server.
+    roomKey: fromBase64(app.session.key),
+    relayOnly: relayOnlyWanted(),
+  });
+  return app.call;
+}
+
+const relayOnlyWanted = () => app.prefs.hideIp === true && app.features.call?.relay === true;
+
+/** Ruft an. @param {'audio'|'video'} kind */
+async function startCall(kind) {
+  if (!app.session || !app.conn) return;
+  if (app.call?.busy) {
+    toast(t('callBusyHere'));
+    return;
+  }
+  if (!app.peer?.online) {
+    toast(t('callNeedsPeer'));
+    return;
+  }
+  const call = ensureCall();
+  call.relayOnly = relayOnlyWanted();
+  try {
+    await call.invite(kind);
+  } catch {
+    // Warum es nicht ging, sagt renderCall über den Endgrund.
+  }
+}
+
+/** Zeigt oder verbirgt die beiden Knöpfe in der Kopfzeile. */
+function updateCallButtons() {
+  const audio = el('btn-call-audio');
+  const video = el('btn-call-video');
+  if (!audio || !video) return;
+  const offer = app.features.call?.calls === true && currentScreen() === 'chat';
+  audio.hidden = !offer;
+  video.hidden = !offer;
+}
+
+// ------------------------------------------------------------- Darstellung
+
+/**
+ * Warum der Anruf zu Ende ist, in einem Satz.
+ *
+ * Bewusst ein `switch` statt einer Tabelle mit Schluesselnamen: so sieht der
+ * Pruefer der Uebersetzungen jeden Schluessel im Quelltext stehen und merkt
+ * es, wenn einer fehlt.
+ */
+function callEndLabel(reason) {
+  switch (reason) {
+    case 'hangup':
+    case 'remote_hangup': return t('callEndedHangup');
+    case 'declined': return t('callEndedDeclined');
+    case 'no_answer': return t('callEndedNoAnswer');
+    case 'busy': return t('callEndedBusy');
+    case 'failed': return t('callEndedFailed');
+    case 'no_device': return t('callEndedNoDevice');
+    case 'no_permission': return t('callEndedNoPermission');
+    default: return '';
+  }
+}
+
+function renderCall(state) {
+  const overlay = el('call');
+  if (!overlay) return;
+
+  if (state.state === 'idle' || state.state === 'ended') {
+    if (state.state === 'ended' && state.endReason) {
+      const label = callEndLabel(state.endReason);
+      if (label) toast(label);
+    }
+    closeCallScreen();
+    return;
+  }
+
+  overlay.hidden = false;
+  document.body.classList.add('is-calling');
+  overlay.dataset.state = state.state;
+  overlay.dataset.kind = state.kind;
+
+  el('call-name').textContent = peerName();
+  el('call-avatar').textContent = initial(peerName());
+  el('call-state').textContent = callStateLabel(state);
+
+  bindStream(el('call-remote'), state.remoteStream, 'remote');
+  bindStream(el('call-local'), state.localStream, 'local');
+  const showLocal = Boolean(state.localStream?.getVideoTracks().length) && !state.cameraOff;
+  el('call-local').hidden = !showLocal;
+  // Solange kein fremdes Bild da ist, steht der Name gross in der Mitte. Das
+  // Videofeld bleibt trotzdem stehen: dort läuft der Ton, und ein Element mit
+  // display:none ist der falsche Ort dafür. Ohne Bild ist es schlicht schwarz.
+  const remoteVideo = Boolean(state.remoteStream?.getVideoTracks().length);
+  el('call-person').hidden = remoteVideo && state.state === 'active';
+
+  const incoming = state.state === 'ringing';
+  if (incoming !== ringing) {
+    ringing = incoming;
+    notifyCall(state);
+  }
+  el('call-incoming').hidden = !incoming;
+  el('call-actions').hidden = incoming;
+
+  const muteButton = el('call-mute');
+  muteButton.classList.toggle('is-off', state.muted);
+  muteButton.querySelector('use').setAttribute('href', state.muted ? '#i-mic-off' : '#i-mic');
+  muteButton.querySelector('span').textContent = state.muted ? t('callUnmute') : t('callMute');
+
+  const hasCamera = Boolean(state.localStream?.getVideoTracks().length);
+  const cameraButton = el('call-camera');
+  cameraButton.classList.toggle('is-off', hasCamera && state.cameraOff);
+  cameraButton.querySelector('use').setAttribute('href', hasCamera && !state.cameraOff ? '#i-video' : '#i-video-off');
+  cameraButton.querySelector('span').textContent = hasCamera && !state.cameraOff ? t('callCameraOff') : t('callCamera');
+  el('call-flip').hidden = !hasCamera || state.cameraOff;
+
+  const safety = el('call-safety');
+  safety.hidden = !state.safety;
+  safety.classList.toggle('is-double', state.doubleEncrypted === true);
+  el('call-safety-code').textContent = state.safety;
+
+  el('call-timer').hidden = state.state !== 'active';
+  updateCallTimer(state.startedAt);
+  if (state.state === 'active' && !callTicker) {
+    callTicker = setInterval(() => updateCallTimer(app.call?.startedAt ?? 0), 1000);
+  }
+
+  const hint = el('call-hint');
+  const text = callHint(state);
+  hint.textContent = text;
+  hint.hidden = !text;
+
+  if (incoming) startRingTone();
+  else stopRingTone();
+}
+
+/**
+ * Ein Anruf, der nur im Vordergrund klingelt, ist ein verpasster Anruf.
+ * Deshalb geht dieselbe Benachrichtigung heraus wie bei einer Nachricht -
+ * mit einem Hinweis, worum es geht, aber ohne Inhalt.
+ */
+let callNotification = null;
+
+function notifyCall(state) {
+  closeCallNotification();
+  if (state.state !== 'ringing') return;
+  announce(`${peerName()}: ${callStateLabel(state)}`);
+  if (!app.prefs.notifications || typeof Notification === 'undefined') return;
+  if (Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
+  try {
+    callNotification = new Notification(peerName(), {
+      body: callStateLabel(state),
+      icon: appUrl('img/icon-192.png'),
+      badge: appUrl('img/badge.png'),
+      tag: `anruf:${app.session?.roomId ?? ''}`,
+      requireInteraction: true,
+    });
+    callNotification.onclick = () => {
+      window.focus();
+      closeCallNotification();
+    };
+  } catch { /* Benachrichtigungen sind Beiwerk */ }
+}
+
+function closeCallNotification() {
+  try { callNotification?.close(); } catch { /* schon zu */ }
+  callNotification = null;
+}
+
+function callStateLabel(state) {
+  switch (state.state) {
+    case 'calling': return t('callRinging');
+    case 'ringing': return state.kind === 'video' ? t('callIncomingVideo') : t('callIncoming');
+    case 'connecting': return t('callConnecting');
+    case 'active': return t('callActive');
+    default: return '';
+  }
+}
+
+/**
+ * Ein ehrlicher Hinweis, wenn etwas fehlt oder anders läuft als gedacht -
+ * lieber das als eine Funktion, die stillschweigend nicht klappt.
+ */
+function callHint(state) {
+  if (state.state === 'active') {
+    if (state.relayed === true) return t('callRouteRelay');
+    if (state.relayed === false) return t('callRouteDirect');
+    return '';
+  }
+  if (app.features.call?.relay === false && state.state !== 'ringing') return t('callNoRelayHint');
+  return '';
+}
+
+/** Setzt einen Strom nur dann neu, wenn er sich wirklich geändert hat. */
+function bindStream(video, stream, slot) {
+  const last = slot === 'remote' ? lastRemoteStream : lastLocalStream;
+  if (last === stream) return;
+  if (slot === 'remote') lastRemoteStream = stream;
+  else lastLocalStream = stream;
+  video.srcObject = stream ?? null;
+  if (stream) video.play?.().catch(() => {});
+}
+
+function updateCallTimer(startedAt) {
+  const node = el('call-timer');
+  if (!node || !startedAt) return;
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  node.textContent = `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function closeCallScreen() {
+  ringing = false;
+  closeCallNotification();
+  const overlay = el('call');
+  if (overlay) {
+    overlay.hidden = true;
+    delete overlay.dataset.state;
+  }
+  document.body.classList.remove('is-calling');
+  stopRingTone();
+  clearInterval(callTicker);
+  callTicker = null;
+  bindStream(el('call-remote'), null, 'remote');
+  bindStream(el('call-local'), null, 'local');
+}
+
+/** Es klingelt: alle zwei Sekunden ein Ton und ein kurzes Rütteln. */
+function startRingTone() {
+  if (ringTone) return;
+  const beat = () => {
+    if (app.prefs.sound) playPing();
+    if (navigator.vibrate) navigator.vibrate([120, 100, 120]);
+  };
+  beat();
+  ringTone = setInterval(beat, 2000);
+}
+
+function stopRingTone() {
+  if (!ringTone) return;
+  clearInterval(ringTone);
+  ringTone = null;
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+
+/**
+ * Der Kamera-Knopf macht zweierlei: läuft schon Bild, schaltet er es ab und
+ * wieder an. Bei einem Sprachanruf schaltet er die Kamera überhaupt erst zu -
+ * dafür wird im Hintergrund neu ausgehandelt.
+ */
+async function switchCamera() {
+  const call = app.call;
+  if (!call) return;
+  if (call.localStream?.getVideoTracks().length) {
+    call.toggleCamera();
+    return;
+  }
+  try {
+    await call.addCamera();
+  } catch {
+    toast(t('callEndedNoPermission'));
+  }
+}
+
+/** Erklärt die Prüfzeichen - der Handgriff, der auch ohne Vertrauen trägt. */
+function showSafetySheet() {
+  const code = app.call?.safety ?? '';
+  // Ehrlich sagen, wie viele Schichten wirklich laufen - nicht behaupten,
+  // was der Browser gerade nicht kann.
+  const layers = app.call?.doubleEncrypted
+    ? t('callLayersDouble')
+    : (mediaCryptoAvailable() ? t('callLayersPeer') : t('callLayersBrowser'));
+  openSheet(t('callSafetyTitle'), [
+    make('p', 'sheet-note', t('callSafetyYours')),
+    make('p', 'call-safety__big', code),
+    make('p', 'sheet-note', t('callSafetyText')),
+    make('p', 'sheet-note', layers),
+  ]);
 }
 
 function markRead() {
@@ -1804,12 +2161,25 @@ function openChatMenu() {
       value: app.prefs.sound ? t('switchOn') : t('switchOff'),
       onClick: toggleSound,
     },
+    ...(app.features.call?.relay === true ? [{
+      icon: 'i-shield',
+      label: t('callHideIp'),
+      hint: t('callHideIpHint'),
+      value: app.prefs.hideIp ? t('switchOn') : t('switchOff'),
+      onClick: toggleHideIp,
+    }] : []),
     { icon: 'i-sun', label: t('theme'), value: themeLabel(), onClick: cycleTheme },
     { icon: 'i-globe', label: t('language'), value: getLanguage().toUpperCase(), onClick: cycleLanguage },
     { icon: 'i-info', label: t('about'), onClick: showAbout },
     { icon: 'i-close', label: t('leaveChat'), onClick: leaveChat },
     { icon: 'i-trash', label: t('burnChat'), danger: true, onClick: burnCurrentChat },
   ]);
+}
+
+function toggleHideIp() {
+  app.prefs = setPrefs({ hideIp: !app.prefs.hideIp });
+  if (app.call) app.call.relayOnly = relayOnlyWanted();
+  toast(app.prefs.hideIp ? t('callHideIp') + ': ' + t('switchOn') : t('callHideIp') + ': ' + t('switchOff'));
 }
 
 async function changeNick() {
@@ -1921,6 +2291,7 @@ function refreshDynamicLabels() {
   if (langLabel) langLabel.textContent = getLanguage().toUpperCase();
   applyTheme(app.prefs.theme);
   if (currentScreen() === 'chat') {
+    updateCallButtons();
     updatePeerStatus();
     redrawAll();
   }
@@ -2142,6 +2513,17 @@ function wireStaticHandlers() {
   // --- Chat ---
   el('chat-back').addEventListener('click', showStart);
   el('chat-menu').addEventListener('click', openChatMenu);
+  el('btn-call-audio').addEventListener('click', () => void startCall('audio'));
+  el('btn-call-video').addEventListener('click', () => void startCall('video'));
+
+  // --- Anruf ---
+  el('call-accept').addEventListener('click', () => void app.call?.accept().catch(() => {}));
+  el('call-decline').addEventListener('click', () => app.call?.hangUp('declined'));
+  el('call-hangup').addEventListener('click', () => app.call?.hangUp('hangup'));
+  el('call-mute').addEventListener('click', () => app.call?.toggleMute());
+  el('call-camera').addEventListener('click', () => void switchCamera());
+  el('call-flip').addEventListener('click', () => void app.call?.flipCamera());
+  el('call-safety').addEventListener('click', showSafetySheet);
   el('jump-down').addEventListener('click', () => {
     scrollToBottom();
     markRead();

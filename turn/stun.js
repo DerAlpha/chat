@@ -289,7 +289,7 @@ export class MessageBuilder {
    * MD5(benutzer:bereich:passwort) - so schreibt es RFC 5389 vor, auch wenn
    * MD5 heute niemand mehr freiwillig wählen würde. Geschützt wird damit die
    * Zuordnung zum Konto, nicht der Inhalt: der Medienstrom darüber ist
-   * ohnehin schon zweifach verschlüsselt.
+   * ohnehin schon mit DTLS-SRTP verschlüsselt.
    */
   sign(key) {
     // 20 Byte HMAC plus 4 Byte Attributkopf.

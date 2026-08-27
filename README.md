@@ -32,6 +32,21 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Beliebige Dateien
 - Antworten mit Zitat, Reaktionen, Nachrichten bearbeiten und für beide Seiten löschen
 
+**Sprechen statt tippen**
+- Sprach- und Videoanrufe zwischen den beiden Geräten, direkt im Browser
+- Die Aushandlung ist genauso verschlüsselt wie eine Nachricht – der Server
+  reicht sie durch, ohne sie lesen zu können
+- Vier Prüfzeichen aus den Zertifikaten beider Seiten: stimmen sie überein,
+  sitzt niemand dazwischen
+- Der Medienstrom selbst läuft über DTLS-SRTP, direkt von Gerät zu Gerät –
+  und darüber liegt, wo der Browser es hergibt, noch eine zweite Schicht:
+  jedes Bild und jedes Tonpaket wird zusätzlich mit dem Schlüssel aus eurem
+  Code verschlüsselt
+- Stumm schalten, Kamera aus, vorne/hinten wechseln, mitten im Sprachanruf
+  die Kamera zuschalten
+- Auf Wunsch alles über den eigenen Relaisdienst – dann sieht das Gegenüber
+  die eigene IP-Adresse nicht
+
 **Drumherum**
 - Tippanzeige, Online-Status, „zuletzt gesehen", Lesebestätigung
 - Verlauf bleibt erhalten – auch nach Neuladen, Verbindungsabbruch oder Serverneustart
@@ -268,6 +283,9 @@ public/
   js/session.js Was das Gerät sich merkt
   js/i18n.js    Deutsch und Englisch
   js/emoji.js   Mitgelieferter Emoji-Katalog samt Suche
+  js/call.js    Anrufe: Aushandlung, Prüfzeichen, Mikrofon und Kamera
+  js/framecrypto.js Die zweite Schicht über Ton und Bild
+  js/call-worker.js Eigener Faden, in dem sie angewendet wird
   js/ui.js      Screens, Sheets, Toasts, Zeitangaben
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
@@ -285,8 +303,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 154 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs)
-npm run test:e2e          # 36 Tests am Smartphone + 12 am Rechner
+npm test                  # 200 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe)
+npm run test:e2e          # 48 Tests am Smartphone + 12 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -308,8 +326,14 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   und das Chat-Layout hält auch, wenn das Verbindungsbanner verschwindet.
 - Schnell hintereinander abgeschickte Nachrichten behalten ihre Reihenfolge, schon
   bevor die erste Quittung da ist.
+- Zwei echte Browser bauen einen echten Anruf auf: der eine ruft an, der andere
+  nimmt ab, und danach zählt der Test die tatsächlich angezeigten Bilder. Nicht
+  `videoWidth` – die Bildgrösse steht im Klartext-Kopf eines Schlüsselbilds und
+  kommt auch dann an, wenn kein einziges Bild entschlüsselt werden konnte.
+- Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
+  Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 26 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 60 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
   `mod_php` und der mitgelieferten `.htaccess` durchgetestet. Dabei fiel auf,

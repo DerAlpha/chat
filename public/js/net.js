@@ -94,6 +94,15 @@ export async function downloadBlob(roomId, token, blobId) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+/**
+ * Dienste für die Adresssuche eines Anrufs. Die Zugangsdaten sind kurzlebig
+ * und gelten nur für diesen Raum - deshalb wird bei jedem Anruf neu gefragt.
+ */
+export const iceConfig = (roomId, token) =>
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}/ice`), {
+    headers: { 'x-room-token': token },
+  });
+
 export const burnRoom = (roomId, token) =>
   request(appPath(`api/rooms/${encodeURIComponent(roomId)}`), {
     method: 'DELETE',

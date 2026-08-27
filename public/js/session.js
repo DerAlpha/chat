@@ -14,6 +14,8 @@ const DEFAULT_PREFS = {
   notifications: false,
   /** Zuletzt als Reaktion benutzte Emoji, neuestes zuerst. */
   recentEmoji: [],
+  /** Anrufe nur über den Relaisdienst leiten - verbirgt die eigene Adresse. */
+  hideIp: false,
 };
 
 function readJson(key, fallback) {

@@ -133,8 +133,8 @@ final class App
                 'maxBlobBytes' => $this->config->maxBlobBytes,
                 'maxCiphertextBytes' => $this->config->maxCiphertextBytes,
             ],
-            // Ob Anrufe angeboten werden, hängt daran, ob ein Aushandlungs-
-            // oder Relaisdienst eingetragen ist.
+            // Anrufe laufen zwischen den Browsern und werden immer angeboten;
+            // was an Diensten fehlt, sagt die App als Hinweis dazu.
             'call' => Ice::support($this->config),
             // Ohne Giphy-Schlüssel bleibt die GIF-Suche unsichtbar statt kaputt.
             'gifs' => $this->config->giphyKey !== '',
@@ -188,9 +188,6 @@ final class App
     {
         [$room] = $this->authenticate($roomId);
         $support = Ice::support($this->config);
-        if (!$support['calls']) {
-            Http::fail(503, 'no_call_service', 'Fuer diese Installation sind keine Anrufdienste eingetragen.');
-        }
         // Die Kennung landet im Benutzernamen und taucht im Protokoll des
         // Relaisdienstes auf - deshalb der Raum nur gekürzt.
         Http::json(Ice::servers($this->config, substr((string) ($room['id'] ?? $roomId), 0, 8)) + $support);
@@ -313,6 +310,10 @@ final class App
         foreach ($incoming as $frame) {
             $cost += match ((string) ($frame['t'] ?? '')) {
                 'typing', 'read' => 0.1,
+                // Anruf-Aushandlung kommt in Schwällen: zwei Dutzend kleine
+                // Pakete in wenigen Sekunden. Die dürfen das Kontingent für
+                // echte Nachrichten nicht auffressen.
+                'sig' => 0.2,
                 'history' => 0.5,
                 default => 1.0,
             };

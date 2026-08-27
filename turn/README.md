@@ -17,10 +17,11 @@ er sieht, wer wann mit wem telefoniert. Deshalb dieser hier.
 ## Was er zu sehen bekommt
 
 Verschlüsselte Pakete und die IP-Adressen beider Seiten. **Nicht** den Ton
-oder das Bild: der Medienstrom ist zweifach verschlüsselt, bevor er hier
-ankommt – einmal von WebRTC selbst (DTLS-SRTP) und darunter noch einmal mit
-dem Schlüssel des Chats. Der Dienst reicht Bytes weiter, die er nicht lesen
-kann.
+oder das Bild: der Medienstrom ist mit DTLS-SRTP verschlüsselt, bevor er hier
+ankommt. Den Schlüssel dafür handeln die beiden Geräte unter sich aus – und
+zwar über einen Kanal, den auch der Webserver nicht mitlesen kann, weil die
+Aushandlung mit dem Schlüssel des Chats verschlüsselt ist. Der Dienst reicht
+Bytes weiter, die er nicht lesen kann.
 
 ## Wo er läuft – und wo nicht
 
