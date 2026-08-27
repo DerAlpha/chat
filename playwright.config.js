@@ -43,12 +43,30 @@ function phpWebServer() {
   fs.cpSync('php/api', path.join(docRoot, 'api'), { recursive: true });
   fs.writeFileSync(
     path.join(docRoot, 'api', 'lib', 'config.local.php'),
-    `<?php return ['dataDir' => '${dataDir}', 'pollWaitSeconds' => 15, 'welcomeHistory' => 5];\n`,
+    `<?php return [
+      'dataDir' => '${dataDir}',
+      'pollWaitSeconds' => 15,
+      'welcomeHistory' => 5,
+      // Dieselben gelockerten Grenzen wie beim Node-Server. Ohne sie greift
+      // ab dem 61. Raum das Limit, und alles Weitere scheitert - aber erst
+      // im letzten Drittel der Suite, was wie ein ganz anderer Fehler aussieht.
+      'createRoomPerHour' => 2000,
+      'joinAttemptsPerHour' => 5000,
+      'uploadsPerHour' => 2000,
+      'overviewPerHour' => 20000,
+    ];\n`,
   );
   return {
     command: `php -S 127.0.0.1:${PORT} -t ${docRoot} php/router.php`,
     // Ohne Arbeitsprozesse blockiert eine wartende Abfrage den ganzen Server.
-    env: { PHP_CLI_SERVER_WORKERS: '24' },
+    //
+    // Reichlich bemessen, und zwar absichtlich: jede offene Seite haelt beim
+    // Abholen per HTTP dauerhaft eine wartende Anfrage, und eine geschlossene
+    // Seite gibt ihren Arbeiter erst nach Ablauf der Wartezeit wieder frei.
+    // Ueber eine ganze Suite mit Dutzenden Browser-Kontexten summiert sich
+    // das. Das ist eine Eigenheit des eingebauten PHP-Servers, nicht der App:
+    // unter Apache mit mod_php stehen viel mehr Prozesse bereit.
+    env: { PHP_CLI_SERVER_WORKERS: '64' },
     url: `${baseURL}api/healthz`,
     reuseExistingServer: false,
     timeout: 20_000,

@@ -35,6 +35,34 @@ final class Presence
         return time() - $this->lastSeen($memberId) <= $this->timeout;
     }
 
+    private function typingPath(string $memberId): string
+    {
+        return $this->roomDir . '/typing-' . $memberId;
+    }
+
+    /**
+     * Hält fest, dass jemand gerade schreibt.
+     *
+     * Die Übersicht auf der Startseite hat keine Verbindung zu diesem Raum
+     * und kann das Tippen sonst nirgends ablesen - im Ereignisstrom steht es
+     * zwar, aber den holt nur ab, wer den Chat offen hat.
+     */
+    public function setTyping(string $memberId, bool $on): void
+    {
+        if ($on) {
+            @file_put_contents($this->typingPath($memberId), (string) time(), LOCK_EX);
+            return;
+        }
+        @unlink($this->typingPath($memberId));
+    }
+
+    /** Wer aufhört, meldet es selbst; wer verschwindet, gilt kurz darauf als still. */
+    public function isTyping(string $memberId, int $ttl = 5): bool
+    {
+        $raw = @file_get_contents($this->typingPath($memberId));
+        return $raw !== false && time() - (int) trim($raw) <= $ttl;
+    }
+
     /**
      * @param array<string, array<string,mixed>> $members
      * @return list<array<string,mixed>>

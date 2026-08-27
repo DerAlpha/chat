@@ -11,6 +11,10 @@ const TOKEN_PREFIX = 't.';
 // Beim Aushandeln eines Anrufs kommen die Kandidaten in Schwällen - zwei
 // Dutzend kleine Pakete in wenigen Sekunden. Die dürfen das Kontingent für
 // echte Nachrichten nicht auffressen; gross werden können sie ohnehin nicht.
+/** So lange gilt ein "tippt" als aktuell. Wer aufhoert, meldet es selbst;
+    wer die Verbindung verliert, soll nicht ewig als tippend gelten. */
+const TYPING_TTL_MS = 5000;
+
 const FRAME_COST = { ping: 0, typing: 0.1, read: 0.1, sig: 0.2, history: 0.5 };
 const MAX_HISTORY_PAGE = 300;
 
@@ -235,6 +239,10 @@ export class Hub {
 
       case 'typing': {
         const on = frame.on === true;
+        // Merken, nicht nur weiterreichen: die Uebersicht auf der Startseite
+        // hat keine Verbindung zu diesem Raum und kann das Tippen sonst
+        // nirgends ablesen.
+        member.typingUntil = on ? this.store.now() + TYPING_TTL_MS : 0;
         return this.broadcast(room.id, { t: 'typing', from: member.id, on }, ws);
       }
 

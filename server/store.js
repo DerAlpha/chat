@@ -4,6 +4,9 @@ import path from 'node:path';
 import { config } from './config.js';
 import { log } from './logger.js';
 
+/** Mehr als das zeigt der Punkt in der Uebersicht ohnehin nicht an. */
+const UNREAD_CAP = 99;
+
 /** Raum-IDs sind base64url(SHA-256(code)).slice(0, 22) - der Server sieht den Code nie. */
 export const ROOM_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 export const BLOB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
@@ -304,6 +307,50 @@ export class Store {
     room.touch(this.now());
     this.markDirty();
     return { member, returning: false };
+  }
+
+  /**
+   * Kurzfassung eines Raums fuer die Uebersicht auf der Startseite.
+   *
+   * Die App haelt genau eine Verbindung - zu dem Raum, der offen ist. Ueber
+   * alle anderen weiss sie nichts: nicht, ob dort etwas angekommen ist, und
+   * nicht, ob jemand gerade schreibt. Statt fuer jeden Chat eine eigene
+   * Verbindung aufzumachen, fragt sie alle auf einmal ab - das ist eine
+   * Anfrage statt zwanzig und laeuft auch auf einem einfachen Webspace.
+   *
+   * @param {Room} room
+   * @param {{id: string}} member Wer fragt.
+   * @param {number} sinceSeq Bis hierher hat er gelesen.
+   */
+  summarise(room, member, sinceSeq = 0) {
+    const jetzt = this.now();
+    let unread = 0;
+    let lastMessageAt = 0;
+    // Von hinten: die juengsten Nachrichten sind die interessanten, und mehr
+    // als der Zaehler auf dem Punkt anzeigen kann, muss niemand zaehlen.
+    for (let i = room.messages.length - 1; i >= 0; i -= 1) {
+      const message = room.messages[i];
+      if (message.seq <= sinceSeq) break;
+      if (message.from === member.id) continue;
+      if (!lastMessageAt) lastMessageAt = message.ts;
+      unread += 1;
+      if (unread >= UNREAD_CAP) break;
+    }
+    // Wenn nichts Neues da ist, trotzdem sagen, wann zuletzt etwas kam -
+    // sonst steht in der Uebersicht weiter der eigene letzte Besuch.
+    if (!lastMessageAt) {
+      for (let i = room.messages.length - 1; i >= 0; i -= 1) {
+        if (room.messages[i].from === member.id) continue;
+        lastMessageAt = room.messages[i].ts;
+        break;
+      }
+    }
+    let typing = false;
+    for (const anderer of room.members.values()) {
+      if (anderer.id === member.id) continue;
+      if ((anderer.typingUntil ?? 0) > jetzt) { typing = true; break; }
+    }
+    return { unread, lastMessageAt, typing };
   }
 
   async deleteRoom(roomId, reason = 'manual') {

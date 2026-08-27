@@ -40,6 +40,9 @@ final class Store
         return $fresh;
     }
 
+    /** So viele Nachrichten stehen im Auszug fuer die Uebersicht. */
+    private const RECENT_KEEP = 120;
+
     public const ROOM_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
     public const BLOB_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
 
@@ -323,6 +326,49 @@ final class Store
             $messages = array_slice($messages, -$this->config->maxMessagesPerRoom);
         }
         $this->writeJson($this->roomDir($roomId) . '/messages.json', array_values($messages));
+        $this->saveRecent($roomId, $messages);
+    }
+
+    /**
+     * Ein winziger Auszug der letzten Nachrichten: nur Nummer, Absender und
+     * Zeit.
+     *
+     * Die Uebersicht auf der Startseite fragt alle Chats auf einmal ab. Wuerde
+     * sie dafuer jedes Mal die vollstaendige messages.json jedes Raums lesen,
+     * waere das auf einem einfachen Webspace die teuerste Anfrage der ganzen
+     * App - und die haeufigste. Hier stehen nur die Angaben, die der Punkt in
+     * der Liste braucht.
+     *
+     * @param list<array<string,mixed>> $messages
+     */
+    private function saveRecent(string $roomId, array $messages): void
+    {
+        $auszug = [];
+        foreach (array_slice($messages, -self::RECENT_KEEP) as $message) {
+            $auszug[] = [
+                (int) ($message['seq'] ?? 0),
+                (string) ($message['from'] ?? ''),
+                (int) ($message['ts'] ?? 0),
+            ];
+        }
+        $this->writeJson($this->roomDir($roomId) . '/recent.json', $auszug);
+    }
+
+    /**
+     * Der Auszug von oben. Fehlt er (alter Bestand), wird er einmalig aus der
+     * vollstaendigen Liste nachgezogen.
+     *
+     * @return list<array{0:int,1:string,2:int}>
+     */
+    public function loadRecent(string $roomId): array
+    {
+        $auszug = $this->readJson($this->roomDir($roomId) . '/recent.json', null);
+        if (!is_array($auszug)) {
+            $messages = $this->loadMessages($roomId);
+            $this->saveRecent($roomId, $messages);
+            $auszug = $this->readJson($this->roomDir($roomId) . '/recent.json', []);
+        }
+        return is_array($auszug) ? array_values($auszug) : [];
     }
 
     // ------------------------------------------------------------ Ereignisse

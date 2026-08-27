@@ -1,7 +1,8 @@
 # Flüsterchat
 
-Ein Chat für genau zwei Personen – **ohne Anmeldung, ohne Konto, ohne Telefonnummer**.
-Eine Person erzeugt einen Einmal-Code, gibt ihn weiter, und schon läuft die Unterhaltung.
+Ein Chat **ohne Anmeldung, ohne Konto, ohne Telefonnummer** – zu zweit oder in
+einer kleinen Gruppe. Eine Person erzeugt einen Einmal-Code (in einer Gruppe
+einen je Teilnehmer), gibt ihn weiter, und schon läuft die Unterhaltung.
 Fotos aus der Galerie, Kamerabilder, Sprachnachrichten und Dateien inklusive.
 Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 
@@ -57,6 +58,20 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Auf Wunsch alles über den eigenen Relaisdienst – dann sieht das Gegenüber
   die eigene IP-Adresse nicht
 
+**Gruppen**
+- Ein Code je Person, nicht einer für alle. Wer einen weitergibt, gibt genau
+  einen Platz weiter – nicht die Gruppe
+- Jeder Code gilt genau einmal; danach ist er verbraucht
+- Der Gruppenschlüssel ist gewürfelt und liegt auf jedem Platz einzeln
+  verpackt – mit einem Schlüssel, den nur dieser eine Code hergibt. Der
+  Server sieht Pakete, die er nicht öffnen kann
+- Im Paket steht, wozu der Schlüssel gehört. Nennt der Server einen anderen
+  Raum, bricht der Beitritt ab – das ist der einzige Schutz gegen einen
+  Server, der jemanden in einen fremden Raum lotst
+- Über fremden Blasen steht, von wem sie kommen; in der Kopfzeile, wie viele
+  gerade da sind
+- Anrufe bleiben in Gruppen vorerst aus (siehe *Was noch fehlt*)
+
 **Wie es klingt**
 - Neun Klänge, alle aus einer Fünftonleiter: was hintereinander erklingt,
   passt zusammen
@@ -82,7 +97,10 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 **Drumherum**
 - Tippanzeige, Online-Status, „zuletzt gesehen", Lesebestätigung
 - Verlauf bleibt erhalten – auch nach Neuladen, Verbindungsabbruch oder Serverneustart
-- Mehrere Chats parallel, mit Übersicht auf der Startseite
+- Mehrere Chats parallel, mit Übersicht auf der Startseite: ein Punkt mit der
+  Zahl ungelesener Nachrichten, die Zeit der letzten eingegangenen Nachricht,
+  und wenn dort gerade jemand schreibt, steht das auch da. Wo etwas ankommt,
+  rutscht nach oben
 - Zweites eigenes Gerät per Geräte-Link dazuschalten
 - Als App installierbar (PWA), offline lauffähige Oberfläche, Benachrichtigungen
 - Hell/Dunkel/Automatisch, Deutsch und Englisch
@@ -278,7 +296,8 @@ Ehrlichkeit gehört dazu. Der Server sieht:
 
 - die Raum-ID, Zeitstempel und Größen der Nachrichten,
 - wer wann verbunden ist, und wie viele Anhänge es gibt,
-- die beiden Zugangstoken, die er selbst vergeben hat,
+- die Zugangstoken, die er selbst vergeben hat,
+- wer gerade tippt (nicht was) – das braucht die Übersicht auf der Startseite,
 - die IP-Adressen der Verbindungen (wie bei jedem Webserver).
 
 Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
@@ -293,6 +312,13 @@ Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
   Gerät in der Hand hat, kommt an den Chat.
 - Der ausgelieferte Code stammt vom Server. Wer den Server kontrolliert, könnte
   theoretisch manipuliertes JavaScript ausliefern – das gilt für jede Web-Krypto.
+- In einer Gruppe kennt jedes Mitglied den Gruppenschlüssel. Wer einmal drin
+  ist, kann alles mitlesen, was danach geschrieben wird – auch nachdem er
+  gegangen ist. Es gibt keinen Rauswurf und keinen Schlüsselwechsel.
+- Anrufe gibt es in Gruppen deshalb (noch) nicht: der Schlüssel für Ton und
+  Bild hängt am Raumschlüssel, und der Aushandlungskanal geht an alle. Jedes
+  Mitglied könnte damit ein fremdes Zweiergespräch im selben Raum mithören.
+  Das braucht einen eigenen Schlüsseltausch je Anruf, bevor es einen Knopf gibt.
 
 ## Wie es aufgebaut ist
 
@@ -343,8 +369,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 289 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 64 Tests am Smartphone + 13 am Rechner
+npm test                  # 303 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
+npm run test:e2e          # 81 Tests am Smartphone + 13 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -379,8 +405,14 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 77 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 94 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
+- Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
+  den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
+- Bei Gruppen wird nicht nur geprüft, dass drei Leute miteinander reden
+  können, sondern auch, dass ein Code sich kein zweites Mal einlösen lässt –
+  und dass ein Server, der im Platzpaket einen anderen Raum nennt, abgewiesen
+  wird. Dafür verbiegt der Test die Antwort des Servers unterwegs.
 - Beim Ton wird nicht gezählt, was eingeplant wurde, sondern was am Ausgang
   ankommt: der Test hängt einen Messknoten vor den Lautsprecher. Kappt man
   eine einzige Verbindung im Klangweg, ist die App still – und genau dann
@@ -398,6 +430,20 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 Jeder dieser Regressionstests wurde gegen den fehlerhaften Stand gegengeprüft – sie
 werden rot, wenn man die zugehörige Korrektur zurücknimmt.
 
+## Was noch fehlt
+
+- **Anrufe in Gruppen.** Der Schlüssel für Ton und Bild wird aus dem
+  Raumschlüssel abgeleitet, und der Aushandlungskanal geht an alle im Raum.
+  In einer Gruppe könnte damit jedes Mitglied ein fremdes Zweiergespräch im
+  selben Raum mithören. Bis es dafür einen eigenen Schlüsseltausch je Anruf
+  gibt, sind die Anrufknöpfe in Gruppen ausgeblendet – kein halbgares Angebot.
+- **Zweites eigenes Gerät in einer Gruppe.** Der Geräte-Link trägt den Code,
+  und den gibt es in einer Gruppe nicht. Er bräuchte einen eigenen Weg.
+- **Jemanden aus einer Gruppe entfernen.** Alle teilen einen Schlüssel; wer
+  einmal drin war, kann alles Weitere mitlesen. Ein Rauswurf wäre nur mit
+  einem Schlüsselwechsel ehrlich.
+- **Sticker selbst erstellen und empfangene speichern.**
+
 ## Einstellungen
 
 Alle Werte sind optional – siehe `.env.example`. Die wichtigsten:
@@ -409,6 +455,7 @@ Alle Werte sind optional – siehe `.env.example`. Die wichtigsten:
 | `DATA_DIR` | `./data` | Momentaufnahme und verschlüsselte Anhänge |
 | `ROOM_IDLE_TTL_HOURS` | `168` | Stille Chats verschwinden nach einer Woche |
 | `UNCLAIMED_ROOM_TTL_HOURS` | `24` | Nie eingelöste Codes verfallen nach einem Tag |
+| `MAX_ROOM_CAPACITY` | `16` | Wie groß eine Gruppe höchstens werden darf |
 | `MAX_BLOB_BYTES` | `12582912` | Größe eines einzelnen Anhangs (12 MB) |
 | `MESSAGES_PER_MINUTE` | `240` | Nachrichten pro Mitglied und Minute |
 | `WELCOME_HISTORY` | `300` | Nachrichten beim Verbinden; ältere lädt der Client nach |

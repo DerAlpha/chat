@@ -148,17 +148,33 @@ test('Beim Senden und Empfangen klingt es', async ({ browser }) => {
 
   // Der Tonkanal wacht erst an einer echten Eingabe auf - genau wie im Leben.
   await seiteA.locator('#message-input').click();
-  const vorher = (await toene(seiteA)).length;
+  // Das Eintreffen des Gegenübers meldet sich selbst - aber erst, wenn die
+  // Anwesenheit ein paar Sekunden gehalten hat. Diesen Ton abwarten, sonst
+  // fällt er mitten in die Messung und der Test kann nicht mehr sagen,
+  // welcher Klang er war.
+  await seiteA.waitForTimeout(5000);
 
+  // Gezählt wird nicht, WIE VIELE Töne kommen, sondern WELCHE. Sonst würde
+  // dieser Test auch dann grün bleiben, wenn der Sendeton ersatzlos wegfällt
+  // und irgendein anderer Klang zufällig im selben Fenster liegt.
+  const vorher = (await toene(seiteA)).length;
   await sendText(seiteA, 'Hallo');
-  await expect.poll(() => toene(seiteA).then((t) => t.length), { timeout: 5000 }).toBeGreaterThan(vorher);
+  await expect
+    .poll(() => toene(seiteA).then((liste) => liste.slice(vorher)), { timeout: 5000 })
+    .toEqual([880, 1760]);
   // Und es kommt auch wirklich am Ausgang an, nicht nur im Terminkalender.
   await expect.poll(() => pegel(seiteA), { timeout: 5000 }).toBeGreaterThan(0);
 
-  // Und wenn etwas ankommt, klingt es ebenfalls.
+  // Und wenn etwas ankommt, klingt es ebenfalls - mit seinem eigenen Klang.
   const nachSenden = (await toene(seiteA)).length;
   await sendText(seiteB, 'Hallo zurück');
-  await expect.poll(() => toene(seiteA).then((t) => t.length), { timeout: 20_000 }).toBeGreaterThan(nachSenden);
+  await expect
+    .poll(() => toene(seiteA).then((liste) => liste.slice(nachSenden)), { timeout: 20_000 })
+    .toEqual([739.99, 1479.98, 880, 1760].map(Math.round));
+
+  // Achtung für später: "receive" hat eine Ruhezeit von 6 s. Ein zweiter
+  // Nachrichtenwechsel bliebe hier absichtlich stumm - das wäre kein Fehler
+  // in der App.
 
   // Alle Töne liegen im gedämpften Bereich - nichts Schrilles.
   const alle = await toene(seiteA);

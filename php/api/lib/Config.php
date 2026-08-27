@@ -46,6 +46,12 @@ final class Config
     // Rate-Limits pro IP
     public int $createRoomPerHour = 60;
     public int $joinAttemptsPerHour = 300;
+    /**
+     * Die Uebersicht fragt alle paar Sekunden nach - sie darf das
+     * Beitritts-Kontingent nicht aufbrauchen. Sonst kaeme jemand mit
+     * offener App irgendwann in keinen Chat mehr hinein.
+     */
+    public int $overviewPerHour = 5000;
     public int $uploadsPerHour = 400;
     public int $framesPerMinute = 240;
 

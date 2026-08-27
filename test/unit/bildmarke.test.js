@@ -197,6 +197,46 @@ test('Das Abzeichen fuellt seine Leinwand aus', () => {
   assert.ok(Math.abs(oben - unten) <= png.hoehe * 0.06, `oben ${oben} px, unten ${unten} px - das sitzt schief`);
 });
 
+/**
+ * Die Marke liegt zwangslaeufig zweimal im Baum: einmal als Datei fuer Reiter
+ * und App-Symbol, einmal als Sprite-Symbol in der Seite. Zusammenlegen geht
+ * nicht - in der App bringt die Platte das Stilblatt mit, in der Datei steckt
+ * sie drin. Also muss wenigstens die Zeichnung selbst gleich bleiben, sonst
+ * driften die beiden auseinander, und genau das ist schon passiert.
+ */
+test('Die Blase in der App ist dieselbe wie im App-Symbol', () => {
+  const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+  const symbol = html.split('<symbol id="i-logo"')[1]?.split('</symbol>')[0];
+  assert.ok(symbol, 'das Sprite-Symbol fehlt in der Seite');
+
+  // Der ganze Pfad, nicht nur seine Form: auch Fuellung und Deckkraft muessen
+  // uebereinstimmen, sonst ist es in der App eine Spur anders als im Reiter.
+  const pfad = (text) => text.match(/<path\b[^>]*\/>/)?.[0].replace(/\s+/g, ' ').trim();
+  assert.equal(pfad(symbol), pfad(quelle), 'die Sprechblase ist nicht mehr dieselbe');
+
+  // Und die Schrift darin auch nicht - Groesse, Schnitt, festgenagelte Breite.
+  for (const merkmal of ['font-size="118"', 'font-weight="700"', 'letter-spacing="-2"', 'textLength="276"']) {
+    assert.ok(symbol.includes(merkmal), `im Sprite fehlt ${merkmal}`);
+    assert.ok(quelle.includes(merkmal), `in der Datei fehlt ${merkmal}`);
+  }
+  assert.ok(symbol.includes('>psst...<'), 'im Sprite steht nicht "psst..."');
+});
+
+/**
+ * Die farbige Platte kommt in der App aus dem Stilblatt, im App-Symbol aus
+ * der Datei. Verwendet das Stilblatt die Farbe des Farbschemas, wandert die
+ * Marke mit - eine Marke tut das nicht.
+ */
+test('Die Platte unter der Marke hat dieselben Farben wie das App-Symbol', () => {
+  const css = fs.readFileSync(path.join(root, 'public', 'css', 'app.css'), 'utf8');
+  const regel = css.split('.logo--mark {')[1]?.split('}')[0] ?? '';
+  const farben = [...quelle.matchAll(/stop-color="(#[0-9a-fA-F]{6})"/g)].map((treffer) => treffer[1]);
+  assert.equal(farben.length, 2, 'der Verlauf in der Datei hat nicht zwei Farben');
+  for (const farbe of farben) {
+    assert.ok(regel.includes(farbe), `die Platte in der App kennt ${farbe} nicht`);
+  }
+});
+
 test('Jedes Symbol aus dem Manifest liegt auch wirklich da', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'public', 'manifest.webmanifest'), 'utf8'));
   assert.ok(manifest.icons.length > 0);

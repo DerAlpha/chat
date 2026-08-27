@@ -14,12 +14,15 @@ final class Frames
     /** @var list<array<string,mixed>> */
     private array $direct = [];
 
+    private Presence $presence;
+
     public function __construct(
         private Config $config,
         private Store $store,
         private string $roomId,
         private string $memberId,
     ) {
+        $this->presence = new Presence($this->store->roomDir($roomId), $this->config->presenceTimeout);
     }
 
     /**
@@ -246,6 +249,7 @@ final class Frames
     {
         $on = ($frame['on'] ?? false) === true;
         $memberId = $this->memberId;
+        $this->presence->setTyping($memberId, $on);
         $this->store->mutate($this->roomId, function (array $room) use ($on, $memberId): array {
             [$room] = $this->store->appendEvent($this->roomId, $room, [
                 't' => 'typing', 'from' => $memberId, 'on' => $on,

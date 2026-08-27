@@ -25,7 +25,7 @@ export function icon(name, className = 'icon') {
 // -------------------------------------------------------------------- Screens
 
 /** Bildschirme, von denen immer hoechstens einer im Hauptbereich steht. */
-const PANES = ['invite', 'join', 'chat', 'error'];
+const PANES = ['invite', 'group', 'join', 'chat', 'error'];
 
 /**
  * Ab hier ist Platz fuer zwei Spalten. Darunter bleibt es beim Handy-Ablauf:

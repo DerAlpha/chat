@@ -45,6 +45,11 @@ try {
 
 final class App
 {
+    /** Mehr Chats hat niemand offen, und eine Anfrage soll klein bleiben. */
+    private const MAX_OVERVIEW_ROOMS = 50;
+    /** Mehr als das zeigt der Punkt in der Uebersicht ohnehin nicht an. */
+    private const UNREAD_CAP = 99;
+
     private string $ip;
 
     public function __construct(
@@ -99,6 +104,9 @@ final class App
         }
         if (preg_match('#^/slots/([A-Za-z0-9_-]{22})/claim$#', $route, $m) && $method === 'POST') {
             $this->claimSlot($m[1]);
+        }
+        if ($route === '/overview' && $method === 'POST') {
+            $this->overview();
         }
         if ($route === '/gifs' && $method === 'GET') {
             $this->gifSearch();
@@ -369,6 +377,105 @@ final class App
             'capacity' => (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom),
             'you' => ['id' => $ergebnis['member']['id'], 'token' => $ergebnis['member']['token']],
         ]);
+    }
+
+    /**
+     * Kurzfassung mehrerer Räume auf einmal.
+     *
+     * Die App hält genau eine Verbindung - zu dem Chat, der offen ist. Was in
+     * den anderen passiert, erfährt sie nur hier: wie viel Ungelesenes liegt,
+     * wann zuletzt etwas kam und ob dort gerade jemand schreibt. Eine Anfrage
+     * statt zwanzig Verbindungen - das ist auf einem Webspace der Unterschied
+     * zwischen "läuft" und "läuft nicht".
+     *
+     * Gelesen werden dabei nur winzige Dateien: der Auszug aus recent.json
+     * und je ein Zeitstempel für Anwesenheit und Tippen.
+     */
+    private function overview(): never
+    {
+        $this->limit('overview', $this->config->overviewPerHour, 3600);
+        $body = Http::jsonBody(16 * 1024);
+        $wanted = is_array($body['rooms'] ?? null) ? array_slice($body['rooms'], 0, self::MAX_OVERVIEW_ROOMS) : [];
+
+        $out = [];
+        foreach ($wanted as $eintrag) {
+            if (!is_array($eintrag)) {
+                continue;
+            }
+            $roomId = (string) ($eintrag['roomId'] ?? '');
+            $token = (string) ($eintrag['token'] ?? '');
+            if (!preg_match(Store::ROOM_ID_RE, $roomId) || $token === '') {
+                continue;
+            }
+            $room = $this->store->loadRoom($roomId);
+            if ($room === null) {
+                // Weg ist weg - das darf die App wissen, damit sie nicht ewig fragt.
+                $out[] = ['roomId' => $roomId, 'gone' => true];
+                continue;
+            }
+            $memberId = null;
+            foreach ((array) ($room['members'] ?? []) as $id => $member) {
+                if (hash_equals((string) ($member['token'] ?? ''), $token)) {
+                    $memberId = (string) $id;
+                    break;
+                }
+            }
+            // Ohne gültiges Token gibt es keine Auskunft - und auch keinen
+            // Hinweis darauf, ob es den Raum überhaupt gibt.
+            if ($memberId === null) {
+                continue;
+            }
+            $seq = (int) ($eintrag['seq'] ?? 0);
+            $out[] = ['roomId' => $roomId] + $this->summarise($roomId, $room, $memberId, $seq);
+        }
+
+        Http::json(['rooms' => $out, 'now' => time() * 1000]);
+    }
+
+    /**
+     * @param array<string,mixed> $room
+     * @return array{unread:int, lastMessageAt:int, typing:bool}
+     */
+    private function summarise(string $roomId, array $room, string $memberId, int $seq): array
+    {
+        $auszug = $this->store->loadRecent($roomId);
+        $unread = 0;
+        $lastMessageAt = 0;
+        // Von hinten: die jüngsten Nachrichten sind die interessanten, und
+        // mehr als der Punkt anzeigen kann, muss niemand zählen.
+        for ($i = count($auszug) - 1; $i >= 0; $i--) {
+            $eintrag = $auszug[$i];
+            $mseq = (int) ($eintrag[0] ?? 0);
+            $von = (string) ($eintrag[1] ?? '');
+            $ts = (int) ($eintrag[2] ?? 0);
+            if ($von === $memberId) {
+                continue;
+            }
+            if ($lastMessageAt === 0) {
+                $lastMessageAt = $ts;
+            }
+            if ($mseq <= $seq) {
+                break;
+            }
+            $unread++;
+            if ($unread >= self::UNREAD_CAP) {
+                break;
+            }
+        }
+
+        $presence = new Presence($this->store->roomDir($roomId), $this->config->presenceTimeout);
+        $typing = false;
+        foreach (array_keys((array) ($room['members'] ?? [])) as $id) {
+            if ((string) $id === $memberId) {
+                continue;
+            }
+            if ($presence->isTyping((string) $id)) {
+                $typing = true;
+                break;
+            }
+        }
+
+        return ['unread' => $unread, 'lastMessageAt' => $lastMessageAt, 'typing' => $typing];
     }
 
     private function roomStatus(string $roomId): never

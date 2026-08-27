@@ -14,9 +14,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Flüsterchat">
-<!-- Die Symbole liegen in img/ und nicht in img/: viele Apache-Installationen
-     bringen von Haus aus ein "Alias /img/" auf ihr eigenes Symbolverzeichnis mit
-     und würden unseren Ordner damit verdecken. -->
+<!-- Die Symbole liegen in img/ und nicht in icons/: viele Apache-Installationen
+     bringen von Haus aus ein "Alias /icons/" auf ihr eigenes Symbolverzeichnis
+     mit und würden unseren Ordner damit verdecken. -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="img/icon.svg" type="image/svg+xml">
 <!-- Fuer Browser ohne SVG-Favicon. Ohne diese Zeile fragen sie /favicon.ico
@@ -104,6 +104,10 @@
           <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
           <span data-i18n="startChat"></span>
         </button>
+        <button class="btn btn--ghost btn--lg" id="btn-group" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>
+          <span data-i18n="startGroup"></span>
+        </button>
         <button class="btn btn--ghost btn--lg" id="btn-join" type="button">
           <svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>
           <span data-i18n="joinChat"></span>
@@ -183,6 +187,25 @@
         <span data-i18n="waitingForPeer"></span>
       </p>
       <button class="btn btn--primary" id="btn-to-chat" type="button" hidden data-i18n="toChat"></button>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------- Gruppe: die Codes -->
+  <!-- Ein Code je Person, jeder genau einmal einloesbar. Wer einen davon
+       weitergibt, gibt genau einen Platz weiter - nicht die Gruppe. -->
+  <section class="screen screen--scroll" id="screen-group" hidden aria-labelledby="group-title">
+    <div class="screen__inner">
+      <button class="btn btn--icon back" id="group-back" type="button" data-i18n-attr="aria-label:back">
+        <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
+      </button>
+
+      <h2 id="group-title" data-i18n="groupCodes"></h2>
+      <p class="muted center" data-i18n="groupCodesHint"></p>
+      <p class="muted center small" id="group-progress" aria-live="polite"></p>
+
+      <ul class="invite-list" id="group-codes"></ul>
+
+      <button class="btn btn--primary" id="btn-group-to-chat" type="button" data-i18n="toChat"></button>
     </div>
   </section>
 

@@ -156,3 +156,142 @@ test('Der eigene Name für einen Chat gewinnt gegen den des Gegenübers', async 
   await kontextA.close();
   await kontextB.close();
 });
+
+// ---------------------------------------------------------------------------
+// Was in der Liste steht, ohne dass der Chat offen ist
+// ---------------------------------------------------------------------------
+
+/**
+ * Die App haelt genau eine Verbindung - zu dem Chat, der offen ist. Ueber die
+ * anderen weiss sie von sich aus gar nichts. Damit in der Liste trotzdem
+ * steht, was los ist, fragt sie alle auf einmal ab.
+ */
+test('Ungelesene Nachrichten bekommen einen Punkt mit Zahl', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+
+  const { link } = await createChat(seiteA, { nick: 'Anton' });
+  await joinChat(seiteB, link, { nick: 'Mira' });
+  await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+
+  // A geht auf die Startseite - die Verbindung ist damit zu.
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible();
+  await expect(seiteA.locator('#chat-list .pill--unread')).toHaveCount(0);
+
+  // Erst jetzt schreibt B - A ist gar nicht verbunden.
+  for (const text of ['Eins', 'Zwei', 'Drei']) {
+    await seiteB.locator('#message-input').fill(text);
+    await seiteB.locator('#btn-send').click();
+  }
+
+  const punkt = seiteA.locator('#chat-list .pill--unread');
+  await expect(punkt).toHaveText('3', { timeout: 30_000 });
+
+  // Und wer den Chat oeffnet, hat sie gelesen.
+  await seiteA.locator('#chat-list .chat-list__item').first().click();
+  await expect(seiteA.locator('#messages .msg')).toHaveCount(3, { timeout: 25_000 });
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#chat-list .pill--unread')).toHaveCount(0, { timeout: 30_000 });
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+/**
+ * Frueher stand hier der eigene letzte Besuch. Das las sich als "gerade eben",
+ * obwohl seit Tagen nichts gekommen war - eine Zeitangabe, die genau das
+ * Gegenteil dessen sagte, was man wissen will.
+ */
+test('Die Zeitangabe meint die letzte Nachricht, nicht den eigenen Besuch', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+
+  const { link } = await createChat(seiteA, { nick: 'Anton' });
+  await joinChat(seiteB, link, { nick: 'Mira' });
+  await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible();
+
+  // Noch nie etwas gekommen: dann gibt es auch nichts zu datieren.
+  await expect(seiteA.locator('#chat-list .chat-list__meta')).not.toContainText(/gerade eben/i);
+
+  await seiteB.locator('#message-input').fill('Jetzt kommt was');
+  await seiteB.locator('#btn-send').click();
+  await expect(seiteA.locator('#chat-list .chat-list__meta')).toContainText(/gerade eben/i, { timeout: 30_000 });
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+test('In der Liste steht, wenn jemand gerade schreibt', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+
+  const { link } = await createChat(seiteA, { nick: 'Anton' });
+  await joinChat(seiteB, link, { nick: 'Mira' });
+  await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible();
+
+  // B tippt weiter, solange A noch nichts davon sieht. Ein kurzer Anschlag
+  // reicht nicht: die Anzeige haelt nur ein paar Sekunden, und A fragt in
+  // seinem eigenen Takt nach.
+  const feld = seiteB.locator('#message-input');
+  await feld.click();
+  const tippt = seiteA.locator('#chat-list .chat-list__meta.is-typing');
+  await expect.poll(async () => {
+    await feld.press('a');
+    await seiteA.waitForTimeout(500);
+    return tippt.count();
+  }, { timeout: 40_000, intervals: [0] }).toBeGreaterThan(0);
+  await expect(tippt).toHaveText(/tippt/i);
+
+  await feld.fill('Ich schreibe gerade');
+
+  // Abschicken beendet das Tippen - und hinterlaesst eine Nachricht.
+  await seiteB.locator('#btn-send').click();
+  await expect(seiteA.locator('#chat-list .chat-list__meta.is-typing')).toHaveCount(0, { timeout: 30_000 });
+  await expect(seiteA.locator('#chat-list .pill--unread')).toHaveText('1', { timeout: 30_000 });
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+/**
+ * Nach oben kommt, wo zuletzt etwas los war. Frueher zaehlte nur der eigene
+ * Besuch - ein Chat mit drei neuen Nachrichten blieb dann unten, weil man
+ * laenger nicht hineingesehen hatte.
+ */
+test('Ein Chat mit Neuem rutscht nach oben', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const gegen = [];
+
+  // Zwei Chats anlegen: der zweite ist der zuletzt besuchte und steht oben.
+  for (const nick of ['Mira', 'Papa']) {
+    const { link } = await createChat(seiteA, { nick: 'Anton' });
+    const kontext = await browser.newContext(HANDY);
+    const seite = await kontext.newPage();
+    await joinChat(seite, link, { nick });
+    await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+    await seiteA.locator('#chat-back').click();
+    await expect(seiteA.locator('#screen-start')).toBeVisible();
+    gegen.push(seite);
+  }
+  await expect(namen(seiteA).first()).toHaveText('Papa');
+
+  // Und jetzt schreibt der untere.
+  await gegen[0].locator('#message-input').fill('Hallo!');
+  await gegen[0].locator('#btn-send').click();
+  await expect(namen(seiteA).first()).toHaveText('Mira', { timeout: 30_000 });
+
+  await kontextA.close();
+  for (const seite of gegen) await seite.context().close();
+});

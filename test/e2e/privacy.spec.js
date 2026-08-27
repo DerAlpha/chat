@@ -306,6 +306,62 @@ test('Die Oberfläche passt auf ein schmales Display', async ({ browser }) => {
   await context2.close();
 });
 
+/**
+ * Ein langer Name des Gegenuebers hat die halbe App aus dem Bild geschoben.
+ *
+ * Der Grund lag im Raster des Chat-Bildschirms: seine Spalte war so breit wie
+ * der breiteste Inhalt, den man nicht umbrechen kann - und das war die
+ * Kopfzeile mit dem Namen darin. #app hat den Ueberstand abgeschnitten, also
+ * blieb `document.scrollWidth` unauffaellig; sichtbar war nur, dass die
+ * eigenen Nachrichten und der Sende-Knopf rechts aus dem Bild rutschten und
+ * die App sich nicht mehr bedienen liess.
+ *
+ * Deshalb wird hier nicht die Seitenbreite gemessen, sondern jedes einzelne
+ * Stueck: was rechts hinausragt, faellt auf.
+ */
+test('Ein langer Name schiebt die App nicht aus dem Bild', async ({ browser }) => {
+  const context = await browser.newContext({ ...MOBILE, viewport: { width: 320, height: 568 } });
+  const context2 = await browser.newContext({ ...MOBILE, viewport: { width: 320, height: 568 } });
+  const page = await context.newPage();
+  const page2 = await context2.newPage();
+
+  const { link } = await createChat(page, { nick: 'Anton' });
+  await joinChat(page2, link, { nick: 'Maximiliane von Sonnenschein-Wolkenberg' });
+  await expect(page.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#peer-name')).toHaveText(/Maximiliane/);
+
+  await sendText(page, 'Eine eigene Nachricht');
+  await expect(page.locator('#messages .msg')).toHaveCount(1, { timeout: 20_000 });
+  // Der Sende-Knopf zeigt sich nur, wenn etwas im Feld steht.
+  await page.locator('#message-input').fill('Noch etwas');
+
+  const ueberstand = await page.evaluate(() => {
+    const sicht = document.documentElement.clientWidth;
+    const raus = [];
+    for (const knoten of document.querySelectorAll('#screen-chat, #screen-chat *')) {
+      if (knoten.offsetParent === null && knoten.id !== 'screen-chat') continue;
+      const k = knoten.getBoundingClientRect();
+      if (k.width === 0) continue;
+      if (k.right > sicht + 1 || k.left < -1) {
+        raus.push(`${knoten.tagName}#${knoten.id}.${String(knoten.className).slice(0, 30)} l=${Math.round(k.left)} r=${Math.round(k.right)}`);
+      }
+    }
+    return { sicht, raus };
+  });
+  expect(ueberstand.raus, `ragt aus dem Bild: ${ueberstand.raus.join(' | ')}`).toEqual([]);
+
+  // Und die Bedienelemente sind wirklich erreichbar.
+  for (const wahl of ['#btn-send', '#btn-attach', '#chat-menu', '#chat-back']) {
+    const kasten = await page.locator(wahl).boundingBox();
+    expect(kasten, `${wahl} ist gar nicht da`).not.toBeNull();
+    expect(kasten.x + kasten.width, `${wahl} liegt rechts ausserhalb`).toBeLessThanOrEqual(320);
+    expect(kasten.x, `${wahl} liegt links ausserhalb`).toBeGreaterThanOrEqual(0);
+  }
+
+  await context.close();
+  await context2.close();
+});
+
 test('Der Zurück-Knopf verdeckt die Überschrift nicht', async ({ browser }) => {
   const context = await browser.newContext({ ...MOBILE, viewport: { width: 320, height: 568 } });
   const page = await context.newPage();

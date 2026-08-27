@@ -53,6 +53,22 @@ export const claimSlot = (slotId) =>
 export const roomStatus = (roomId) => request(appPath(`api/rooms/${encodeURIComponent(roomId)}`));
 
 /**
+ * Kurzfassung mehrerer Raeume auf einmal - fuer die Liste auf der Startseite.
+ *
+ * Die App haelt genau eine Verbindung, naemlich zu dem Chat, der offen ist.
+ * Was in den anderen liegt, erfaehrt sie nur hier. Eine Anfrage statt einer
+ * Verbindung je Chat: das laeuft auch auf einem einfachen Webspace.
+ *
+ * @param {Array<{roomId: string, token: string, seq: number}>} rooms
+ */
+export const overview = (rooms) =>
+  request(appPath('api/overview'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ rooms }),
+  });
+
+/**
  * GIF-Suche über das eigene Backend. Giphy sieht den Server, nicht das Gerät -
  * und was zurückkommt, enthält keine einzige Giphy-Adresse, sondern nur
  * signierte, befristete Verweise, die wiederum nur dieser Server einlöst.

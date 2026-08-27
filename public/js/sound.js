@@ -257,6 +257,11 @@ function buildBus(ctx) {
  * stumm, ohne dass irgendetwas darauf hindeutet.
  */
 export function primeSound() {
+  // Wer den Ton abgeschaltet hat, bekommt auch keinen Tonkanal. Sonst bliebe
+  // die Audioausgabe des Geraets die ganze Sitzung wach fuer etwas, das nie
+  // kommt. Beim Wiedereinschalten weckt der Vorhoerton den Kanal ohnehin -
+  // und der laeuft in einer echten Geste.
+  if (!enabled) return null;
   const ctx = audio();
   if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
     void ctx.resume?.().catch(() => {});

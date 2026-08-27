@@ -83,6 +83,10 @@ export const config = {
   // Rate-Limits
   createRoomPerHour: int('CREATE_ROOM_PER_HOUR', 60),
   joinAttemptsPerHour: int('JOIN_ATTEMPTS_PER_HOUR', 300),
+  // Die Uebersicht fragt alle paar Sekunden nach - sie darf das
+  // Beitritts-Kontingent nicht aufbrauchen. Sonst kaeme jemand mit
+  // offener App irgendwann in keinen Chat mehr hinein.
+  overviewPerHour: int('OVERVIEW_PER_HOUR', 5000),
   uploadsPerHour: int('UPLOADS_PER_HOUR', 400),
   messagesPerMinute: int('MESSAGES_PER_MINUTE', 240),
 

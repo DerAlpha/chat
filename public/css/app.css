@@ -170,6 +170,10 @@ button, input, textarea { font: inherit; color: inherit; }
 /* Die Bildmarke ist gefüllt, nicht gestrichelt. Sie ist breiter als hoch -
    eine Sprechblase mit Spitze -, deshalb kein Quadrat. */
 .logo--mark svg { width: 48px; height: 39px; stroke: none; }
+/* Dieselbe Platte wie im App-Symbol - Zahl fuer Zahl aus public/img/icon.svg.
+   Die allgemeine .logo-Regel oben faerbt mit --accent und wandert damit mit
+   dem Farbschema; eine Marke tut das nicht. */
+.logo--mark { background: linear-gradient(135deg, #2f6df6, #8b5cf6); }
 
 /* Bei "Automatisch" setzt das Skript data-system anhand von prefers-color-scheme. */
 
@@ -251,6 +255,9 @@ button, input, textarea { font: inherit; color: inherit; }
 .chat-list__text { flex: 1; min-width: 0; }
 .chat-list__name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-list__meta { display: block; font-size: .82rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Dass gerade jemand schreibt, ist die einzige Angabe in dieser Zeile, die
+   gleich wieder verschwindet - deshalb sticht sie heraus. */
+.chat-list__meta.is-typing { color: var(--accent); font-style: italic; }
 
 .avatar {
   width: 40px; height: 40px;
@@ -271,6 +278,21 @@ button, input, textarea { font: inherit; color: inherit; }
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-text);
+}
+/* Der Punkt mit der Zahl ungelesener Nachrichten. Rund und mindestens so
+   breit wie hoch - bei einer einzelnen Ziffer soll es ein Kreis sein und
+   kein Strich. Die Farbe ist die der Marke: der Punkt gehoert zur App und
+   ist keine Warnung. */
+.pill--unread {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  font-size: .74rem;
+  line-height: 1;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* ------------------------------------------------------------ Features --- */
@@ -351,12 +373,22 @@ button, input, textarea { font: inherit; color: inherit; }
    sich an den Viewport statt an den Chat. */
 .screen--chat[data-active] {
   display: grid;
+  /* minmax(0, 1fr) und nicht einfach 1fr: sonst ist die Spalte mindestens so
+     breit wie der breiteste Inhalt, den man nicht umbrechen kann - und das
+     ist die Kopfzeile mit einem langen Namen darin. Die Spalte wuchs dann
+     ueber den Bildschirm hinaus, #app hat den Ueberstand abgeschnitten, und
+     die eigenen Nachrichten samt Sende-Knopf lagen ausserhalb des Bildes.
+     Von aussen sah es aus, als sei die App nach rechts weggerutscht. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto 1fr auto;
   height: 100%;
   min-height: 0;
   min-width: 0;
   position: relative;
 }
+/* Und damit die Zeilen selbst schrumpfen duerfen: ein Rasterelement ist von
+   Haus aus mindestens so breit wie sein Inhalt. */
+.screen--chat[data-active] > * { min-width: 0; }
 .chat-header { grid-row: 1; }
 .banner { grid-row: 2; }
 .messages { grid-row: 3; }
@@ -471,6 +503,43 @@ button, input, textarea { font: inherit; color: inherit; }
   .msg__more:focus-visible { opacity: 1; }
   .msg__more:hover { color: var(--text); background: var(--bg-sunken); }
 }
+
+/* --------------------------------------------------- Codeliste der Gruppe --- */
+/* Ein Code je Person, alle untereinander. Wer eine Gruppe zusammenstellt,
+   verteilt sie in einem Zug und muss sehen, welchen er schon vergeben hat. */
+.invite-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+.invite-row__nr {
+  flex: none;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 600;
+}
+.invite-row__body { flex: 1; min-width: 0; }
+.invite-row__code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1rem;
+  letter-spacing: .06em;
+  /* Der Code darf umbrechen statt die Zeile zu sprengen - auf 320 px breiten
+     Displays passt er sonst nicht neben Nummer und Knopf. */
+  overflow-wrap: anywhere;
+}
+.invite-row__hint { font-size: .72rem; color: var(--text-muted); }
+.invite-row__actions { flex: none; }
 
 /* In einer Gruppe steht über fremden Blasen, von wem sie kommt. Eine eigene
    Farbe je Person wäre hübsch, aber Namen sind hier frei wählbar und nicht
@@ -733,6 +802,11 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--bg);
 }
 .sheet-field input:focus { outline: none; border-color: var(--accent); }
+/* Beschriftung und Feld nebeneinander - fuer eine Zahl reicht ein schmales
+   Feld, und die Frage steht daneben statt darueber. */
+.sheet-field--row { flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; }
+.sheet-field--row input { width: 6.5rem; text-align: center; }
+.sheet-field__label { color: var(--text-muted); }
 
 .emoji-row { display: flex; justify-content: space-between; gap: 4px; padding: 6px 4px 10px; }
 .emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; }

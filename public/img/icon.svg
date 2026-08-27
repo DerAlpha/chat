@@ -22,7 +22,7 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#fc-grad)"/>
-  <path d="M96 138h320a38 38 0 0 1 38 38v148a38 38 0 0 1-38 38H222l-80 60v-60h-46a38 38 0 0 1-38-38V176a38 38 0 0 1 38-38z" fill="#fff" opacity=".97"/>
+  <path d="M96 138h320a38 38 0 0 1 38 38v148a38 38 0 0 1-38 38H222l-80 60v-60h-46a38 38 0 0 1-38-38V176a38 38 0 0 1 38-38z" fill="#fff"/>
   <text x="256" y="286" fill="#2f6df6"
         font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
         font-size="118" font-weight="700" letter-spacing="-2"

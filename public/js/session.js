@@ -52,13 +52,20 @@ export const storageAvailable = (() => {
 
 // ------------------------------------------------------------------- Chats
 
+/** Der juengere der beiden Zeitpunkte: eigener Besuch oder letzte Nachricht. */
+const zuletzt = (session) => Math.max(session?.lastActivity ?? 0, session?.lastMessageAt ?? 0);
+
 /** @returns {Array<object>} Alle bekannten Chats, zuletzt benutzte zuerst. */
 export function listSessions() {
   const sessions = readJson(SESSIONS_KEY, []);
   if (!Array.isArray(sessions)) return [];
   return sessions
     .filter((entry) => entry && typeof entry.roomId === 'string' && typeof entry.code === 'string')
-    .sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0));
+    // Nach oben kommt, wo zuletzt etwas los war - eigener Besuch ODER eine
+    // eingegangene Nachricht. Nur nach dem Besuch zu sortieren hiesse: ein
+    // Chat mit drei neuen Nachrichten bleibt unten, weil man laenger nicht
+    // hineingesehen hat.
+    .sort((a, b) => zuletzt(b) - zuletzt(a));
 }
 
 export function getSession(roomId) {
@@ -79,6 +86,34 @@ export function patchSession(roomId, patch) {
   const merged = { ...existing, ...patch };
   saveSession(merged);
   return merged;
+}
+
+/**
+ * Mehrere Chats in einem Zug aendern.
+ *
+ * Die Uebersicht auf der Startseite bekommt alle paar Sekunden neue Zahlen
+ * fuer alle Chats auf einmal. Jeden einzeln zu speichern hiesse: bei zehn
+ * Chats zehnmal die ganze Liste lesen und zehnmal die ganze Liste schreiben -
+ * und das im Sekundentakt, waehrend jemand scrollt.
+ *
+ * @param {Map<string, object>|Record<string, object>} patches
+ * @returns {boolean} ob sich ueberhaupt etwas geaendert hat
+ */
+export function patchSessions(patches) {
+  const eintraege = patches instanceof Map ? patches : new Map(Object.entries(patches));
+  if (eintraege.size === 0) return false;
+  const sessions = listSessions();
+  let geaendert = false;
+  const neu = sessions.map((session) => {
+    const patch = eintraege.get(session.roomId);
+    if (!patch) return session;
+    const zusammen = { ...session, ...patch };
+    if (Object.keys(patch).every((schluessel) => session[schluessel] === patch[schluessel])) return session;
+    geaendert = true;
+    return zusammen;
+  });
+  if (geaendert) writeJson(SESSIONS_KEY, neu);
+  return geaendert;
 }
 
 export function removeSession(roomId) {

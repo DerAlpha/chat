@@ -210,6 +210,17 @@ test('Ein abgeschalteter Ton bleibt wirklich stumm', () => {
   });
 });
 
+test('Wer den Ton aus hat, bekommt gar keinen Tonkanal', () => {
+  // Sonst bleibt die Audioausgabe des Geraets die ganze Sitzung wach fuer
+  // etwas, das nie kommt.
+  mitKanal((ctx, angelegt) => {
+    configureSound({ enabled: false });
+    assert.equal(primeSound(), null);
+    assert.equal(angelegt(), 0, 'es wurde trotzdem ein Kanal aufgemacht');
+    assert.equal(ctx.resumed, 0);
+  }, { state: 'suspended' });
+});
+
 test('Ein unbekannter Klang tut gar nichts', () => {
   mitKanal((ctx) => {
     assert.equal(playSound('gibtsnicht'), false);

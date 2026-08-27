@@ -8,7 +8,8 @@
 
 import {
   cryptoAvailable, generateCode, formatCode, normalizeCode, isCompleteCode, codeLength,
-  deriveSecrets, importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
+  deriveSecrets, deriveSlot, generateGroupKey, randomRoomId, wrapGroupKey, unwrapGroupKey,
+  importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
   toBase64, fromBase64, randomId,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
@@ -17,8 +18,8 @@ import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
-import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
-import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
+import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
+import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
 import {
@@ -47,7 +48,7 @@ const app = {
   conn: null,
   limits: { maxBlobBytes: 12 * 1024 * 1024 },
   /** Was diese Installation anbietet - kommt von GET api/config. */
-  features: { gifs: false, call: { calls: false, discovery: false, relay: false } },
+  features: { gifs: false, maxGroup: 8, call: { calls: false, discovery: false, relay: false } },
   /** Der laufende Anruf, falls einer läuft. */
   call: null,
   /** Die Anmeldung des Service Workers - über sie kommt die Update-Meldung. */
@@ -102,6 +103,8 @@ function boot() {
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') primeSound();
+    // Im Hintergrund fragt niemand nach der Liste - das kostet nur Akku.
+    watchOverview();
   });
   setLanguage(detectLanguage(app.prefs.lang));
   applyTheme(app.prefs.theme);
@@ -125,6 +128,10 @@ function boot() {
   void serverConfig().then((remote) => {
     app.features = {
       gifs: remote?.gifs === true,
+      // Wie gross eine Gruppe hoechstens werden darf, entscheidet der Server.
+      // Ohne Auskunft ein zurueckhaltender Wert - lieber eine Gruppe zu klein
+      // anbieten als eine, die beim Anlegen abgewiesen wird.
+      maxGroup: Number.isInteger(remote?.maxGroup) ? remote.maxGroup : 8,
       call: remote?.call ?? { discovery: false, relay: false, calls: false },
     };
     updateCallButtons();
@@ -141,12 +148,17 @@ function boot() {
  * Fragmente werden nie an den Server geschickt.
  */
 function parseHash() {
-  const raw = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+  let raw = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
   if (!raw) return null;
+  // Ein Gruppen-Link traegt ein Vorzeichen. Damit weiss die App sofort,
+  // welchen Weg sie gehen muss - und die Raum-ID, die derselbe Code als
+  // Zweierchat ergaebe, wird gar nicht erst gerechnet und nie verschickt.
+  const gruppe = raw.startsWith('g:');
+  if (gruppe) raw = raw.slice(2);
   const [codePart, tokenPart] = raw.split('.');
   const code = normalizeCode(codePart);
   if (!isCompleteCode(code)) return null;
-  return { code: formatCode(code), token: tokenPart || null };
+  return { code: formatCode(code), token: tokenPart || null, group: gruppe };
 }
 
 function clearHash() {
@@ -157,7 +169,8 @@ async function route() {
   const invite = parseHash();
   if (invite) {
     clearHash();
-    await enterChat(invite.code, { deviceToken: invite.token });
+    if (invite.group) await enterGroup(invite.code);
+    else await enterChat(invite.code, { deviceToken: invite.token });
     return;
   }
   if (currentScreen() === 'chat') return;
@@ -168,6 +181,7 @@ function showStart() {
   teardownChat();
   renderChatList();
   showScreen('start');
+  watchOverview();
 }
 
 /**
@@ -211,6 +225,9 @@ async function startNewChat() {
         label: '',
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        readSeq: 0,
+        lastMessageAt: 0,
+        typing: false,
         unread: 0,
       });
       busy(false);
@@ -221,6 +238,212 @@ async function startNewChat() {
   } catch (error) {
     busy(false);
     reportError(error);
+  } finally {
+    busy(false);
+  }
+}
+
+/**
+ * Eine Gruppe anlegen.
+ *
+ * Der Unterschied zum Zweiergespräch steckt im Schlüssel. Dort IST der Code
+ * der Raum: beide Seiten rechnen aus demselben Code dasselbe aus. Das geht
+ * hier nicht, denn jede Person bekommt einen eigenen Code - sonst wäre ein
+ * einziger weitergereichter Code der Zugang für beliebig viele.
+ *
+ * Also: ein gewürfelter Gruppenschlüssel, ein gewürfelter Raum, und je
+ * Teilnehmer ein Platz. Auf dem Platz liegt der Gruppenschlüssel, verpackt
+ * mit einem Schlüssel, den nur dieser eine Code hergibt. Der Server sieht
+ * Pakete, die er nicht öffnen kann, und Plätze, die genau einmal aufgehen.
+ */
+async function startNewGroup() {
+  const setup = await askGroupSetup();
+  if (!setup) return;
+
+  busy(true, t('joining'));
+  try {
+    const key = generateGroupKey();
+    const roomId = randomRoomId();
+    const codes = [];
+    const slots = [];
+    for (let i = 0; i < setup.count; i += 1) {
+      const code = generateCode();
+      const { slotId, wrapKeyRaw } = await deriveSlot(code);
+      slots.push({ id: slotId, wrapped: await wrapGroupKey(wrapKeyRaw, { key, roomId, name: setup.name }) });
+      codes.push(formatCode(code));
+    }
+
+    // Wer anlegt, hat selbst keinen Code - die hat er gerade für die anderen
+    // erzeugt. Sein Platz kommt deshalb mit der Antwort zurück.
+    const room = await createRoom(roomId, slots);
+
+    const session = saveSession({
+      roomId,
+      // Eine Gruppe hat keinen gemeinsamen Code. Das Feld bleibt leer, damit
+      // nirgends einer angeboten wird, den es nicht gibt.
+      code: '',
+      kind: 'group',
+      key: toBase64(key),
+      token: room?.you?.token ?? null,
+      memberId: room?.you?.id ?? null,
+      capacity: room?.capacity ?? setup.count + 1,
+      // Die Codes bleiben auf diesem Gerät, damit man sie noch verteilen
+      // kann. Sie gehen nie an den Server - der kennt nur die Plätze.
+      codes,
+      nick: app.prefs.nick ?? '',
+      peerNick: '',
+      label: setup.name,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      readSeq: 0,
+      lastMessageAt: 0,
+      typing: false,
+      unread: 0,
+    });
+    busy(false);
+    await openSession(session, { screen: 'group' });
+  } catch (error) {
+    busy(false);
+    reportError(error);
+  } finally {
+    busy(false);
+  }
+}
+
+/**
+ * Fragt Name und Grösse ab. Zwei Felder in einem Blatt - für zwei Angaben
+ * hintereinander zwei Dialoge zu öffnen wäre eine Zumutung.
+ */
+function askGroupSetup() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.placeholder = t('groupNamePlaceholder');
+    name.maxLength = 40;
+    name.autocomplete = 'off';
+    name.id = 'group-name';
+    const nameZeile = make('div', 'sheet-field');
+    nameZeile.appendChild(name);
+
+    const zahl = document.createElement('input');
+    zahl.type = 'number';
+    zahl.min = '2';
+    // Man selbst zählt mit - deshalb einer weniger als die Kapazität.
+    zahl.max = String(Math.max(2, (app.features.maxGroup ?? 8) - 1));
+    zahl.value = '2';
+    zahl.inputMode = 'numeric';
+    zahl.id = 'group-size';
+    const label = make('label', 'sheet-field__label', t('groupSize'));
+    label.htmlFor = zahl.id;
+    const zahlZeile = make('div', 'sheet-field sheet-field--row');
+    zahlZeile.append(label, zahl);
+
+    const senden = make('button', 'btn btn--primary', t('create'));
+    senden.type = 'button';
+    // In dieselbe Umrandung wie die Felder, damit er nicht an den Rand stösst.
+    const knopfZeile = make('div', 'sheet-field');
+    knopfZeile.appendChild(senden);
+
+    const absenden = () => {
+      const wieviele = Math.min(Number(zahl.max), Math.max(2, Number.parseInt(zahl.value, 10) || 2));
+      finish({ name: name.value.trim(), count: wieviele });
+      closeSheet();
+    };
+    senden.addEventListener('click', absenden);
+    for (const eingabe of [name, zahl]) {
+      eingabe.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          absenden();
+        }
+      });
+    }
+
+    // Reihenfolge: erst fragen, dann bestätigen. Ein Knopf zwischen zwei
+    // Feldern sieht aus, als wäre man schon fertig.
+    openSheet(t('startGroup'), [
+      make('p', 'sheet-note', t('groupSetupHint')),
+      nameZeile,
+      zahlZeile,
+      knopfZeile,
+    ], { onClose: () => finish(null) });
+  });
+}
+
+/**
+ * Einer Gruppe beitreten - mit einem Code, der auf einen Platz zeigt.
+ *
+ * Der Beitretende kennt den Raum nicht. Er rechnet aus seinem Code die
+ * Platzkennung, löst den Platz ein und bekommt das Paket, das nur sein Code
+ * öffnet. Erst darin stehen Schlüssel, Raum und Name.
+ */
+async function enterGroup(code, { quiet = false } = {}) {
+  busy(true, t('joining'));
+  try {
+    const { slotId, wrapKeyRaw } = await deriveSlot(code);
+    let platz;
+    try {
+      platz = await claimSlot(slotId);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 410) {
+        // Den gab es, er ist verbraucht. Das ist die richtige Auskunft -
+        // auch beim Nachfassen nach einem getippten Code.
+        showError(t('errorCodeUsed'), { retry: false });
+        return true;
+      }
+      if (error instanceof ApiError && error.status === 404) {
+        if (quiet) return false;
+        showError(t('errorRoomUnknown'), { retry: false });
+        return true;
+      }
+      throw error;
+    }
+
+    const inhalt = await unwrapGroupKey(wrapKeyRaw, platz.wrapped);
+    if (!inhalt) {
+      showError(t('errorGroupPacket'), { retry: false });
+      return true;
+    }
+    // Was im Paket steht, muss zu dem passen, was der Server sagt. Sonst
+    // lotst ein untergeschobener Server jemanden in einen fremden Raum -
+    // und der Vergleich ist das Einzige, was das bemerken würde.
+    if (inhalt.roomId !== platz.roomId) {
+      showError(t('errorGroupPacket'), { retry: false });
+      return true;
+    }
+
+    const bekannt = getSession(platz.roomId);
+    const session = saveSession({
+      roomId: platz.roomId,
+      code: '',
+      kind: 'group',
+      key: toBase64(inhalt.key),
+      token: platz.you?.token ?? bekannt?.token ?? null,
+      memberId: platz.you?.id ?? bekannt?.memberId ?? null,
+      capacity: platz.capacity ?? bekannt?.capacity ?? 0,
+      codes: [],
+      nick: bekannt?.nick ?? app.prefs.nick ?? '',
+      peerNick: '',
+      label: bekannt?.label || inhalt.name || '',
+      createdAt: bekannt?.createdAt ?? Date.now(),
+      lastActivity: Date.now(),
+      readSeq: bekannt?.readSeq ?? 0,
+      lastMessageAt: bekannt?.lastMessageAt ?? 0,
+      typing: false,
+      unread: 0,
+    });
+    await openSession(session, { screen: 'chat' });
+    return true;
+  } catch (error) {
+    reportError(error);
+    return true;
   } finally {
     busy(false);
   }
@@ -250,6 +473,11 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       status = await roomStatus(roomId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
+        // Vielleicht war es gar kein Zweierchat-Code, sondern ein Platz in
+        // einer Gruppe. Ein Gruppen-Link sagt das vorweg; ein von Hand
+        // getippter Code sagt gar nichts. Wer ihn abtippt, soll nicht
+        // "diesen Chat gibt es nicht" lesen, obwohl er stimmt.
+        if (!knownSession && await enterGroup(code, { quiet: true })) return;
         showError(t('errorRoomUnknown'));
         return;
       }
@@ -273,6 +501,10 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       label: known?.label ?? '',
       createdAt: known?.createdAt ?? Date.now(),
       lastActivity: Date.now(),
+      // Muss mit: sonst gaelte nach jedem Betreten wieder alles als ungelesen.
+      readSeq: known?.readSeq ?? 0,
+      lastMessageAt: known?.lastMessageAt ?? 0,
+      typing: false,
       unread: 0,
     });
     await openSession(session, { screen: status.members >= 1 || token ? 'chat' : 'invite' });
@@ -291,6 +523,7 @@ async function openSession(session, { screen = 'chat' } = {}) {
   resetConversation();
 
   if (screen === 'invite') showInvite(session);
+  else if (screen === 'group') showGroupCodes(session);
   else showChatScreen();
 
   await connect();
@@ -423,7 +656,92 @@ function showInvite(session, { fromChat = false } = {}) {
   showScreen('invite');
 }
 
+/**
+ * Die Codeliste einer Gruppe: einer je Person.
+ *
+ * Bewusst untereinander statt einer nach dem anderen. Wer eine Gruppe
+ * zusammenstellt, verteilt die Codes in einem Zug an verschiedene Leute -
+ * und muss dabei sehen können, welchen er schon vergeben hat.
+ */
+function showGroupCodes(session) {
+  const liste = el('group-codes');
+  liste.replaceChildren();
+  const codes = session.codes ?? [];
+
+  codes.forEach((code, i) => {
+    const eintrag = make('li', 'invite-row');
+    eintrag.appendChild(make('span', 'invite-row__nr', String(i + 1)));
+
+    const mitte = make('div', 'invite-row__body');
+    mitte.appendChild(make('code', 'invite-row__code', code));
+    mitte.appendChild(make('span', 'invite-row__hint', t('groupCodeOnce')));
+    eintrag.appendChild(mitte);
+
+    const knoepfe = make('div', 'invite-row__actions');
+    // Zum Vorzeigen: wer nebeneinander steht, scannt lieber, als abzutippen.
+    const scannen = make('button', 'btn btn--icon');
+    scannen.type = 'button';
+    scannen.title = t('scanHint');
+    scannen.appendChild(icon('i-qr'));
+    scannen.addEventListener('click', () => showCodeQr(code, i + 1));
+    knoepfe.appendChild(scannen);
+
+    const teilen = make('button', 'btn btn--icon');
+    teilen.type = 'button';
+    teilen.title = typeof navigator.share === 'function' ? t('shareLink') : t('copyLink');
+    teilen.appendChild(icon(typeof navigator.share === 'function' ? 'i-share' : 'i-link'));
+    teilen.addEventListener('click', () => void handOutCode(code));
+    knoepfe.appendChild(teilen);
+    eintrag.appendChild(knoepfe);
+
+    liste.appendChild(eintrag);
+  });
+
+  updateGroupProgress();
+  renderChatList();
+  showScreen('group');
+}
+
+/** Einen einzelnen Platz zum Abscannen zeigen. */
+function showCodeQr(code, nummer) {
+  const teile = [];
+  try {
+    const rahmen = make('div', 'qr-frame');
+    rahmen.appendChild(qrSvg(groupLink(code)));
+    teile.push(rahmen);
+  } catch {
+    // Ohne QR bleibt der Code - abtippen geht immer noch.
+  }
+  teile.push(make('p', 'sheet-note center', code));
+  openSheet(`${t('groupCodes')} · ${nummer}`, teile);
+}
+
+/** Einen einzelnen Platz weitergeben - teilen, wenn das Gerät es kann. */
+async function handOutCode(code) {
+  const link = groupLink(code);
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title: t('appName'), url: link });
+      return;
+    } catch {
+      // Abgebrochen oder nicht möglich - dann eben in die Zwischenablage.
+    }
+  }
+  toast(await copyText(link) ? t('copied') : t('copyFailed'));
+}
+
+/** Wie viele schon da sind. Steht über der Liste, damit man weiss, wer fehlt. */
+function updateGroupProgress() {
+  const zeile = el('group-progress');
+  if (!zeile || !app.session) return;
+  const alle = app.session.capacity || (app.session.codes?.length ?? 0) + 1;
+  zeile.textContent = t('groupPresence', { online: app.members.size + 1, total: alle });
+}
+
 const inviteLink = (code) => `${baseUrl.href}#${encodeURIComponent(formatCode(code))}`;
+/** Ein Platz in einer Gruppe. Das Vorzeichen spart dem Beitretenden eine
+    Ableitung, die sonst ins Leere liefe. */
+const groupLink = (code) => `${baseUrl.href}#g:${encodeURIComponent(formatCode(code))}`;
 const deviceLink = (code, token) =>
   `${baseUrl.href}#${encodeURIComponent(formatCode(code))}.${encodeURIComponent(token)}`;
 
@@ -508,7 +826,11 @@ async function onWelcome(frame) {
   app.hasMore = frame.hasMore === true;
   await renderHistory(frame.messages, { replace: true });
 
-  if (currentScreen() !== 'invite') {
+  if (currentScreen() === 'group') {
+    // Wer gerade Codes verteilt, wird nicht in den Chat geschoben - er ist
+    // mitten in einer Aufgabe.
+    updateGroupProgress();
+  } else if (currentScreen() !== 'invite') {
     showChatScreen();
   } else if (app.members.size > 0 && !app.inviteFromChat) {
     // Es war schon jemand da - dann direkt in den Chat.
@@ -538,6 +860,10 @@ function onServerError(frame) {
 function onBurned() {
   if (app.session) removeSession(app.session.roomId);
   teardownChat();
+  // Das Gegenueber hat den Chat vernichtet: alles weg, und man steht wieder
+  // am Anfang. Dafuer reicht ein Hinweis am Rand nicht - wer gerade woanders
+  // hinsieht, bekaeme davon sonst gar nichts mit.
+  playSound('error');
   toast(t('burnDone'), 3200);
   showStart();
 }
@@ -605,8 +931,8 @@ function memberOf(id) {
   return member;
 }
 
-/** Wie jemand heisst. Ohne Namen bleibt es beim allgemeinen Wort. */
-const nameOf = (id) => (app.members.get(id)?.nick || '').trim() || t('partner');
+/** Wie jemand heisst. */
+const nameOf = (id) => memberName(app.members.get(id));
 
 /**
  * Eine Aufzählung von Namen, wie man sie spricht: "Anna", "Anna und Bea",
@@ -620,7 +946,27 @@ function nameList(members) {
   return t('nameMore', { first: namen[0], second: namen[1], count: namen.length - 2 });
 }
 
-const memberName = (member) => (member?.nick || '').trim() || t('partner');
+/**
+ * Wie jemand heisst - und wenn er sich keinen Namen gegeben hat, wenigstens
+ * unterscheidbar.
+ *
+ * In einem Zweiergespräch reicht "Gegenüber": es gibt nur eines. In einer
+ * Gruppe hiessen damit alle Namenlosen gleich, und man wüsste bei keiner
+ * Blase, von wem sie kommt. Durchnummeriert wird nach der Mitglieds-Kennung,
+ * nicht nach der Reihenfolge des Eintreffens - die ist auf jedem Gerät eine
+ * andere, und dann hiesse dieselbe Person bei jedem anders.
+ */
+function memberName(member) {
+  const eigener = (member?.nick || '').trim();
+  if (eigener) return eigener;
+  if (!isGroup() || !member) return t('partner');
+  const namenlos = others()
+    .filter((anderer) => !(anderer.nick || '').trim())
+    .map((anderer) => anderer.id)
+    .sort();
+  const platz = namenlos.indexOf(member.id);
+  return platz < 0 ? t('partner') : t('unnamedMember', { n: platz + 1 });
+}
 
 /** Haben alle anderen bis hierher gelesen? */
 function allRead(seq) {
@@ -812,6 +1158,7 @@ function onPresence(frame) {
   // im Zweiergespräch ist das dasselbe, in einer Gruppe erspart es ein
   // Glockenspiel, sobald sich mehrere gleichzeitig bewegen.
   soundPresence(anyOnline());
+  updateGroupProgress();
   if (currentScreen() === 'invite' && frame.online) {
     setInviteWaiting(true);
     if (!app.inviteFromChat) {
@@ -881,6 +1228,8 @@ function showChatScreen() {
   // Am Rechner steht die Liste daneben und soll den offenen Chat hervorheben.
   renderChatList();
   showScreen('chat');
+  // Am Handy verschwindet die Liste - dann muss auch niemand nach ihr fragen.
+  watchOverview();
   updateCallButtons();
   updatePeerStatus();
   redrawAll();
@@ -1278,7 +1627,11 @@ function updateJumpButton() {
  * "Gegenüber" - das dann hoffentlich nur noch bei einem einzigen Chat steht.
  */
 function chatTitle(session) {
-  return (session?.label || '').trim() || (session?.peerNick || '').trim() || t('partner');
+  const eigene = (session?.label || '').trim();
+  if (eigene) return eigene;
+  // Eine Gruppe ohne Namen ist immer noch eine Gruppe.
+  if (session?.kind === 'group') return t('group');
+  return (session?.peerNick || '').trim() || t('partner');
 }
 
 function peerName() {
@@ -1579,7 +1932,11 @@ function updateCallButtons() {
   const audio = el('btn-call-audio');
   const video = el('btn-call-video');
   if (!audio || !video) return;
-  const offer = app.features.call?.calls === true && currentScreen() === 'chat';
+  // In einer Gruppe bleiben die Knoepfe weg. Der Aushandlungskanal geht an
+  // alle, und der Schluessel fuer Ton und Bild haengt am Raumschluessel -
+  // jedes Mitglied koennte damit ein fremdes Gespraech mithoeren. Das
+  // gehoert geloest, bevor es hier einen Knopf gibt.
+  const offer = app.features.call?.calls === true && currentScreen() === 'chat' && !isGroup();
   audio.hidden = !offer;
   video.hidden = !offer;
 }
@@ -1841,6 +2198,19 @@ function markRead() {
     if (entry && !isMine(entry) && !entry.pending) highest = Math.max(highest, entry.seq);
   }
   if (highest > 0) app.conn.send({ t: 'read', seq: highest });
+  // Und merken, wo man steht. Ohne das faengt die Zaehlung in der Uebersicht
+  // nach jedem Neuladen wieder bei null an - und alles gaelte als ungelesen.
+  noteRead(highest);
+}
+
+/** Den eigenen Lesestand festhalten und den Punkt in der Uebersicht loeschen. */
+function noteRead(seq) {
+  if (!app.session) return;
+  const bisher = app.session.readSeq ?? 0;
+  if (seq <= bisher && (app.session.unread ?? 0) === 0) return;
+  const patch = { readSeq: Math.max(bisher, seq), unread: 0 };
+  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  renderChatList();
 }
 
 // --------------------------------------------------------------- Tippanzeige
@@ -2384,13 +2754,21 @@ function openChatMenu() {
       value: app.session?.label || '–',
       onClick: () => void renameChat(app.session.roomId),
     },
-      { icon: 'i-qr', label: t('showCode'), onClick: () => showInvite(app.session, { fromChat: true }) },
-    {
+    // In einer Gruppe gibt es keinen gemeinsamen Code, sondern einen je
+    // Person - und die hat nur, wer sie angelegt hat.
+    ...(isGroup()
+      ? (app.session?.codes?.length
+        ? [{ icon: 'i-qr', label: t('groupCodes'), onClick: () => showGroupCodes(app.session) }]
+        : [])
+      : [{ icon: 'i-qr', label: t('showCode'), onClick: () => showInvite(app.session, { fromChat: true }) }]),
+    // Der Geraete-Link traegt den Code. Ohne Code kein Link - fuer Gruppen
+    // braeuchte er einen eigenen Weg, den es noch nicht gibt.
+    ...(isGroup() ? [] : [{
       icon: 'i-link',
       label: t('linkDevice'),
       hint: t('linkDeviceHint'),
       onClick: shareDeviceLink,
-    },
+    }]),
     { icon: 'i-bell', label: t('notifications'), value: notificationLabel, onClick: toggleNotifications },
     {
       icon: app.prefs.sound ? 'i-sound' : 'i-sound-off',
@@ -2444,7 +2822,9 @@ async function shareDeviceLink() {
 }
 
 async function burnCurrentChat() {
-  const ok = await confirmSheet(t('burnChat'), t('burnConfirm'), t('confirm'));
+  // In einer Gruppe trifft es alle - das muss dastehen, bevor jemand tippt.
+  const frage = isGroup() ? t('burnConfirmGroup') : t('burnConfirm');
+  const ok = await confirmSheet(t('burnChat'), frage, t('confirm'));
   if (!ok) return;
   const session = app.session;
   try {
@@ -2541,6 +2921,7 @@ function refreshDynamicLabels() {
   // Am Rechner steht die Liste immer da - also auch immer nachziehen.
   if (currentScreen() === 'start' || isDesktop()) renderChatList();
   if (currentScreen() === 'invite') setInviteWaiting(app.members.size > 0);
+  if (currentScreen() === 'group') updateGroupProgress();
 }
 
 function toggleSound() {
@@ -2582,7 +2963,7 @@ function announce(text) {
 }
 
 function notifyIncoming(entry) {
-  announce(`${peerName()}: ${previewOf(entry)}`);
+  announce(`${senderLabel(entry)}: ${previewOf(entry)}`);
   const sichtbar = document.visibilityState === 'visible';
   const vomSystem = !sichtbar && systemMeldung(entry);
   // Wer hinsieht, braucht kein Signal - nur eine Bestätigung. Wer woanders
@@ -2599,11 +2980,21 @@ function notifyIncoming(entry) {
  * Die Meldung des Betriebssystems. Gibt zurück, ob sie wirklich herausging -
  * daran hängt, ob die App zusätzlich einen eigenen Ton spielt.
  */
+/**
+ * Was ueber der Meldung steht. Im Zweiergespraech reicht der Name des
+ * Gegenuebers; in einer Gruppe muss dazu, WER geschrieben hat - sonst meldet
+ * sich die Gruppe, und man weiss nicht, von wem.
+ */
+function senderLabel(entry) {
+  if (!isGroup()) return peerName();
+  return t('groupFrom', { who: nameOf(entry.from), group: peerName() });
+}
+
 function systemMeldung(entry) {
   if (!app.prefs.notifications || typeof Notification === 'undefined') return false;
   if (Notification.permission !== 'granted') return false;
   try {
-    const notification = new Notification(peerName(), {
+    const notification = new Notification(senderLabel(entry), {
       body: previewOf(entry).slice(0, 140),
       icon: appUrl('img/icon-192.png'),
       badge: appUrl('img/badge.png'),
@@ -2645,20 +3036,151 @@ function renderChatList() {
     const avatar = make('div', 'avatar avatar--sm', initial(name));
     const text = make('div', 'chat-list__text');
     text.appendChild(make('span', 'chat-list__name', name));
-    // Zweite Zeile: was zusätzlich weiterhilft. Steht schon ein Name oben,
-    // ist das der echte Name des Gegenübers (falls die Bezeichnung eine
-    // eigene war); sonst der Code, damit man den wartenden Chat wiederfindet.
-    const zusatz = (session.peerNick || '').trim();
-    const hinweis = zusatz && zusatz !== name ? zusatz : (zusatz ? '' : session.code);
-    const meta = hinweis ? `${hinweis} · ${relativeTime(session.lastActivity)}` : relativeTime(session.lastActivity);
-    text.appendChild(make('span', 'chat-list__meta', meta));
+    text.appendChild(chatListMeta(session));
     button.append(avatar, text);
-    if (session.unread > 0) button.appendChild(make('span', 'pill', String(session.unread)));
+    const ungelesen = session.unread ?? 0;
+    if (ungelesen > 0) {
+      const punkt = make('span', 'pill pill--unread', ungelesen > 99 ? '99+' : String(ungelesen));
+      punkt.setAttribute('aria-label', t('unreadCount', { n: ungelesen }));
+      button.appendChild(punkt);
+    }
     button.appendChild(icon('i-chevron-down'));
-    button.addEventListener('click', () => void enterChat(session.code, { known: session }));
+    button.addEventListener('click', () => void openFromList(session));
     onLongPress(button, () => openSessionMenu(session));
     item.appendChild(button);
     list.appendChild(item);
+  }
+}
+
+/**
+ * Die zweite Zeile eines Eintrags.
+ *
+ * Schreibt dort gerade jemand, hat das Vorrang - das ist die einzige Angabe,
+ * die gleich wieder verschwindet. Sonst steht da, wann zuletzt etwas KAM.
+ * Frueher stand hier der eigene letzte Besuch; das sah aus wie "gerade eben",
+ * obwohl seit Tagen nichts gekommen war.
+ */
+function chatListMeta(session) {
+  if (session.typing) {
+    const zeile = make('span', 'chat-list__meta is-typing', t('typing'));
+    return zeile;
+  }
+  const zusatz = (session.peerNick || '').trim();
+  const hinweis = zusatz && zusatz !== chatTitle(session) ? zusatz : (zusatz ? '' : session.code);
+  // Ohne eine einzige fremde Nachricht gibt es nichts zu datieren - dann
+  // bleibt es beim Hinweis, und wo auch der fehlt, bei gar nichts.
+  const wann = session.lastMessageAt ? relativeTime(session.lastMessageAt) : '';
+  const teile = [hinweis, wann].filter(Boolean);
+  return make('span', 'chat-list__meta', teile.join(' \u00b7 '));
+}
+
+/** Einen Chat aus der Liste oeffnen - Gruppen haben keinen Code. */
+function openFromList(session) {
+  if (session.kind === 'group') return openSession({ ...session, unread: 0 }, { screen: 'chat' });
+  return enterChat(session.code, { known: session });
+}
+
+/**
+ * Haelt die Liste auf der Startseite lebendig.
+ *
+ * Die App ist immer nur mit EINEM Raum verbunden. Ueber die anderen erfaehrt
+ * sie nichts - ausser sie fragt nach. Das tut sie hier, aber nur, solange die
+ * Liste ueberhaupt zu sehen ist und die Seite im Vordergrund steht: im
+ * Hintergrund zu fragen kostet Akku und beantwortet niemandem eine Frage.
+ */
+/**
+ * Wie oft nachgefragt wird, solange die Liste zu sehen ist.
+ *
+ * Der Takt richtet sich nach der Tippanzeige, nicht nach den Nachrichten:
+ * wer aufhoert zu tippen, gilt noch 4 s als tippend (TYPING_TIMEOUT), und der
+ * Server vergisst es nach 5 s. Wer seltener fragt als das, verpasst das
+ * Tippen regelmaessig - und eine Anzeige, die meistens fehlt, ist schlimmer
+ * als keine.
+ */
+const OVERVIEW_INTERVAL = 4500;
+let overviewTimer = null;
+let overviewLaeuft = false;
+
+function watchOverview() {
+  stopOverview();
+  if (document.visibilityState !== 'visible') return;
+  // Am Rechner steht die Liste dauerhaft neben dem Chat.
+  if (!(currentScreen() === 'start' || isDesktop())) return;
+  void refreshOverview();
+  overviewTimer = setInterval(() => void refreshOverview(), OVERVIEW_INTERVAL);
+}
+
+function stopOverview() {
+  clearInterval(overviewTimer);
+  overviewTimer = null;
+}
+
+async function refreshOverview() {
+  if (overviewLaeuft) return;
+  // Nach dem offenen Chat wird nicht gefragt: zu dem besteht eine Verbindung,
+  // ueber die alles ohnehin sofort ankommt. Am Rechner steht die Liste neben
+  // dem Chat, und ohne diese Ausnahme fragte die App dauernd nach etwas, das
+  // sie schon weiss - beim Abholen per HTTP ist das eine Anfrage zu viel je
+  // Runde, und davon lebt der Webspace nicht besser.
+  const gefragt = listSessions()
+    .filter((session) => session.token && session.roomId !== app.session?.roomId);
+  if (gefragt.length === 0) return;
+  overviewLaeuft = true;
+  try {
+    const antwort = await overview(gefragt.map((session) => ({
+      roomId: session.roomId,
+      token: session.token,
+      seq: session.readSeq ?? 0,
+    })));
+    let geaendert = false;
+    let verschwunden = 0;
+    // Erst sammeln, dann einmal schreiben. Jeden Chat einzeln zu speichern
+    // hiesse bei zehn Chats zehn volle Schreibvorgaenge - alle paar Sekunden.
+    const patches = new Map();
+    const bekanntNach = new Map(listSessions().map((session) => [session.roomId, session]));
+    for (const eintrag of antwort?.rooms ?? []) {
+      const bekannt = bekanntNach.get(eintrag.roomId);
+      if (!bekannt) continue;
+      if (eintrag.gone) {
+        // Den Raum gibt es nicht mehr - vernichtet, waehrend wir woanders
+        // waren, oder nach langer Stille verfallen. Ohne ihn ist die Sitzung
+        // wertlos: der Verlauf liegt auf dem Server, nicht hier.
+        //
+        // Aber nicht wortlos: ein Chat, der beim Hinsehen verschwindet, sieht
+        // aus wie ein Fehler der App.
+        const warOffen = eintrag.roomId === app.session?.roomId;
+        removeSession(eintrag.roomId);
+        verschwunden += 1;
+        geaendert = true;
+        // Am Rechner steht die Liste neben dem offenen Chat. Verschwindet
+        // ausgerechnet der, waere sonst die Sitzung weg und der Bildschirm
+        // noch da - mit einem Raum, den es nicht mehr gibt.
+        if (warOffen) {
+          teardownChat();
+          showStart();
+        }
+        continue;
+      }
+      // Der offene Chat zaehlt sich selbst - dort ist man ja dabei.
+      const offen = eintrag.roomId === app.session?.roomId;
+      const patch = {
+        unread: offen ? 0 : eintrag.unread ?? 0,
+        lastMessageAt: eintrag.lastMessageAt || bekannt.lastMessageAt || 0,
+        typing: offen ? false : eintrag.typing === true,
+      };
+      if (patch.unread !== (bekannt.unread ?? 0)
+        || patch.lastMessageAt !== (bekannt.lastMessageAt ?? 0)
+        || patch.typing !== (bekannt.typing === true)) {
+        patches.set(eintrag.roomId, patch);
+      }
+    }
+    if (patchSessions(patches)) geaendert = true;
+    if (geaendert) renderChatList();
+    if (verschwunden > 0) toast(t('chatGone'), 3600);
+  } catch {
+    // Keine Verbindung, kein Drama - beim naechsten Mal wieder.
+  } finally {
+    overviewLaeuft = false;
   }
 }
 
@@ -2747,6 +3269,9 @@ function formatCodeInput(input) {
 
 function wireStaticHandlers() {
   el('btn-start').addEventListener('click', () => void startNewChat());
+  el('btn-group').addEventListener('click', () => void startNewGroup());
+  el('group-back').addEventListener('click', showStart);
+  el('btn-group-to-chat').addEventListener('click', showChatScreen);
   el('btn-join').addEventListener('click', () => {
     el('code-input').value = '';
     el('btn-do-join').disabled = true;

@@ -24,6 +24,9 @@ const CSP = [
   "manifest-src 'self'",
 ].join('; ');
 
+/** Mehr Chats hat niemand offen, und eine Anfrage soll klein bleiben. */
+const MAX_OVERVIEW_ROOMS = 50;
+
 /**
  * @param {import('./store.js').Store} store
  * @param {import('./ws.js').Hub} hub
@@ -39,6 +42,7 @@ export function createApp(store, hub) {
     join: perHour(config.joinAttemptsPerHour),
     upload: perHour(config.uploadsPerHour),
     gifs: perHour(config.gifSearchesPerHour),
+    overview: perHour(config.overviewPerHour),
   };
   const sweeper = setInterval(() => {
     for (const limiter of Object.values(limits)) limiter.sweep();
@@ -161,6 +165,35 @@ export function createApp(store, hub) {
       capacity: room.capacity,
       you: { id: member.id, token: member.token },
     });
+  });
+
+  // --- Kurzfassung mehrerer Raeume auf einmal. --------------------------------
+  // Die App haelt genau eine Verbindung - zu dem Chat, der offen ist. Was in
+  // den anderen passiert, erfaehrt sie nur hier: wie viel Ungelesenes liegt,
+  // wann zuletzt etwas kam und ob dort gerade jemand schreibt. Eine Anfrage
+  // statt zwanzig Verbindungen - das laeuft auch auf einem einfachen Webspace.
+  api.post('/overview', express.json({ limit: '16kb' }), (req, res) => {
+    if (!limits.overview.take(clientKey(req))) return tooMany(res, limits.overview, clientKey(req));
+    const wanted = Array.isArray(req.body?.rooms) ? req.body.rooms.slice(0, MAX_OVERVIEW_ROOMS) : [];
+    const rooms = [];
+    for (const eintrag of wanted) {
+      const roomId = String(eintrag?.roomId ?? '');
+      const token = String(eintrag?.token ?? '');
+      if (!ROOM_ID_RE.test(roomId) || !token) continue;
+      const room = store.getRoom(roomId);
+      if (!room) {
+        // Weg ist weg - das darf die App wissen, damit sie nicht ewig fragt.
+        rooms.push({ roomId, gone: true });
+        continue;
+      }
+      const member = [...room.members.values()].find((m) => safeEqual(m.token, token));
+      // Ohne gueltiges Token gibt es keine Auskunft - und auch keinen Hinweis
+      // darauf, ob es den Raum gibt.
+      if (!member) continue;
+      const seq = Number.parseInt(String(eintrag?.seq ?? '0'), 10) || 0;
+      rooms.push({ roomId, ...store.summarise(room, member, seq) });
+    }
+    res.json({ rooms, now: Date.now() });
   });
 
   // --- Existenz pruefen, bevor der Client die WebSocket oeffnet. --------------
