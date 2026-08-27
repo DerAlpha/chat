@@ -18,7 +18,8 @@ import { listSessions, getSession, saveSession, patchSession, removeSession, get
 import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
 import {
-  el, make, icon, showScreen, currentScreen, toast, busy, openSheet, closeSheet, sheetOpen,
+  el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
+  openSheet, closeSheet, sheetOpen,
   confirmSheet, promptSheet, openLightbox, closeLightbox, lightboxOpen,
   formatClock, formatDay, sameDay, relativeTime, linkify, initial, onLongPress, copyText,
 } from './ui.js';
@@ -71,6 +72,7 @@ function boot() {
   applyTheme(app.prefs.theme);
   applyTranslations();
   wireStaticHandlers();
+  onLayoutChange(placeFeatures);
   onLanguageChange(() => {
     applyTranslations();
     refreshDynamicLabels();
@@ -120,6 +122,17 @@ function showStart() {
   teardownChat();
   renderChatList();
   showScreen('start');
+}
+
+/**
+ * Die drei Stichpunkte stehen am Handy unter der Chatliste. Am Rechner ist
+ * dort kein Platz - dafuer ist die rechte Haelfte leer, solange kein Chat
+ * offen ist. Also ziehen sie um, statt zweimal im Quelltext zu stehen.
+ */
+function placeFeatures() {
+  const features = el('features');
+  const target = el(isDesktop() ? 'slot-empty' : 'slot-start');
+  if (features && target && features.parentElement !== target) target.appendChild(features);
 }
 
 // ===========================================================================
@@ -315,6 +328,7 @@ function showInvite(session, { fromChat = false } = {}) {
   }
   el('btn-share').hidden = typeof navigator.share !== 'function';
   setInviteWaiting(fromChat || Boolean(app.peer));
+  renderChatList();
   showScreen('invite');
 }
 
@@ -629,6 +643,8 @@ function onPresence(frame) {
 // ===========================================================================
 
 function showChatScreen() {
+  // Am Rechner steht die Liste daneben und soll den offenen Chat hervorheben.
+  renderChatList();
   showScreen('chat');
   updatePeerStatus();
   redrawAll();
@@ -746,6 +762,15 @@ function buildMessageNode(entry, sameSender) {
 
   if (!entry.deleted) {
     onLongPress(bubble, () => openMessageMenu(entry));
+    // Ohne Finger gibt es kein langes Druecken. Am Rechner erscheint deshalb
+    // beim Ueberfahren ein Knopf neben der Blase; die rechte Maustaste tut es
+    // weiterhin auch.
+    const more = make('button', 'msg__more');
+    more.type = 'button';
+    more.setAttribute('aria-label', t('menu'));
+    more.appendChild(icon('i-more'));
+    more.addEventListener('click', () => openMessageMenu(entry));
+    wrapper.appendChild(more);
   }
   entry.node = wrapper;
   return wrapper;
@@ -1598,7 +1623,8 @@ function refreshDynamicLabels() {
     updatePeerStatus();
     redrawAll();
   }
-  if (currentScreen() === 'start') renderChatList();
+  // Am Rechner steht die Liste immer da - also auch immer nachziehen.
+  if (currentScreen() === 'start' || isDesktop()) renderChatList();
   if (currentScreen() === 'invite') setInviteWaiting(Boolean(app.peer));
 }
 
@@ -1673,6 +1699,10 @@ function renderChatList() {
     const item = make('li');
     const button = make('button', 'chat-list__item');
     button.type = 'button';
+    if (session.roomId === app.session?.roomId) {
+      button.classList.add('is-active');
+      button.setAttribute('aria-current', 'true');
+    }
     const name = session.peerNick || t('partner');
     const avatar = make('div', 'avatar avatar--sm', initial(name));
     const text = make('div', 'chat-list__text');

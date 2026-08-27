@@ -47,6 +47,16 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Eingabefelder mit 16 px, damit iOS beim Antippen nicht hineinzoomt
 - Randbereiche (Notch, Home-Indicator) werden respektiert
 - Die Bildschirmtastatur schiebt die Ansicht mit, statt sie zu verdecken
+- Langes Drücken öffnet das Nachrichtenmenü, statt Text zu markieren
+
+**Am Rechner ein eigenes Layout**
+- Ab 900 px zwei Spalten: links die Chatliste, rechts die Unterhaltung
+- Ohne offenen Chat steht rechts ein Platzhalter statt einer leeren Fläche
+- Der Menüknopf einer Nachricht erscheint beim Überfahren mit der Maus;
+  die rechte Maustaste tut es genauso
+- Text lässt sich mit der Maus ganz normal markieren
+- Enter schickt ab, Umschalt+Enter macht eine neue Zeile
+- Halbhohe Menüs werden zu Dialogen in der Fenstermitte
 
 ## Loslegen
 
@@ -103,6 +113,13 @@ Auf einem Webspace mit SSH genügt ein Befehl:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/claude/chat-website-no-signup-qpswkk/deploy/install-webspace.sh | sh
+```
+
+Danach ist Aktualisieren ein Einzeiler – der Installer merkt sich Document
+Root, Datenordner und Adresse:
+
+```bash
+ssh DEINNUTZER@DEINHOST 'sh ~/fluesterchat-update.sh'
 ```
 
 Ohne SSH tut es der FTP-Weg. Beides steht in [`deploy/lima-city.md`](deploy/lima-city.md).
@@ -240,7 +257,7 @@ server/
 public/
   index.html    Grundgerüst inklusive Icon-Sprite
   js/base.js    Wo die App hängt - aus dem eigenen Modulpfad abgeleitet
-  css/app.css   Mobile-First-Gestaltung, hell und dunkel
+  css/app.css   Mobile First, ab 900 px zwei Spalten; hell und dunkel
   js/crypto.js  Code-Erzeugung, Schlüsselableitung, Ver- und Entschlüsselung
   js/qr.js      Eigener QR-Encoder (Byte-Modus, Stufe M, Versionen 1–10)
   js/net.js     REST-Aufrufe; WebSocket oder Long-Polling, je nach Server
@@ -259,10 +276,10 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 77 Unit-Tests (Server, Krypto, QR, i18n)
-npm run test:e2e          # 26 End-to-End-Tests mit zwei simulierten Smartphones
-npm run test:e2e:subpath  # dieselben 26 Tests unter /chats
-npm run test:e2e:php      # dieselben 26 Tests gegen das PHP-Backend
+npm test                  # 81 Unit-Tests (Server, Krypto, QR, i18n, Installer)
+npm run test:e2e          # 29 Tests am Smartphone + 6 am Rechner
+npm run test:e2e:subpath  # dieselben Tests unter /chats
+npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
 ```
 

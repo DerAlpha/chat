@@ -66,10 +66,35 @@ ssh DEINNUTZER@DEINHOST 'mkdir -p ~/fc \
 | `--archive ~/paket.tar.gz` | Direkt aus `.tar.gz` oder `.zip` |
 | `--data ~/woanders` | Anderer Ort für die Daten |
 | `--force` | Auch installieren, wenn im Verzeichnis schon etwas anderes liegt |
+| `--update` | Nur der Deutlichkeit halber – gemerkte Werte gelten ohnehin |
 
-Erneutes Ausführen aktualisiert. Eine eigene `api/lib/config.local.php`, der
-Datenordner und fremde Dateien im Verzeichnis bleiben unangetastet – laufende
-Chats überleben das.
+Nach dem ersten Mal braucht keiner dieser Schalter mehr angegeben zu werden:
+ein bloßes erneutes Ausführen nimmt die gemerkten Werte. Ein trotzdem
+angegebener Schalter gewinnt.
+
+### Später aktualisieren: ein Wort
+
+Beim Installieren merkt sich das Skript Document Root, Datenordner und Adresse
+in `~/.fluesterchat-install.conf` und legt `~/fluesterchat-update.sh` an. Ab
+dann genügt vom eigenen Rechner aus:
+
+```bash
+ssh DEINNUTZER@DEINHOST 'sh ~/fluesterchat-update.sh'
+```
+
+Oder, wenn du ohnehin schon angemeldet bist:
+
+```bash
+sh ~/fluesterchat-update.sh
+```
+
+Der Aktualisierer holt sich jedes Mal die neueste Fassung des Installers – so
+wandern auch Verbesserungen am Installer selbst mit. Eine eigene
+`api/lib/config.local.php`, der Datenordner und fremde Dateien im Verzeichnis
+bleiben unangetastet; laufende Chats überleben das Update.
+
+Danach im Browser einmal hart neu laden (Strg+Umschalt+R), sonst hält der
+Service Worker noch kurz die alte Fassung.
 
 Ohne SSH geht es genauso gut per FTP; das steht direkt darunter.
 
@@ -141,9 +166,10 @@ ob `.htaccess` greift – und sagt bei jedem Haken dazu, was zu tun ist. Steht
 dort **„Alles bereit"**, ist die Seite unter `https://fluester.4lima.de/`
 einsatzbereit. Die Prüfdatei danach ruhig löschen.
 
-## Aktualisieren
+## Aktualisieren per FTP
 
-Paket neu bauen und den Inhalt erneut hochladen. Zwei Dinge dabei:
+Mit SSH ist es der eine Befehl von oben. Ohne SSH: Paket neu bauen und den
+Inhalt erneut hochladen. Zwei Dinge dabei:
 
 - `api/lib/config.local.php` (falls angelegt) **nicht überschreiben**.
 - Der Ordner `fluesterchat-data` bleibt unangetastet – laufende Chats

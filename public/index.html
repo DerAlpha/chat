@@ -83,20 +83,23 @@
         <ul class="chat-list" id="chat-list"></ul>
       </section>
 
-      <ul class="features">
-        <li>
-          <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>
-          <div><strong data-i18n="featureE2e"></strong><span data-i18n="featureE2eText"></span></div>
-        </li>
-        <li>
-          <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>
-          <div><strong data-i18n="featureNoAccount"></strong><span data-i18n="featureNoAccountText"></span></div>
-        </li>
-        <li>
-          <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg>
-          <div><strong data-i18n="featurePhotos"></strong><span data-i18n="featurePhotosText"></span></div>
-        </li>
-      </ul>
+      <!-- Die Stichpunkte ziehen am Rechner in den Platzhalter nebenan um. -->
+      <div class="slot" id="slot-start">
+        <ul class="features" id="features">
+          <li>
+            <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>
+            <div><strong data-i18n="featureE2e"></strong><span data-i18n="featureE2eText"></span></div>
+          </li>
+          <li>
+            <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>
+            <div><strong data-i18n="featureNoAccount"></strong><span data-i18n="featureNoAccountText"></span></div>
+          </li>
+          <li>
+            <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg>
+            <div><strong data-i18n="featurePhotos"></strong><span data-i18n="featurePhotosText"></span></div>
+          </li>
+        </ul>
+      </div>
 
       <footer class="page-footer">
         <p class="muted center" data-i18n="privacyNote"></p>
@@ -245,6 +248,17 @@
     <input class="visually-hidden" id="file-gallery" type="file" accept="image/*" multiple tabindex="-1">
     <input class="visually-hidden" id="file-camera" type="file" accept="image/*" capture="environment" tabindex="-1">
     <input class="visually-hidden" id="file-any" type="file" tabindex="-1">
+  </section>
+
+  <!-- ---------------------------------------- Platzhalter neben der Liste -->
+  <section class="screen screen--empty" id="screen-empty" hidden aria-labelledby="empty-title">
+    <div class="empty">
+      <div class="logo" aria-hidden="true"><svg><use href="#i-lock"/></svg></div>
+      <h2 id="empty-title" data-i18n="appName">Flüsterchat</h2>
+      <p class="muted" data-i18n="tagline"></p>
+      <div class="slot" id="slot-empty"></div>
+      <p class="muted small" data-i18n="emptyHint"></p>
+    </div>
   </section>
 
   <!-- -------------------------------------------------------------- Fehler -->

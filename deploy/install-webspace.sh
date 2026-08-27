@@ -12,11 +12,19 @@
 # Weitere Schalter: --docroot ~/html, --url https://…, --data ~/…, --force
 #
 # Erneut ausführen = aktualisieren. Eine eigene api/lib/config.local.php
-# und der Datenordner bleiben dabei unangetastet.
+# und der Datenordner bleiben dabei unangetastet. Der Installer merkt sich
+# Docroot, Datenordner und Adresse in ~/.fluesterchat-install.conf und legt
+# ~/fluesterchat-update.sh an - danach genuegt zum Aktualisieren:
+#
+#   ssh BENUTZER@SERVER 'sh ~/fluesterchat-update.sh'
 # ---------------------------------------------------------------------------
 set -eu
 
-REPO_URL="https://codeload.github.com/DerAlpha/chat/tar.gz/refs/heads/claude/chat-website-no-signup-qpswkk"
+BRANCH="claude/chat-website-no-signup-qpswkk"
+REPO_URL="https://codeload.github.com/DerAlpha/chat/tar.gz/refs/heads/$BRANCH"
+INSTALLER_URL="https://raw.githubusercontent.com/DerAlpha/chat/refs/heads/$BRANCH/deploy/install-webspace.sh"
+CONF="$HOME/.fluesterchat-install.conf"
+UPDATER="$HOME/fluesterchat-update.sh"
 DOCROOT=""
 SITE_URL=""
 DATA_DIR=""
@@ -37,10 +45,27 @@ while [ $# -gt 0 ]; do
         --url)     SITE_URL="${2:-}"; shift 2 ;;
         --data)    DATA_DIR="${2:-}"; shift 2 ;;
         --force)   FORCE=1; shift ;;
-        -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # --update ist nur noch Hoeflichkeit: gemerkte Werte gelten ohnehin.
+        --update)  shift ;;
+        -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Unbekannte Option: $1" ;;
     esac
 done
+
+# --- Was beim letzten Mal galt ----------------------------------------------
+# Gesetzte Schalter haben Vorrang; alles andere kommt aus der Merkdatei.
+# So ist ein blosses erneutes Ausfuehren schon die Aktualisierung.
+if [ -f "$CONF" ]; then
+    OLD_DOCROOT=""; OLD_DATA_DIR=""; OLD_SITE_URL=""
+    # shellcheck disable=SC1090
+    . "$CONF" 2>/dev/null || true
+    [ -n "$DOCROOT" ]  || DOCROOT="$OLD_DOCROOT"
+    [ -n "$DATA_DIR" ] || DATA_DIR="$OLD_DATA_DIR"
+    [ -n "$SITE_URL" ] || SITE_URL="$OLD_SITE_URL"
+    KNOWN=1
+else
+    KNOWN=0
+fi
 
 # --- Werkzeuge -------------------------------------------------------------
 step "Werkzeuge"
@@ -60,6 +85,7 @@ say "Entpacken mit tar"
 
 # --- Document Root ---------------------------------------------------------
 step "Document Root"
+[ "$KNOWN" -eq 1 ] && say "aus $CONF übernommen"
 
 # Zeigt, was im Home liegt - damit man beim Nachbessern nicht raten muss.
 list_candidates() {
@@ -205,6 +231,50 @@ date > "$DOCROOT/$MARKER"
 chmod 644 "$DOCROOT/.htaccess" "$DOCROOT/.user.ini" 2>/dev/null || true
 say "$(find "$DOCROOT" -type f | wc -l | tr -d ' ') Dateien liegen bereit"
 
+# --- Fuers naechste Mal merken ---------------------------------------------
+step "Aktualisieren vorbereiten"
+# Beim naechsten Mal soll niemand mehr Pfade heraussuchen muessen.
+{
+    printf '# Von install-webspace.sh angelegt. Wird beim Aktualisieren gelesen.\n'
+    printf "OLD_DOCROOT='%s'\n"  "$DOCROOT"
+    printf "OLD_DATA_DIR='%s'\n" "$DATA_DIR"
+    printf "OLD_SITE_URL='%s'\n" "$SITE_URL"
+} > "$CONF"
+chmod 600 "$CONF" 2>/dev/null || true
+say "$CONF geschrieben"
+
+# Der Aktualisierer holt sich jedes Mal den aktuellen Installer - so wandern
+# auch Verbesserungen am Installer selbst mit.
+cat > "$UPDATER" <<UPDATER_EOF
+#!/bin/sh
+# Flüsterchat aktualisieren - angelegt von install-webspace.sh.
+#
+#   sh ~/fluesterchat-update.sh
+#
+# Holt die neueste Fassung und legt sie über die vorhandene Installation.
+# Docroot und Datenordner stehen in ~/.fluesterchat-install.conf; die eigene
+# api/lib/config.local.php und alle gespeicherten Chats bleiben unangetastet.
+set -eu
+[ -f "\$HOME/.fluesterchat-install.conf" ] || {
+    printf 'Keine Installation gefunden (%s fehlt).\n' "\$HOME/.fluesterchat-install.conf" >&2
+    exit 1
+}
+TMP=\$(mktemp -d 2>/dev/null || mktemp -d -t fluesterchat)
+trap 'rm -rf "\$TMP"' EXIT INT TERM
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "\$TMP/install.sh" '$INSTALLER_URL'
+elif command -v wget >/dev/null 2>&1; then
+    wget -qO "\$TMP/install.sh" '$INSTALLER_URL'
+else
+    printf 'Weder curl noch wget vorhanden.\n' >&2
+    exit 1
+fi
+[ -s "\$TMP/install.sh" ] || { printf 'Der Installer kam leer an.\n' >&2; exit 1; }
+sh "\$TMP/install.sh" --update "\$@"
+UPDATER_EOF
+chmod 755 "$UPDATER" 2>/dev/null || true
+say "$UPDATER angelegt"
+
 # --- Nachsehen -------------------------------------------------------------
 step "Kurze Kontrolle"
 for needed in index.html .htaccess .user.ini api/index.php img/icon.svg js/app.js; do
@@ -234,4 +304,8 @@ else
 fi
 printf '\nDie Prüfseite sagt, ob PHP-Version, Rechte und .htaccess passen.\n'
 printf 'Wenn dort "Alles bereit" steht, kann api/setup-check.php weg.\n'
+printf '\nSpäter aktualisieren - ein Befehl, mehr nicht:\n'
+printf '    sh ~/fluesterchat-update.sh\n'
+printf 'oder vom eigenen Rechner aus, ohne sich anzumelden:\n'
+printf "    ssh BENUTZER@SERVER 'sh ~/fluesterchat-update.sh'\n"
 printf '%s\n' '---------------------------------------------------------------'

@@ -240,8 +240,11 @@ button, input, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   cursor: pointer;
+  user-select: none;
 }
 .chat-list__item:active { transform: scale(.99); }
+.chat-list__item:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.chat-list__item.is-active { border-color: var(--accent); background: var(--accent-soft); }
 .chat-list__text { flex: 1; min-width: 0; }
 .chat-list__name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-list__meta { display: block; font-size: .82rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -401,7 +404,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .unread-sep { align-self: stretch; display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--accent); font-size: .76rem; font-weight: 600; }
 .unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35; }
 
-.msg { display: flex; flex-direction: column; max-width: 82%; }
+.msg { display: flex; flex-direction: column; max-width: 82%; position: relative; }
 .msg--out { align-self: flex-end; align-items: flex-end; }
 .msg--in { align-self: flex-start; align-items: flex-start; }
 .msg + .msg--out.msg--same, .msg + .msg--in.msg--same { margin-top: 0; }
@@ -426,6 +429,45 @@ button, input, textarea { font: inherit; color: inherit; }
 .bubble.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bubble.is-media { padding: 4px 4px 6px; }
 .bubble.is-deleted { font-style: italic; opacity: .65; }
+
+/* Mit dem Finger heißt langes Drücken "Menü öffnen" - nicht "Text markieren".
+   Ohne diese Regel legt der Browser beim Halten seine eigene Auswahl samt Lupe
+   über die Nachricht, und das Menü kommt hinter einem blauen Block hoch.
+   Am Schreibtisch bleibt das Markieren erhalten: dort öffnet die rechte
+   Maustaste das Menü, und kopieren will man von Hand. */
+@media (pointer: coarse) {
+  .bubble {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+/* Der Weg zum Menü für alle ohne Finger: erscheint beim Überfahren. */
+.msg__more {
+  position: absolute;
+  top: 2px;
+  width: 30px; height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  display: none;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.msg--in .msg__more { right: -36px; }
+.msg--out .msg__more { left: -36px; }
+.msg__more .icon { width: 17px; height: 17px; }
+@media (hover: hover) and (pointer: fine) {
+  .msg__more { display: grid; }
+  .msg:hover .msg__more,
+  .msg__more:focus-visible { opacity: 1; }
+  .msg__more:hover { color: var(--text); background: var(--bg-sunken); }
+}
 
 .bubble__text { white-space: pre-wrap; }
 .bubble__text a { color: inherit; text-underline-offset: 2px; }
@@ -740,12 +782,101 @@ button, input, textarea { font: inherit; color: inherit; }
 .typing-bubble i:nth-child(2) { animation-delay: .15s; }
 .typing-bubble i:nth-child(3) { animation-delay: .3s; }
 
-/* ---------------------------------------------------- Größere Bildschirme --- */
+/* ------------------------------------------------------------ Platzhalter --- */
 
-@media (min-width: 720px) {
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  max-width: 380px;
+}
+/* Der Platz, an dem die drei Stichpunkte je nach Bildschirm landen. */
+.slot { display: contents; }
+/* Nur die Fließtexte des Platzhalters stehen mittig - eine Aufzählung mit
+   zentrierten Zeilen liest sich schlecht. */
+.empty .features { text-align: left; width: 100%; max-width: 320px; }
+
+/* ------------------------------------------- Tablet: eine zentrierte Spalte --- */
+
+@media (min-width: 720px) and (max-width: 899.98px) {
   #app { max-width: 560px; margin: 0 auto; box-shadow: var(--shadow); background: var(--bg-elevated); }
   .messages { padding-left: 18px; padding-right: 18px; }
   .image-wrap { max-width: 300px; }
+}
+
+/* =========================================================================
+   Rechner: zwei Spalten. Links die Startseite als bleibende Seitenleiste,
+   rechts der Chat - oder ein Platzhalter, solange keiner offen ist.
+   Die Grenze liegt bei 900 px; darunter bleibt es beim Ablauf fürs Handy,
+   ein Bildschirm nach dem anderen.
+   ========================================================================= */
+
+@media (min-width: 900px) {
+  body { background: var(--bg-sunken); }
+
+  #app {
+    flex-direction: row;
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  /* --- Seitenleiste (die Startseite) --- */
+  #screen-start {
+    flex: 0 0 340px;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+    padding: 22px 18px calc(var(--safe-bottom) + 18px);
+  }
+  #screen-start .screen__inner { max-width: none; gap: 18px; height: 100%; }
+  /* Kopfzeile statt Aufmacher: nebeneinander und deutlich kleiner. */
+  #screen-start .hero { flex-direction: row; align-items: center; text-align: left; gap: 12px; padding-top: 0; }
+  #screen-start .hero h1 { font-size: 1.25rem; }
+  #screen-start .hero__tagline { display: none; }
+  #screen-start .logo { width: 42px; height: 42px; border-radius: 13px; }
+  #screen-start .logo svg { width: 23px; height: 23px; }
+  #screen-start .btn--lg { min-height: 46px; font-size: .96rem; }
+  #screen-start .stack { gap: 8px; }
+  #screen-start .chats { flex: 0 1 auto; min-height: 0; }
+  /* Drei Chips passen in 340 px nur etwas gedrungener nebeneinander. */
+  #screen-start .btn--chip { min-height: 40px; padding: 0 11px; font-size: .8rem; }
+  #screen-start .page-footer .muted { font-size: .8rem; }
+
+  /* --- Rechte Spalte --- */
+  .screen[data-active]:not(#screen-start) { flex: 1 1 auto; min-width: 0; }
+  .screen--empty[data-active] { display: grid; place-items: center; padding: 40px; }
+
+  /* Der Weg zurueck ist die Liste nebenan - der Pfeil waere nur im Weg. */
+  #chat-back { display: none; }
+
+  .chat-header { padding-left: 18px; padding-right: 14px; }
+  /* Rechts und links Luft: dort erscheint der Menue-Knopf neben der Blase. */
+  /* Der Verlauf braucht einen eigenen Grund - sonst geht die weiße
+     Empfangsblase im weißen Fenster unter. */
+  .messages { padding: 18px 46px 8px; gap: 4px; background: var(--bg); }
+  .msg { max-width: min(72%, 620px); }
+  .image-wrap { max-width: 340px; }
+  .composer { padding: 10px 18px; }
+  .composer__input { max-height: 180px; }
+  .jump-down { right: 26px; bottom: 104px; }
+
+  /* Was am Handy von unten hochfaehrt, gehoert am Rechner in die Mitte. */
+  .sheet { align-items: center; }
+  .sheet__panel {
+    max-width: 420px;
+    max-height: 78dvh;
+    border-radius: 20px;
+    padding: 14px 18px 18px;
+    animation: fade .16s ease;
+  }
+  .sheet__grip { display: none; }
+  .sheet__title { margin-bottom: 10px; }
+  .lightbox img { padding-bottom: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

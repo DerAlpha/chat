@@ -1,5 +1,5 @@
 import { test, expect, devices } from '@playwright/test';
-import { makePng, createChat, joinChat, sendText, bubbles } from './helpers.js';
+import { makePng, createChat, joinChat, sendText, bubbles, longPress } from './helpers.js';
 
 /** Zwei Geraete, ein Code. */
 async function pairUp(browser) {
@@ -215,6 +215,36 @@ test('Chat löschen räumt bei beiden auf', async ({ browser }) => {
   await expect(pageA.locator('#screen-start')).toBeVisible({ timeout: 15_000 });
   await expect(pageB.locator('#screen-start')).toBeVisible({ timeout: 15_000 });
   await expect(pageB.locator('#chats-section')).toBeHidden();
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Langes Drücken öffnet das Menü, statt Text zu markieren', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  await sendText(pageA, 'Diesen Text soll der Finger nicht markieren');
+  await expect(bubbles(pageB).last()).toContainText('Diesen Text');
+  const bubble = bubbles(pageB).last().locator('.bubble');
+
+  // Am Touchgerät soll der Browser gar nicht erst anfangen zu markieren.
+  await expect(bubble).toHaveCSS('user-select', 'none');
+
+  // Und eine Markierung, die noch von woanders herrührt - hier aus der
+  // Kopfzeile -, muss verschwinden, sobald das Menü kommt. Sonst leuchtet sie
+  // blau hinter dem Menü weiter.
+  await pageB.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById('peer-name'));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  expect(await pageB.evaluate(() => window.getSelection().toString())).not.toBe('');
+
+  await longPress(pageB, bubble);
+  await expect(pageB.locator('#sheet')).toBeVisible();
+  expect(await pageB.evaluate(() => window.getSelection().toString())).toBe('');
+  await expect(pageB.getByRole('button', { name: 'Antworten' })).toBeVisible();
 
   await contextA.close();
   await contextB.close();

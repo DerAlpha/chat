@@ -14,6 +14,7 @@ const STRINGS = {
     featureNoAccountText: 'Code erzeugen, teilen, losschreiben.',
     featurePhotos: 'Fotos & Sprache',
     featurePhotosText: 'Bilder aus der Galerie, Kamera und Sprachnachrichten.',
+    emptyHint: 'Links einen Chat auswählen – oder oben einen neuen starten.',
 
     yourCode: 'Dein Einmal-Code',
     codeHint: 'Gib diesen Code an genau eine Person weiter. Danach ist er verbraucht.',
@@ -144,6 +145,7 @@ const STRINGS = {
     featureNoAccountText: 'Create a code, share it, start typing.',
     featurePhotos: 'Photos & voice',
     featurePhotosText: 'Gallery pictures, camera shots and voice notes.',
+    emptyHint: 'Pick a chat on the left – or start a new one above.',
 
     yourCode: 'Your one-time code',
     codeHint: 'Give this code to exactly one person. After that it is used up.',

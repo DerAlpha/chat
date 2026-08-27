@@ -24,24 +24,59 @@ export function icon(name, className = 'icon') {
 
 // -------------------------------------------------------------------- Screens
 
-const SCREENS = ['start', 'invite', 'join', 'chat', 'error'];
+/** Bildschirme, von denen immer hoechstens einer im Hauptbereich steht. */
+const PANES = ['invite', 'join', 'chat', 'error'];
+
+/**
+ * Ab hier ist Platz fuer zwei Spalten. Darunter bleibt es beim Handy-Ablauf:
+ * ein Bildschirm nach dem anderen.
+ */
+const DESKTOP_QUERY = '(min-width: 900px)';
+const desktop = typeof window.matchMedia === 'function'
+  ? window.matchMedia(DESKTOP_QUERY)
+  : null;
+
+export const isDesktop = () => desktop?.matches === true;
+
 let activeScreen = null;
+const layoutListeners = new Set();
+
+/** Wird gerufen, wenn zwischen Handy- und Rechner-Aufteilung gewechselt wird. */
+export function onLayoutChange(listener) {
+  layoutListeners.add(listener);
+  return () => layoutListeners.delete(listener);
+}
+
+function toggleScreen(node, on) {
+  if (!node) return;
+  node.hidden = !on;
+  if (on) node.setAttribute('data-active', '');
+  else node.removeAttribute('data-active');
+}
+
+/**
+ * Am Handy ist genau ein Bildschirm zu sehen. Am Rechner steht die Startseite
+ * dauerhaft als Seitenleiste daneben - und wo sonst der Chat waere, wartet
+ * solange ein Platzhalter.
+ */
+function applyLayout() {
+  toggleScreen(el('screen-start'), activeScreen === 'start' || isDesktop());
+  for (const pane of PANES) toggleScreen(el(`screen-${pane}`), pane === activeScreen);
+  toggleScreen(el('screen-empty'), isDesktop() && activeScreen === 'start');
+  document.body.dataset.layout = isDesktop() ? 'desktop' : 'mobile';
+  for (const listener of layoutListeners) listener(isDesktop());
+}
 
 export function showScreen(name) {
-  for (const screen of SCREENS) {
-    const node = el(`screen-${screen}`);
-    if (!node) continue;
-    if (screen === name) {
-      node.hidden = false;
-      node.setAttribute('data-active', '');
-    } else {
-      node.hidden = true;
-      node.removeAttribute('data-active');
-    }
-  }
   activeScreen = name;
   document.body.dataset.screen = name;
+  applyLayout();
 }
+
+// Fenster umgezogen oder gedreht: die Aufteilung neu bewerten.
+desktop?.addEventListener?.('change', () => {
+  if (activeScreen) applyLayout();
+});
 
 export const currentScreen = () => activeScreen;
 
@@ -272,6 +307,24 @@ export function initial(name) {
 // ------------------------------------------------------------- Langes Druecken
 
 /**
+ * Nach dem Loslassen schickt der Browser noch einen Klick hinterher - auch
+ * nach langem Druecken. Der landet auf dem Hintergrund des eben geoeffneten
+ * Menues und wuerde es sofort wieder schliessen. Bisher hat der Browser den
+ * Klick von sich aus verschluckt, weil er beim Halten zu markieren anfing;
+ * seit das unterbunden ist, muessen wir das selbst tun.
+ */
+function swallowNextClick() {
+  const swallow = (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    clearTimeout(timer);
+  };
+  window.addEventListener('click', swallow, { capture: true, once: true });
+  // Kommt gar kein Klick, muss der Fanghaken trotzdem wieder weg.
+  const timer = setTimeout(() => window.removeEventListener('click', swallow, true), 600);
+}
+
+/**
  * Ruft `handler` bei langem Druecken (Touch) oder Rechtsklick auf.
  * @returns {() => void} Abmelde-Funktion
  */
@@ -280,6 +333,7 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
   let startX = 0;
   let startY = 0;
   let fired = false;
+  let byTouch = false;
 
   const clear = () => {
     clearTimeout(timer);
@@ -289,6 +343,7 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
   const down = (event) => {
     if (event.button != null && event.button !== 0 && event.pointerType === 'mouse') return;
     fired = false;
+    byTouch = event.pointerType !== 'mouse';
     startX = event.clientX;
     startY = event.clientY;
     clear();
@@ -304,11 +359,26 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
     if (Math.abs(event.clientX - startX) > 12 || Math.abs(event.clientY - startY) > 12) clear();
   };
 
-  const up = () => clear();
+  const up = () => {
+    clear();
+    if (fired) swallowNextClick();
+    byTouch = false;
+  };
 
   const contextmenu = (event) => {
     event.preventDefault();
     if (!fired) handler(event);
+  };
+
+  // Mit dem Finger soll erst gar keine Markierung entstehen. Mit der Maus
+  // bleibt das Markieren, wie man es vom Schreibtisch kennt.
+  //
+  // Die CSS-Regel dazu haengt an "(pointer: coarse)" und trifft damit reine
+  // Touchgeraete. Auf einem Notebook mit Touchscreen ist der Hauptzeiger die
+  // Maus - dort greift nur diese Zeile, und zwar genau dann, wenn wirklich
+  // ein Finger im Spiel ist.
+  const selectstart = (event) => {
+    if (byTouch) event.preventDefault();
   };
 
   node.addEventListener('pointerdown', down);
@@ -317,6 +387,7 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
   node.addEventListener('pointercancel', up);
   node.addEventListener('pointerleave', up);
   node.addEventListener('contextmenu', contextmenu);
+  node.addEventListener('selectstart', selectstart);
 
   return () => {
     clear();
@@ -326,6 +397,7 @@ export function onLongPress(node, handler, { delay = 480 } = {}) {
     node.removeEventListener('pointercancel', up);
     node.removeEventListener('pointerleave', up);
     node.removeEventListener('contextmenu', contextmenu);
+    node.removeEventListener('selectstart', selectstart);
   };
 }
 

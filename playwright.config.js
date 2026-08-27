@@ -72,10 +72,29 @@ export default defineConfig({
   projects: [
     {
       name: 'Smartphone',
+      testIgnore: /desktop\.spec\.js/,
       use: {
         ...devices['Pixel 5'],
         launchOptions,
         // Die Oberflaeche ist zweisprachig - getestet wird die deutsche Fassung.
+        locale: 'de-DE',
+        timezoneId: 'Europe/Berlin',
+        permissions: ['clipboard-read', 'clipboard-write'],
+      },
+    },
+    {
+      // Maus statt Finger, breites Fenster: das Zwei-Spalten-Layout.
+      // Bewusst ohne devices['Desktop Chrome'] - das verlangt ein installiertes
+      // Google Chrome; hier soll dasselbe Chromium laufen wie sonst auch.
+      name: 'Rechner',
+      testMatch: /desktop\.spec\.js/,
+      use: {
+        browserName: 'chromium',
+        launchOptions,
+        viewport: { width: 1280, height: 860 },
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
         locale: 'de-DE',
         timezoneId: 'Europe/Berlin',
         permissions: ['clipboard-read', 'clipboard-write'],
