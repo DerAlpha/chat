@@ -1,6 +1,8 @@
 import express from 'express';
 import { config } from './config.js';
 import { callSupport, iceServers } from './ice.js';
+import { PAGE_SIZE, fetchMedia, searchGifs, verifyRef } from './gifs.js';
+import { serverSecret } from './secrets.js';
 import { log } from './logger.js';
 import { BadRequest, BLOB_ID_RE, ROOM_ID_RE, safeEqual } from './store.js';
 import { perHour } from './ratelimit.js';
@@ -35,6 +37,7 @@ export function createApp(store, hub) {
     create: perHour(config.createRoomPerHour),
     join: perHour(config.joinAttemptsPerHour),
     upload: perHour(config.uploadsPerHour),
+    gifs: perHour(config.gifSearchesPerHour),
   };
   const sweeper = setInterval(() => {
     for (const limiter of Object.values(limits)) limiter.sweep();
@@ -71,6 +74,8 @@ export function createApp(store, hub) {
       // Ob Anrufe überhaupt angeboten werden, hängt daran, ob ein
       // Aushandlungs- oder Relaisdienst eingetragen ist.
       call: callSupport(config),
+      // Ohne Giphy-Schlüssel bleibt die GIF-Suche unsichtbar statt kaputt.
+      gifs: Boolean(config.giphyKey),
     });
   });
 
@@ -115,6 +120,49 @@ export function createApp(store, hub) {
       capacity: config.maxMembersPerRoom,
       full: room.members.size >= config.maxMembersPerRoom,
     });
+  });
+
+  // --- GIF-Suche ueber das eigene Backend. -----------------------------------
+  // Giphy sieht diesen Server, nicht die Nutzer. Der Browser bekommt nur
+  // signierte, befristete Verweise - keine einzige Giphy-Adresse.
+  api.get('/gifs', async (req, res, next) => {
+    try {
+      if (!config.giphyKey) {
+        return res.status(503).json({ error: 'no_gif_service', message: 'Keine GIF-Suche eingerichtet.' });
+      }
+      if (!limits.gifs.take(clientKey(req))) return tooMany(res, limits.gifs, clientKey(req));
+      const query = String(req.query.q ?? '').slice(0, 80);
+      const offset = Number.parseInt(String(req.query.offset ?? '0'), 10) || 0;
+      const result = await searchGifs({
+        key: config.giphyKey,
+        query,
+        offset,
+        rating: config.giphyRating,
+        secret: serverSecret(config.dataDir),
+      });
+      res.json(result);
+    } catch (err) {
+      log.warn('GIF-Suche fehlgeschlagen:', err.message);
+      res.status(502).json({ error: 'gif_upstream', message: 'Die GIF-Suche antwortet gerade nicht.' });
+    }
+  });
+
+  // Ein Bild holen. Der Verweis ist signiert - dieser Server holt nichts,
+  // was er nicht selbst kurz zuvor ausgegeben hat.
+  api.get('/gifs/media', async (req, res) => {
+    try {
+      if (!config.giphyKey) return res.status(404).end();
+      const url = verifyRef(serverSecret(config.dataDir), String(req.query.ref ?? ''));
+      if (!url) return res.status(400).json({ error: 'bad_ref', message: 'Verweis ungueltig oder abgelaufen.' });
+      const { bytes, mime } = await fetchMedia(url);
+      res.setHeader('Content-Type', mime);
+      // Der Browser darf das Vorschaubild behalten - es aendert sich nicht.
+      res.setHeader('Cache-Control', 'private, max-age=900');
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+      res.send(bytes);
+    } catch (err) {
+      res.status(err.status === 413 ? 413 : 502).json({ error: 'gif_upstream', message: err.message });
+    }
   });
 
   // --- Dienste fuer einen Anruf, mit kurzlebigen Zugangsdaten. ---------------

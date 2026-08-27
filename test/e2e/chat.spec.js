@@ -373,3 +373,94 @@ test('Am Handy macht Enter eine neue Zeile, statt abzuschicken', async ({ browse
   await contextA.close();
   await contextB.close();
 });
+
+/**
+ * Ein winziges GIF (1x1, durchsichtig) - echte Bytes, damit der ganze Weg
+ * durchläuft: holen, verschlüsseln, hochladen, entschlüsseln, anzeigen.
+ */
+const MINI_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+/** Stellt sich als Backend-GIF-Suche - ohne Schlüssel, ohne Netz. */
+async function fakeGifService(page) {
+  await page.route('**/api/config', async (route) => {
+    const antwort = await route.fetch();
+    const daten = await antwort.json();
+    await route.fulfill({ json: { ...daten, gifs: true } });
+  });
+  await page.route('**/api/gifs?*', async (route) => {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get('q') ?? '';
+    await route.fulfill({
+      json: {
+        items: Array.from({ length: 4 }, (_, i) => ({
+          id: `gif${i}`,
+          title: `${query || 'beliebt'} ${i}`,
+          width: 100,
+          height: 80,
+          preview: `vorschau-${i}`,
+          full: `voll-${i}`,
+          bytes: MINI_GIF.length,
+        })),
+        next: null,
+      },
+    });
+  });
+  await page.route('**/api/gifs/media?*', async (route) => {
+    await route.fulfill({ body: MINI_GIF, contentType: 'image/gif' });
+  });
+}
+
+test('Ein GIF geht verschlüsselt raus, ohne dass jemand mit Giphy spricht', async ({ browser }) => {
+  const contextA = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const contextB = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  // Mitschreiben, wohin die Browser überhaupt sprechen.
+  const fremdeZiele = [];
+  for (const page of [pageA, pageB]) {
+    page.on('request', (request) => {
+      const host = new URL(request.url()).host;
+      if (host !== '127.0.0.1:3199' && !host.startsWith('127.0.0.1')) fremdeZiele.push(host);
+    });
+  }
+  await fakeGifService(pageA);
+  await fakeGifService(pageB);
+
+  const { link } = await createChat(pageA);
+  await joinChat(pageB, link);
+  await expect(pageA.locator('#screen-chat')).toBeVisible({ timeout: 15_000 });
+
+  await pageA.locator('#btn-attach').click();
+  await pageA.getByRole('button', { name: /GIF suchen/i }).click();
+  await expect(pageA.locator('.gif-grid__item').first()).toBeVisible({ timeout: 15_000 });
+
+  await pageA.locator('.gif-picker .emoji-search').fill('applaus');
+  await expect(pageA.locator('.gif-grid__item').first()).toBeVisible();
+  await pageA.locator('.gif-grid__item').first().click();
+
+  // Landet als Anhang im Eingabefeld und wird verschlüsselt hochgeladen.
+  await expect(pageA.locator('#attachments .attachment')).toHaveCount(1);
+  await expect(pageA.locator('#btn-send')).toBeVisible();
+  await pageA.locator('#btn-send').click();
+
+  // Kommt beim Gegenüber als ganz normales Bild an.
+  await expect(bubbles(pageB).last().locator('.bubble__image')).toBeVisible({ timeout: 20_000 });
+
+  // Und niemand hat dafür mit einer fremden Adresse gesprochen.
+  expect(fremdeZiele).toEqual([]);
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Ohne eingerichtete GIF-Suche gibt es den Eintrag gar nicht', async ({ browser }) => {
+  const { pageA, contextA, contextB } = await pairUp(browser);
+  await pageA.locator('#btn-attach').click();
+  await expect(pageA.locator('#sheet')).toBeVisible();
+  await expect(pageA.getByRole('button', { name: /Foto aus der Galerie/i })).toBeVisible();
+  // Lieber gar kein Eintrag als einer, der ins Leere führt.
+  await expect(pageA.getByRole('button', { name: /GIF suchen/i })).toHaveCount(0);
+  await contextA.close();
+  await contextB.close();
+});

@@ -193,6 +193,47 @@ Inhalt erneut hochladen. Zwei Dinge dabei:
 Nach dem Hochladen einmal hart neu laden (Strg+Umschalt+R), sonst hält der
 Service Worker noch kurz die alte Fassung.
 
+## GIF-Suche einrichten
+
+Optional. Ohne Schlüssel bleibt der Menüpunkt einfach unsichtbar.
+
+Einen Schlüssel gibt es kostenlos bei
+[developers.giphy.com](https://developers.giphy.com/) („Create an App" →
+„API Key"). Dann in `api/lib/config.local.php`:
+
+```php
+'giphyKey' => 'DEIN-SCHLÜSSEL',
+```
+
+**Der Schlüssel bleibt auf dem Server.** Suche und Vorschaubilder laufen über
+dein Backend, nicht über den Browser deiner Nutzer – Giphy sieht deinen
+Webspace, nicht sie. Und wer ein GIF geschickt bekommt, spricht überhaupt nie
+mit Giphy: es kommt als ganz normaler verschlüsselter Anhang an.
+
+Das kostet Bandbreite: eine Seite Suchergebnisse sind rund 300 KB, ein
+verschicktes GIF ein bis zwei Megabyte. Bei knappem Tarif lohnt ein Blick auf
+`gifSearchesPerHour` (Vorgabe 300 je IP-Adresse).
+
+## Anrufe einrichten
+
+Optional. Ohne Eintrag bietet die App keine Anrufe an – lieber gar nicht als
+eine Schaltfläche, die bei der Hälfte der Leute nicht funktioniert.
+
+Anrufe laufen direkt zwischen den Geräten; dieser Webspace handelt sie nur
+aus. Für Gegenstellen hinter strengen Routern (Mobilfunk, Firmennetze)
+braucht es zusätzlich einen Relaisdienst. **Der kann auf lima-city nicht
+laufen** – er braucht einen dauerhaften Prozess und eigene Ports. Dem Projekt
+liegt einer bei (`turn/`), der auf einem eigenen Server oder einem Rechner zu
+Hause läuft; dieser Webspace stellt dann nur die Zugangsdaten dafür aus.
+
+```php
+'stunUrls' => ['stun:anruf.meine-domain.de:3478'],
+'turnUrls' => ['turn:anruf.meine-domain.de:3478?transport=udp'],
+'turnSecret' => 'DASSELBE-GEHEIMNIS-WIE-BEIM-DIENST',
+```
+
+Alles Weitere steht in [`turn/README.md`](../turn/README.md).
+
 ## Eigene Einstellungen
 
 Optional `api/lib/config.local.php` anlegen:

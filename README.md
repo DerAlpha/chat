@@ -39,6 +39,7 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Zweites eigenes Gerät per Geräte-Link dazuschalten
 - Als App installierbar (PWA), offline lauffähige Oberfläche, Benachrichtigungen
 - Hell/Dunkel/Automatisch, Deutsch und Englisch
+- GIF-Suche über das eigene Backend – Giphy sieht den Server, nie die Nutzer
 - Reaktionen aus allen gängigen Emoji, mit Suche auf Deutsch und Englisch
 - Fragt nach einem Namen, wenn noch keiner feststeht – überspringbar
 - „Chat löschen" räumt sofort alles ab – bei beiden und auf dem Server
@@ -284,7 +285,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 136 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN)
+npm test                  # 154 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs)
 npm run test:e2e          # 36 Tests am Smartphone + 12 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend

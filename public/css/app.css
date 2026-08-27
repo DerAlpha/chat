@@ -652,6 +652,8 @@ button, input, textarea { font: inherit; color: inherit; }
   max-width: 480px;
   max-height: 82dvh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-elevated);
   border-radius: 22px 22px 0 0;
   padding: 8px 16px calc(var(--safe-bottom) + 16px);
@@ -681,7 +683,7 @@ button, input, textarea { font: inherit; color: inherit; }
   margin: 11px auto;
 }
 .sheet__title { font-size: 1rem; margin-bottom: 8px; padding: 0 4px; }
-.sheet__body { display: flex; flex-direction: column; gap: 4px; }
+.sheet__body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 
 .sheet-item {
   display: flex; align-items: center; gap: 13px;
@@ -720,6 +722,94 @@ button, input, textarea { font: inherit; color: inherit; }
 .emoji-row { display: flex; justify-content: space-between; gap: 4px; padding: 6px 4px 10px; }
 .emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; }
 .emoji-row button:hover { background: var(--bg-sunken); }
+.emoji-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Der Weg zu allen übrigen Emoji - sichtbar als Knopf, nicht als Emoji. */
+.emoji-more {
+  display: grid; place-items: center;
+  width: 46px; height: 46px;
+  flex: none;
+  color: var(--text-muted);
+  background: var(--bg-sunken) !important;
+}
+.emoji-more .icon { width: 24px; height: 24px; }
+
+/* -------------------------------------------- Emoji-Auswahl und GIF-Suche --- */
+
+.emoji-picker,
+.gif-picker { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+.emoji-search {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  font-size: 16px; /* verhindert das Hineinzoomen auf iOS */
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+}
+.emoji-search:focus { outline: none; border-color: var(--accent); }
+
+/* Feste Spaltenzahl statt auto-fill: sonst springt das Raster bei jedem
+   Tastendruck in der Suche in eine andere Breite. */
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+.emoji-grid button {
+  font-size: 1.5rem;
+  line-height: 1;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  padding: 0;
+  cursor: pointer;
+}
+.emoji-grid button:hover { background: var(--bg-sunken); }
+.emoji-grid button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.emoji-groups { overflow-y: auto; min-height: 0; }
+.emoji-group__title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 10px 0 4px;
+  padding: 4px 2px;
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+}
+.emoji-group__title:first-child { margin-top: 0; }
+
+/* Zwei Spalten mit fester Zahl: sonst springt das Raster beim Nachladen. */
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 52dvh;
+}
+.gif-grid__item {
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  cursor: pointer;
+  display: block;
+  min-height: 60px;
+}
+.gif-grid__item img { display: block; width: 100%; height: auto; }
+.gif-grid__item:hover,
+.gif-grid__item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .lightbox { position: fixed; inset: 0; z-index: 50; background: #05070b; display: flex; flex-direction: column; }
 .lightbox__bar {
@@ -887,6 +977,8 @@ button, input, textarea { font: inherit; color: inherit; }
   }
   .sheet__grip { display: none; }
   .sheet__title { margin-bottom: 10px; }
+  .emoji-grid { grid-template-columns: repeat(10, 1fr); }
+  .gif-grid { grid-template-columns: repeat(3, 1fr); max-height: 46dvh; }
   .lightbox img { padding-bottom: 24px; }
 }
 

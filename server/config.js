@@ -92,6 +92,14 @@ export const config = {
   /** So lange gelten ausgegebene Zugangsdaten für den Relaisdienst. */
   turnTtlSeconds: int('TURN_TTL_SECONDS', 2 * 60 * 60),
 
+  // --- GIF-Suche ----------------------------------------------------------
+  // Ohne Schlüssel bleibt die Suche unsichtbar statt kaputt. Er bleibt hier
+  // auf dem Server: Anfragen laufen über dieses Backend, damit Giphy weder
+  // die IP-Adresse noch das Gerät der Nutzer zu sehen bekommt.
+  giphyKey: process.env.GIPHY_KEY || '',
+  giphyRating: process.env.GIPHY_RATING || 'pg-13',
+  gifSearchesPerHour: int('GIF_SEARCHES_PER_HOUR', 300),
+
   heartbeatIntervalMs: 25 * 1000,
   persistDebounceMs: int('PERSIST_DEBOUNCE_MS', 1500),
 

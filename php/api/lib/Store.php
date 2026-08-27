@@ -11,6 +11,35 @@ declare(strict_types=1);
  */
 final class Store
 {
+    /**
+     * Ein Geheimnis, das der Server für sich behält - zum Signieren
+     * kurzlebiger Verweise (etwa auf ein Bild bei Giphy). Es liegt im
+     * Datenordner, damit es einen Neustart übersteht; sonst würden alle
+     * offenen Vorschauen bei jedem Neustart ungültig.
+     */
+    public function serverSecret(): string
+    {
+        $file = $this->config->dataDir . '/server-secret.bin';
+        $existing = @file_get_contents($file);
+        if (is_string($existing) && strlen($existing) >= 32) {
+            return $existing;
+        }
+        $fresh = random_bytes(32);
+        @mkdir($this->config->dataDir, 0770, true);
+        // Atomar schreiben, damit zwei gleichzeitige Anfragen sich nicht in
+        // die Quere kommen und hinterher zwei verschiedene Geheimnisse gelten.
+        $tmp = $file . '.' . getmypid() . '.tmp';
+        if (@file_put_contents($tmp, $fresh) !== false) {
+            @chmod($tmp, 0600);
+            @rename($tmp, $file);
+            $again = @file_get_contents($file);
+            if (is_string($again) && strlen($again) >= 32) {
+                return $again;
+            }
+        }
+        return $fresh;
+    }
+
     public const ROOM_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
     public const BLOB_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
 

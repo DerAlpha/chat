@@ -16,6 +16,7 @@ require __DIR__ . '/lib/RateLimit.php';
 require __DIR__ . '/lib/Frames.php';
 require __DIR__ . '/lib/Presence.php';
 require __DIR__ . '/lib/Ice.php';
+require __DIR__ . '/lib/Gifs.php';
 
 if (PHP_VERSION_ID < 80100) {
     http_response_code(500);
@@ -96,6 +97,12 @@ final class App
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/events$#', $route, $m) && $method === 'GET') {
             $this->events($m[1]);
         }
+        if ($route === '/gifs' && $method === 'GET') {
+            $this->gifSearch();
+        }
+        if ($route === '/gifs/media' && $method === 'GET') {
+            $this->gifMedia();
+        }
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/ice$#', $route, $m) && $method === 'GET') {
             $this->ice($m[1]);
         }
@@ -129,7 +136,47 @@ final class App
             // Ob Anrufe angeboten werden, hängt daran, ob ein Aushandlungs-
             // oder Relaisdienst eingetragen ist.
             'call' => Ice::support($this->config),
+            // Ohne Giphy-Schlüssel bleibt die GIF-Suche unsichtbar statt kaputt.
+            'gifs' => $this->config->giphyKey !== '',
         ]);
+    }
+
+    /**
+     * GIF-Suche über diesen Server. Giphy sieht den Webspace, nicht die
+     * Nutzer - und der Browser bekommt nur signierte, befristete Verweise.
+     */
+    private function gifSearch(): never
+    {
+        if ($this->config->giphyKey === '') {
+            Http::fail(503, 'no_gif_service', 'Keine GIF-Suche eingerichtet.');
+        }
+        $this->limit('gifs', $this->config->gifSearchesPerHour, 3600);
+        $query = mb_substr((string) ($_GET['q'] ?? ''), 0, 80);
+        $offset = (int) ($_GET['offset'] ?? 0);
+        Http::json(Gifs::search($this->config, $this->store->serverSecret(), $query, $offset));
+    }
+
+    /**
+     * Ein Bild holen. Der Verweis ist signiert - dieser Server holt nichts,
+     * was er nicht selbst kurz zuvor ausgegeben hat.
+     */
+    private function gifMedia(): never
+    {
+        if ($this->config->giphyKey === '') {
+            Http::fail(404, 'not_found', 'Nicht gefunden.');
+        }
+        $url = Gifs::verifyRef($this->store->serverSecret(), (string) ($_GET['ref'] ?? ''));
+        if ($url === null) {
+            Http::fail(400, 'bad_ref', 'Verweis ungueltig oder abgelaufen.');
+        }
+        $media = Gifs::media($url);
+        header('Content-Type: ' . $media['mime']);
+        header('Content-Length: ' . strlen($media['bytes']));
+        // Der Browser darf das Vorschaubild behalten - es ändert sich nicht.
+        header('Cache-Control: private, max-age=900');
+        header('Cross-Origin-Resource-Policy: same-origin');
+        echo $media['bytes'];
+        exit;
     }
 
     /**

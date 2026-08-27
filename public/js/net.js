@@ -36,6 +36,28 @@ export const createRoom = (roomId) =>
 
 export const roomStatus = (roomId) => request(appPath(`api/rooms/${encodeURIComponent(roomId)}`));
 
+/**
+ * GIF-Suche über das eigene Backend. Giphy sieht den Server, nicht das Gerät -
+ * und was zurückkommt, enthält keine einzige Giphy-Adresse, sondern nur
+ * signierte, befristete Verweise, die wiederum nur dieser Server einlöst.
+ */
+export const searchGifs = (query, offset = 0) =>
+  request(appPath(`api/gifs?q=${encodeURIComponent(query)}&offset=${offset}`));
+
+/** Adresse eines Vorschaubilds - gleiche Herkunft, deshalb CSP-tauglich. */
+export const gifMediaUrl = (ref) => appPath(`api/gifs/media?ref=${encodeURIComponent(ref)}`);
+
+/** Holt die Bytes eines GIFs, damit der Browser sie verschlüsselt weiterschicken kann. */
+export async function fetchGif(ref) {
+  const response = await fetch(gifMediaUrl(ref));
+  if (!response.ok) throw new ApiError('gif_failed', 'Das GIF liess sich nicht laden.', response.status);
+  const buffer = await response.arrayBuffer();
+  return {
+    bytes: new Uint8Array(buffer),
+    mime: response.headers.get('content-type') || 'image/gif',
+  };
+}
+
 /** Laedt bereits verschluesselte Bytes hoch. */
 export async function uploadBlob(roomId, token, bytes, onProgress) {
   // XMLHttpRequest, weil fetch keinen Upload-Fortschritt meldet.

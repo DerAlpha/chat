@@ -72,6 +72,7 @@ final class Config
     public string $giphyKey = '';
     /** Bewertungsstufe, die Giphy höchstens ausliefern soll. */
     public string $giphyRating = 'pg-13';
+    public int $gifSearchesPerHour = 300;
 
     public function __construct()
     {

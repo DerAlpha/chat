@@ -16,7 +16,7 @@ import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
-import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, ApiError } from './net.js';
+import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
@@ -43,6 +43,8 @@ const app = {
   key: null,
   conn: null,
   limits: { maxBlobBytes: 12 * 1024 * 1024 },
+  /** Was diese Installation anbietet - kommt von GET api/config. */
+  features: { gifs: false, call: { calls: false, relay: false } },
   me: null,
   peer: null,
   messages: new Map(),
@@ -88,6 +90,14 @@ function boot() {
   }
 
   registerServiceWorker();
+  // Was diese Installation kann, entscheidet der Server. Nebenher holen,
+  // damit der Start dadurch nicht langsamer wird.
+  void serverConfig().then((remote) => {
+    app.features = {
+      gifs: remote?.gifs === true,
+      call: remote?.call ?? { calls: false, relay: false },
+    };
+  }).catch(() => {});
   route();
   window.addEventListener('hashchange', route);
 }
@@ -1152,7 +1162,8 @@ async function sendMessage() {
       const item = attachments[i];
       await deliver({
         v: 1,
-        kind: item.kind,
+        // Ein GIF ist für die Gegenseite schlicht ein Bild.
+        kind: item.kind === 'gif' ? 'image' : item.kind,
         text: i === 0 ? text : '',
         reply: i === 0 ? reply : null,
         media: item.media,
@@ -1310,6 +1321,19 @@ async function prepareAndUpload(item) {
         thumb: prepared.thumb,
       };
       item.previewUrl = prepared.thumb || null;
+    } else if (item.kind === 'gif') {
+      // Die Bytes holt der eigene Server bei Giphy; verschlüsselt werden sie
+      // hier, wie jeder andere Anhang auch. Wer das GIF empfängt, spricht
+      // nie mit Giphy - es kommt als ganz normaler Anhang an.
+      const loaded = await fetchGif(item.ref);
+      bytes = loaded.bytes;
+      item.media = {
+        name: `gif.${extensionFor(loaded.mime)}`,
+        mime: loaded.mime,
+        size: bytes.length,
+        width: item.width,
+        height: item.height,
+      };
     } else if (item.kind === 'audio') {
       bytes = item.bytes;
       item.media = {
@@ -1471,7 +1495,109 @@ function openAttachSheet() {
       hint: t('anyFileHint'),
       onClick: () => el('file-any').click(),
     },
+    ...(app.features.gifs ? [{
+      icon: 'i-gif',
+      label: t('searchGif'),
+      hint: t('searchGifHint'),
+      onClick: openGifPicker,
+    }] : []),
   ]);
+}
+
+/**
+ * GIF-Suche. Läuft vollständig über den eigenen Server: Giphy sieht ihn,
+ * nicht das Gerät. Die Vorschaubilder kommen von der eigenen Adresse, also
+ * bleibt auch die strenge CSP unangetastet.
+ */
+function openGifPicker() {
+  let laufendeSuche = 0;
+  let tippTimer = null;
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'emoji-search';
+  search.placeholder = t('searchGifPlaceholder');
+  search.autocomplete = 'off';
+  search.setAttribute('aria-label', t('searchGifPlaceholder'));
+
+  const grid = make('div', 'gif-grid');
+  const status = make('p', 'sheet-note');
+
+  const zeigen = async (query) => {
+    const lauf = ++laufendeSuche;
+    status.textContent = t('searching');
+    status.hidden = false;
+    try {
+      const { items } = await searchGifs(query);
+      // Eine ältere Suche darf eine neuere nicht überschreiben.
+      if (lauf !== laufendeSuche) return;
+      grid.replaceChildren();
+      if (!items.length) {
+        status.textContent = t('noGifsFound');
+        return;
+      }
+      status.hidden = true;
+      for (const item of items) grid.appendChild(gifButton(item));
+    } catch {
+      if (lauf !== laufendeSuche) return;
+      status.textContent = t('gifServiceDown');
+      status.hidden = false;
+    }
+  };
+
+  search.addEventListener('input', () => {
+    clearTimeout(tippTimer);
+    // Nicht bei jedem Tastendruck losschicken - das wären zwölf Bilder je
+    // Buchstabe über den eigenen Server.
+    tippTimer = setTimeout(() => void zeigen(search.value.trim()), 350);
+  });
+
+  const box = make('div', 'gif-picker');
+  box.append(search, status, grid);
+  openSheet(t('searchGif'), [box], { onClose: () => clearTimeout(tippTimer) });
+  requestAnimationFrame(() => search.focus({ preventScroll: true }));
+  void zeigen('');
+}
+
+function gifButton(item) {
+  const button = make('button', 'gif-grid__item');
+  button.type = 'button';
+  button.setAttribute('aria-label', item.title || 'GIF');
+  const image = make('img');
+  image.src = gifMediaUrl(item.preview);
+  image.alt = item.title || '';
+  image.loading = 'lazy';
+  // Platz freihalten, damit das Raster beim Nachladen nicht springt.
+  image.style.aspectRatio = `${item.width} / ${item.height}`;
+  button.appendChild(image);
+  button.addEventListener('click', () => {
+    closeSheet();
+    addGif(item);
+  });
+  return button;
+}
+
+function addGif(item) {
+  if (app.attachments.length >= MAX_ATTACHMENTS) {
+    toast(t('errorTooLarge', { max: `${MAX_ATTACHMENTS}` }));
+    return;
+  }
+  const entry = {
+    localId: randomId(6),
+    kind: 'gif',
+    ref: item.full,
+    width: item.width,
+    height: item.height,
+    media: null,
+    blobId: null,
+    progress: 0,
+    previewUrl: gifMediaUrl(item.preview),
+    failed: false,
+  };
+  app.attachments.push(entry);
+  renderAttachments();
+  void prepareAndUpload(entry);
+  updateSendButton();
 }
 
 function openMessageMenu(entry) {
