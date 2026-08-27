@@ -842,14 +842,25 @@ button, input, textarea { font: inherit; color: inherit; }
   #screen-start .logo svg { width: 23px; height: 23px; }
   #screen-start .btn--lg { min-height: 46px; font-size: .96rem; }
   #screen-start .stack { gap: 8px; }
+  /* Die Liste scrollt für sich. Ohne overflow läuft sie aus ihrer Box heraus
+     und wird über die Fußzeile gemalt - dort ist sie weder lesbar noch
+     anklickbar, weil die Fußzeile im DOM später kommt und den Klick fängt. */
   #screen-start .chats { flex: 0 1 auto; min-height: 0; }
+  #screen-start .chat-list { overflow-y: auto; min-height: 0; padding-right: 2px; }
   /* Drei Chips passen in 340 px nur etwas gedrungener nebeneinander. */
   #screen-start .btn--chip { min-height: 40px; padding: 0 11px; font-size: .8rem; }
   #screen-start .page-footer .muted { font-size: .8rem; }
 
   /* --- Rechte Spalte --- */
   .screen[data-active]:not(#screen-start) { flex: 1 1 auto; min-width: 0; }
-  .screen--empty[data-active] { display: grid; place-items: center; padding: 40px; }
+  /* Auch der Platzhalter muss scrollen können: #app schneidet hart ab, und in
+     einem niedrigen Fenster passen Logo, Stichpunkte und Hinweis nicht. */
+  .screen--empty[data-active] {
+    display: grid;
+    place-items: center;
+    padding: 40px;
+    overflow-y: auto;
+  }
 
   /* Der Weg zurueck ist die Liste nebenan - der Pfeil waere nur im Weg. */
   #chat-back { display: none; }

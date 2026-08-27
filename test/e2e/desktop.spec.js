@@ -214,3 +214,81 @@ test('Der Mauszeiger allein macht keinen Klick unwirksam', async ({ page }) => {
   await page.mouse.click(x, y);
   await expect(page.locator('#screen-empty')).toBeHidden({ timeout: 15_000 });
 });
+
+test('Den offenen Chat aus der Liste zu verlassen baut ihn auch ab', async ({ browser }) => {
+  // Am Handy lag die Liste hinter dem offenen Chat, dieser Weg war unerreichbar.
+  // Am Rechner steht sie daneben - und löschte Schlüssel und Geräte-Token,
+  // während der Chat weiterlief. Nach dem Neuladen wäre er unwiederbringlich
+  // weg gewesen, weil der Raum weiter zwei Mitglieder hat.
+  const { pageA, contextA, contextB } = await pairUp(browser);
+  const eintrag = pageA.locator('#chat-list .chat-list__item.is-active');
+  await expect(eintrag).toHaveCount(1);
+
+  await eintrag.dispatchEvent('contextmenu');
+  await pageA.getByRole('button', { name: /Chat verlassen/i }).click();
+  // Ohne Rückfrage darf nichts verschwinden.
+  await expect(pageA.locator('#sheet')).toContainText(/wirklich|verlassen/i);
+  await pageA.getByRole('button', { name: /^Ja|Verlassen|Bestätigen|Weiter/i }).first().click();
+
+  await expect(pageA.locator('#screen-chat')).toBeHidden({ timeout: 15_000 });
+  await expect(pageA.locator('#screen-empty')).toBeVisible();
+  await expect(pageA.locator('#chat-list .chat-list__item')).toHaveCount(0);
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test('Viele Chats verdecken die Fußzeile nicht', async ({ page }) => {
+  await page.addInitScript(() => {
+    const now = Date.now();
+    const key = new Uint8Array(32).fill(7);
+    const b64 = btoa(String.fromCharCode(...key));
+    localStorage.setItem('fc:sessions:v1', JSON.stringify(
+      Array.from({ length: 9 }, (_, i) => ({
+        roomId: `raum${i}`, code: `AAAA-BBBB-CCC${i}`, key: b64, token: null,
+        memberId: null, nick: 'Ich', peerNick: `Person ${i}`,
+        createdAt: now, lastActivity: now - i * 1000, unread: 0,
+      })),
+    ));
+  });
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.goto('./');
+  await expect(page.locator('#screen-start')).toBeVisible();
+
+  const eintraege = page.locator('#chat-list .chat-list__item');
+  await expect(eintraege).toHaveCount(9);
+
+  // Jeder Eintrag, den man sieht, muss auch derjenige sein, den ein Klick
+  // trifft. Wer in der Liste weggescrollt ist, zählt nicht - nur was im
+  // sichtbaren Ausschnitt der Liste steht.
+  const verdeckt = await page.evaluate(() => {
+    const liste = document.getElementById('chat-list');
+    const rahmen = liste.getBoundingClientRect();
+    const treffer = [];
+    for (const item of liste.querySelectorAll('.chat-list__item')) {
+      const box = item.getBoundingClientRect();
+      const mitte = box.top + box.height / 2;
+      if (mitte < rahmen.top + 2 || mitte > rahmen.bottom - 2) continue;
+      if (mitte < 0 || mitte > window.innerHeight) continue;
+      const oben = document.elementFromPoint(box.left + box.width / 2, mitte);
+      if (!item.contains(oben) && oben !== item) treffer.push(item.textContent.trim().slice(0, 20));
+    }
+    return treffer;
+  });
+  expect(verdeckt).toEqual([]);
+  // Und die Liste muss überhaupt scrollen können, sonst ist der Rest unerreichbar.
+  const scrollbar = await page.locator('#chat-list').evaluate((n) => n.scrollHeight > n.clientHeight
+    && ['auto', 'scroll'].includes(getComputedStyle(n).overflowY));
+  expect(scrollbar).toBe(true);
+});
+
+test('Der Platzhalter bleibt in einem niedrigen Fenster erreichbar', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 420 });
+  await page.goto('./');
+  await expect(page.locator('#screen-empty')).toBeVisible();
+  const erreichbar = await page.locator('#screen-empty').evaluate((node) => {
+    const style = getComputedStyle(node);
+    return node.scrollHeight <= node.clientHeight || style.overflowY === 'auto' || style.overflowY === 'scroll';
+  });
+  expect(erreichbar).toBe(true);
+});

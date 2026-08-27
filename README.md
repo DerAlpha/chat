@@ -279,8 +279,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 91 Unit-Tests (Server, Krypto, QR, i18n, Installer)
-npm run test:e2e          # 35 Tests am Smartphone + 9 am Rechner
+npm test                  # 104 Unit-Tests (Server, Krypto, QR, i18n, Installer, Langdruck)
+npm run test:e2e          # 36 Tests am Smartphone + 12 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all

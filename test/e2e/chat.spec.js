@@ -356,3 +356,20 @@ test('Wer schon einen Namen hat, wird nicht gefragt', async ({ browser }) => {
   await contextA.close();
   await contextB.close();
 });
+
+test('Am Handy macht Enter eine neue Zeile, statt abzuschicken', async ({ browser }) => {
+  // Die andere Hälfte der Regel, die am Rechner geprüft wird. Fällt die
+  // Abfrage auf grobe Zeiger weg, ist die halbe Nachricht raus, sobald jemand
+  // auf der Bildschirmtastatur die Eingabetaste für einen Absatz benutzt.
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+  const input = pageA.locator('#message-input');
+  await input.fill('Erste Zeile');
+  await input.press('Enter');
+  await input.type('Zweite Zeile');
+
+  expect(await input.inputValue()).toBe('Erste Zeile\nZweite Zeile');
+  await expect(bubbles(pageB)).toHaveCount(0);
+
+  await contextA.close();
+  await contextB.close();
+});

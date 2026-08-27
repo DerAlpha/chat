@@ -1725,12 +1725,28 @@ async function burnCurrentChat() {
   }
 }
 
-async function leaveChat() {
+const leaveChat = () => leaveSession(app.session.roomId);
+
+/**
+ * Einen Chat vom Gerät nehmen. Ist es der gerade offene, muss auch die
+ * Verbindung abgebaut werden: sonst läuft er weiter, obwohl Schlüssel und
+ * Geräte-Token schon aus dem Speicher gelöscht sind - und ist nach dem
+ * nächsten Neuladen unwiederbringlich weg, weil der Raum weiter besetzt ist.
+ *
+ * Am Handy war dieser Weg nie erreichbar, weil die Liste hinter dem offenen
+ * Chat lag. Am Rechner steht sie daneben.
+ */
+async function leaveSession(roomId) {
+  if (!roomId) return;
   const ok = await confirmSheet(t('leaveChat'), t('leaveConfirm'), t('confirm'), { danger: false });
   if (!ok) return;
-  removeSession(app.session.roomId);
-  teardownChat();
-  showStart();
+  removeSession(roomId);
+  if (app.session?.roomId === roomId) {
+    teardownChat();
+    showStart();
+  } else {
+    renderChatList();
+  }
 }
 
 function showAbout() {
@@ -1882,10 +1898,7 @@ function openSessionMenu(session) {
     { icon: 'i-copy', label: t('copyCode'), onClick: async () => {
       toast(await copyText(session.code) ? t('copied') : t('copyFailed'));
     } },
-    { icon: 'i-close', label: t('leaveChat'), danger: true, onClick: () => {
-      removeSession(session.roomId);
-      renderChatList();
-    } },
+    { icon: 'i-close', label: t('leaveChat'), danger: true, onClick: () => void leaveSession(session.roomId) },
   ]);
 }
 

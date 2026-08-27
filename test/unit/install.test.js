@@ -74,10 +74,12 @@ test('Der Installer legt die App ab und merkt sich den Weg dorthin', () => {
 test('Erneut ausführen aktualisiert am gemerkten Ort, ohne Eigenes zu zerstören', () => {
   const home = makeHome();
   const source = makeSource();
-  // Bewusst ein Name, den die eingebaute Suche nicht kennt: nur so zeigt sich,
-  // dass der zweite Lauf wirklich aus der Merkdatei liest und nicht raet.
-  const docroot = path.join(home, 'webseite-42');
-  fs.mkdirSync(docroot);
+  // Drei Ebenen tief - so legen Hoster Subdomains an. Damit liegt der Ordner
+  // ausserhalb der Namensliste UND ausserhalb der Markierungssuche, die nur
+  // zwei Ebenen weit reicht. Nur so beweist der zweite Lauf, dass er den Weg
+  // wirklich aus der Merkdatei nimmt und nicht doch wieder rät.
+  const docroot = path.join(home, 'kunden/example.de/htdocs');
+  fs.mkdirSync(docroot, { recursive: true });
   const data = path.join(home, 'eigene-daten');
   install(home, source, ['--docroot', docroot, '--data', data, '--url', 'https://beispiel.de']);
 
@@ -100,7 +102,8 @@ test('Erneut ausführen aktualisiert am gemerkten Ort, ohne Eigenes zu zerstöre
   assert.ok(!fs.existsSync(path.join(home, 'fluesterchat-data')), 'ein zweiter Datenordner entstand');
   assert.ok(!fs.existsSync(path.join(docroot, 'js/uralt.js')), 'alte Datei blieb liegen');
   assert.ok(fs.existsSync(path.join(docroot, 'index.html')));
-  // Und der naheliegende, aber falsche Ordner blieb unangetastet.
+  // Und der naheliegende, aber falsche Ordner blieb unangetastet - dorthin
+  // würde die Namensliste greifen, wenn die Merkdatei nicht gelesen würde.
   assert.deepEqual(fs.readdirSync(path.join(home, 'html')), []);
 });
 
@@ -298,6 +301,48 @@ test('Die Hilfe gibt keinen Programmtext aus', () => {
   assert.doesNotMatch(output, /set -eu/);
   assert.doesNotMatch(output, /BRANCH=/);
   assert.doesNotMatch(output, /codeload\.github\.com/);
+});
+
+test('Der Aktualisierer bringt jede vermerkte Installation auf den neuen Stand', () => {
+  // Bisher wurde vom Aktualisierer nur geprüft, dass er existiert und
+  // syntaktisch aufgeht. Ob er tatsächlich durchläuft, stand nirgends - eine
+  // Umbenennung des Branches oder ein Aufräumen der Optionsauswertung wäre
+  // unbemerkt geblieben, obwohl genau dieser Befehl der beworbene Weg ist.
+  const home = makeHome();
+  const source = makeSource();
+  const zweite = path.join(home, 'zweite-seite');
+  fs.mkdirSync(zweite);
+  install(home, source, ['--url', 'https://erste.de']);
+  install(home, source, ['--docroot', zweite, '--url', 'https://zweite.de']);
+
+  // Beide auf einen alten Stand zurückdrehen, damit sich das Update zeigt.
+  for (const docroot of [path.join(home, 'html'), zweite]) {
+    fs.writeFileSync(path.join(docroot, 'js/app.js'), '// alte Fassung');
+    shippedLastTime(docroot, 'js/uralt.js');
+  }
+
+  // Statt von GitHub zu laden: den Installer aus diesem Arbeitsverzeichnis
+  // nehmen. Alles andere am Aktualisierer läuft unverändert durch.
+  const stub = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-stub-'));
+  fs.writeFileSync(path.join(stub, 'curl'), [
+    '#!/bin/sh',
+    'while [ $# -gt 0 ]; do case "$1" in -o) ziel="$2"; shift 2 ;; *) shift ;; esac; done',
+    'cp "$INSTALLER_SRC" "$ziel"',
+  ].join('\n'));
+  fs.chmodSync(path.join(stub, 'curl'), 0o755);
+
+  const output = execFileSync('sh', [path.join(home, 'fluesterchat-update.sh'), '--source', source], {
+    env: { ...process.env, HOME: home, PATH: `${stub}:${process.env.PATH}`, INSTALLER_SRC: installer },
+    encoding: 'utf8',
+  });
+
+  assert.match(output, /https:\/\/erste\.de/);
+  assert.match(output, /https:\/\/zweite\.de/);
+  for (const docroot of [path.join(home, 'html'), zweite]) {
+    assert.notEqual(fs.readFileSync(path.join(docroot, 'js/app.js'), 'utf8'), '// alte Fassung',
+      `${docroot} wurde nicht aktualisiert`);
+    assert.ok(!fs.existsSync(path.join(docroot, 'js/uralt.js')), `${docroot}: alte Datei blieb liegen`);
+  }
 });
 
 test('Der Aktualisierer bricht sauber ab, wenn nichts installiert ist', () => {
