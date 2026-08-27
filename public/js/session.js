@@ -18,6 +18,8 @@ const PREFS_KEY = `${KEY_PREFIX}prefs:v1`;
 
 const DEFAULT_PREFS = {
   lang: null,
+  /** Ein paar Zeilen ueber sich - gehen verschluesselt in jeden Chat mit. */
+  bio: '',
   theme: 'auto',
   sound: true,
   notifications: false,

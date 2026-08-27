@@ -56,13 +56,15 @@ test('Wer die Gruppe anlegt, verwaltet sie - die anderen nicht', async ({ browse
   const { kontextA, kontextB, seiteA, seiteB } = await gruppeZuZweit(browser);
 
   await menue(seiteA);
+  await seiteA.getByRole('button', { name: /^Gruppe/ }).click();
   await seiteA.getByRole('button', { name: /^Mitglieder/ }).click();
   await expect(seiteA.locator('#sheet')).toContainText(/Verwalter/);
   await expect(seiteA.locator('#sheet')).toContainText(/Mira/);
   await seiteA.keyboard.press('Escape');
 
   await menue(seiteB);
-  // B sieht die Liste, aber keine Verwalterknöpfe.
+  // B sieht dasselbe Gruppenprofil - nur ohne Verwalterknöpfe.
+  await seiteB.getByRole('button', { name: /^Gruppe/ }).click();
   await expect(seiteB.getByRole('button', { name: /^Mitglieder/ })).toBeVisible();
   await expect(seiteB.getByRole('button', { name: /Weitere einladen/ })).toHaveCount(0);
   await seiteB.getByRole('button', { name: /^Mitglieder/ }).click();
@@ -76,12 +78,17 @@ test('Ein Verwalter kann Rechte weitergeben', async ({ browser }) => {
   const { kontextA, kontextB, seiteA, seiteB } = await gruppeZuZweit(browser);
 
   await menue(seiteA);
+  await seiteA.getByRole('button', { name: /^Gruppe/ }).click();
   await seiteA.getByRole('button', { name: /^Mitglieder/ }).click();
+  // Antippen öffnet das Profil - dort steht auch der Knopf für die Rechte.
   await seiteA.getByRole('button', { name: /Mira/ }).click();
+  await expect(seiteA.locator('#sheet')).toContainText(/Gewöhnliches Mitglied/i);
+  await seiteA.getByRole('button', { name: /Zum Verwalter machen/i }).click();
 
   // B erfährt es und darf danach selbst einladen.
   await expect(seiteB.locator('#toast')).toContainText(/verwaltest diese Gruppe jetzt/i, { timeout: 30_000 });
   await menue(seiteB);
+  await seiteB.getByRole('button', { name: /^Gruppe/ }).click();
   await expect(seiteB.getByRole('button', { name: /Weitere einladen/ })).toBeVisible({ timeout: 15_000 });
 
   await kontextA.close();
@@ -130,6 +137,7 @@ test('Eine Gruppe lässt sich nachträglich erweitern', async ({ browser }) => {
   const seiteC = await kontextC.newPage();
 
   await menue(seiteA);
+  await seiteA.getByRole('button', { name: /^Gruppe/ }).click();
   await seiteA.getByRole('button', { name: /Weitere einladen/ }).click();
   await seiteA.locator('#sheet input[type="text"]').fill('1');
   await seiteA.locator('#sheet').getByRole('button', { name: /^Anlegen$/ }).click();
@@ -241,6 +249,7 @@ test('Geht der Verwalter, rückt jemand nach - und erfährt es auch', async ({ b
 
   await expect(seiteB.locator('#toast')).toContainText(/verwaltest diese Gruppe jetzt/i, { timeout: 30_000 });
   await menue(seiteB);
+  await seiteB.getByRole('button', { name: /^Gruppe/ }).click();
   await expect(seiteB.getByRole('button', { name: /Weitere einladen/ })).toBeVisible({ timeout: 15_000 });
 
   await kontextA.close();

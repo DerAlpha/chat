@@ -134,15 +134,18 @@ test('Das Gruppenbild darf nur der Verwalter setzen', async ({ browser }) => {
   await expect(seiteB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
   await seiteA.locator('#btn-group-to-chat').click();
 
-  // B ist gewöhnliches Mitglied: kein Gruppenbild, kein Einladen.
+  // B ist gewöhnliches Mitglied: im Gruppenprofil steht kein Gruppenbild
+  // und kein Einladen.
   await seiteB.locator('#chat-menu').click();
   await expect(seiteB.locator('#sheet')).toBeVisible();
+  await seiteB.getByRole('button', { name: /^Gruppe/ }).click();
   await expect(seiteB.getByRole('button', { name: /^Gruppenbild/ })).toHaveCount(0);
   await expect(seiteB.getByRole('button', { name: /Weitere einladen/ })).toHaveCount(0);
   await seiteB.keyboard.press('Escape');
 
-  // A ist Verwalter und setzt das Bild.
+  // A ist Verwalter und setzt das Bild - über dasselbe Profil.
   await seiteA.locator('#chat-menu').click();
+  await seiteA.getByRole('button', { name: /^Gruppe/ }).click();
   await bildWaehlen(seiteA, () => seiteA.getByRole('button', { name: /^Gruppenbild/ }).click());
 
   // Und B sieht es.
@@ -188,7 +191,7 @@ test('Ein geändertes Bild ersetzt das alte', async ({ browser }) => {
 
   // Anderes Seitenverhaeltnis: der Ausschnitt sieht danach anders aus.
   await seiteA.locator('#chat-menu').click();
-  await seiteA.getByRole('button', { name: /^Mein Bild/ }).click();
+  await seiteA.getByRole('button', { name: /^Mein Profil/ }).click();
   const [dialog] = await Promise.all([
     seiteA.waitForEvent('filechooser'),
     seiteA.getByRole('button', { name: /Anderes Bild auswählen/i }).click(),
@@ -223,7 +226,7 @@ test('Ein entferntes Bild verschwindet auch beim Gegenüber', async ({ browser }
   await expect(seiteB.locator('#peer-avatar img.avatar__img')).toBeVisible({ timeout: 25_000 });
 
   await seiteA.locator('#chat-menu').click();
-  await seiteA.getByRole('button', { name: /^Mein Bild/ }).click();
+  await seiteA.getByRole('button', { name: /^Mein Profil/ }).click();
   await seiteA.getByRole('button', { name: /Bild entfernen/i }).click();
 
   // Beim Gegenüber steht wieder der Anfangsbuchstabe.
@@ -260,7 +263,7 @@ test('Eine kaputte Datei wirft niemanden aus dem Chat', async ({ browser }) => {
   await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
 
   await seiteA.locator('#chat-menu').click();
-  await seiteA.getByRole('button', { name: /^Mein Bild/ }).click();
+  await seiteA.getByRole('button', { name: /^Mein Profil/ }).click();
   const [dialog] = await Promise.all([
     seiteA.waitForEvent('filechooser'),
     seiteA.getByRole('button', { name: /Bild auswählen/i }).click(),

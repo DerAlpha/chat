@@ -149,7 +149,7 @@
             <svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg><span id="theme-label" data-i18n="themeAuto"></span>
           </button>
           <button class="btn btn--chip" id="btn-avatar" type="button">
-            <span class="avatar avatar--chip" aria-hidden="true"></span><span data-i18n="myPicture"></span>
+            <span class="avatar avatar--chip" aria-hidden="true"></span><span data-i18n="myProfile"></span>
           </button>
           <button class="btn btn--chip" id="btn-about" type="button">
             <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span data-i18n="about"></span>
@@ -245,11 +245,13 @@
       <button class="btn btn--icon" id="chat-back" type="button" data-i18n-attr="aria-label:back">
         <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
       </button>
-      <div class="avatar" id="peer-avatar" aria-hidden="true">?</div>
-      <div class="chat-header__text">
-        <strong id="peer-name"></strong>
-        <span class="chat-header__status" id="peer-status"><span id="peer-status-text"></span></span>
-      </div>
+      <button class="chat-header__who" id="peer-open" type="button" data-i18n-attr="aria-label:profile">
+        <span class="avatar" id="peer-avatar" aria-hidden="true">?</span>
+        <span class="chat-header__text">
+          <strong id="peer-name"></strong>
+          <span class="chat-header__status" id="peer-status"><span id="peer-status-text"></span></span>
+        </span>
+      </button>
       <button class="btn btn--icon" id="btn-call-audio" type="button" data-i18n-attr="aria-label:callAudio" hidden>
         <svg class="icon" aria-hidden="true"><use href="#i-phone"/></svg>
       </button>

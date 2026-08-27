@@ -274,6 +274,37 @@ button, input, textarea { font: inherit; color: inherit; }
   text-transform: uppercase;
 }
 .avatar--sm { width: 32px; height: 32px; font-size: .85rem; }
+
+/* ------------------------------------------------------------------ Profil
+   Bild gross, Name, ein paar Zeilen darunter. Das Bild ist ein Knopf: wer
+   wissen will, wen er vor sich hat, soll es ganz aufziehen koennen. */
+.profile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 10px; text-align: center; }
+.profile__avatar {
+  width: 132px;
+  height: 132px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.profile__avatar.is-empty {
+  cursor: default;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 3rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  box-shadow: none;
+}
+.profile__avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.profile__name { font-size: 1.15rem; }
+.profile__bio { color: var(--text-muted); font-size: .92rem; max-width: 34ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile__bio.is-empty { font-style: italic; opacity: .75; }
 /* Das Bildchen im Knopf "Mein Bild" - so gross wie ein Symbol. */
 .avatar--chip { width: 22px; height: 22px; font-size: .7rem; }
 
@@ -294,7 +325,9 @@ button, input, textarea { font: inherit; color: inherit; }
   aspect-ratio: 1;
   overflow: hidden;
   border-radius: 14px;
-  background: var(--bg-sunken);
+  /* Schwarz, weil genau das im Profilbild steht, wo kein Bild mehr ist.
+     Das Fenster zeigt damit wirklich das Ergebnis, nicht eine Andeutung. */
+  background: #000;
   touch-action: none;
   cursor: grab;
 }
@@ -308,14 +341,20 @@ button, input, textarea { font: inherit; color: inherit; }
   user-select: none;
   -webkit-user-drag: none;
 }
-/* Alles ausserhalb des Kreises abdunkeln - ohne den Zeiger abzufangen. */
+/* Alles ausserhalb des Kreises abdunkeln - ohne den Zeiger abzufangen.
+
+   "closest-side" ist hier entscheidend: ohne die Angabe reicht der Verlauf
+   bis zur weitesten Ecke, und der freie Kreis waere nur etwa 70 % so gross
+   wie gedacht. Der Kreis zeigte dann viel weniger, als spaeter wirklich im
+   runden Bild steht. So ist er dem Quadrat einbeschrieben - und genau so
+   schneidet die runde Anzeige zu. */
 .crop__mask {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background: rgba(6, 10, 18, .45);
-  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 49.5%, #000 50%);
-  mask: radial-gradient(circle at 50% 50%, transparent 49.5%, #000 50%);
+  -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
+  mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
 }
 .crop__zoom { width: 100%; margin: 0 0 10px; accent-color: var(--accent); }
 
@@ -454,7 +493,27 @@ button, input, textarea { font: inherit; color: inherit; }
   position: relative;
   z-index: 5;
 }
-.chat-header__text { flex: 1; min-width: 0; }
+/* Bild und Name fuehren zum Profil - also ein Knopf, der aber aussieht wie
+   die Kopfzeile selbst. Er nimmt den Platz zwischen den Symbolen ein. */
+.chat-header__who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 4px;
+  margin: 0;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-header__who:hover { background: var(--bg-sunken); }
+.chat-header__who:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.chat-header__text { display: block; flex: 1; min-width: 0; }
 .chat-header__text strong { display: block; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Die Statuszeile ist die schmalste Stelle der App: "zuletzt gesehen vor 3
    Std." passt auf einem Telefon nicht, und abgeschnitten fehlt genau die

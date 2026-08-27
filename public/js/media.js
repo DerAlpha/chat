@@ -146,28 +146,43 @@ export async function openForCrop(file) {
 }
 
 /**
- * Schneidet den gewaehlten Ausschnitt heraus und macht ein Profilbild daraus.
+ * Zeichnet den gewaehlten Ausschnitt als Profilbild.
  *
- * Der Ausschnitt kommt in Bildpunkten der Quelle: linke obere Ecke und
- * Kantenlaenge, immer quadratisch. Auch hier ist der Umweg ueber die
- * Leinwand die Metadatenentfernung - GPS, Kameramodell, Aufnahmezeit bleiben
- * zurueck, weil nur Bildpunkte kopiert werden.
+ * Uebergeben wird nicht ein Rechteck im Bild, sondern die Lage des Bildes
+ * im Ausschnittfenster: wo seine linke obere Ecke liegt und wie gross es
+ * dort ist. Das ist genau das, was der Nutzer im Fenster sieht - und nur so
+ * lassen sich auch Stellen waehlen, an denen gar kein Bild mehr ist. Die
+ * bleiben schwarz.
  *
+ * Auch hier ist der Umweg ueber die Leinwand die Metadatenentfernung:
+ * kopiert werden nur Bildpunkte, GPS und Kameramodell bleiben zurueck.
+ *
+ * @param {{source: *, width: number, height: number}} vorlage
+ * @param {{tx: number, ty: number, breite: number, hoehe: number, kante: number}} lage
+ *   Alles in Bildpunkten des Ausschnittfensters; `kante` ist dessen Seitenlaenge.
  * @returns {Promise<{bytes: Uint8Array, mime: string}>}
  */
-export async function finishAvatar({ source, width, height }, ausschnitt) {
+export async function finishAvatar(vorlage, lage) {
   preferredType ??= pickImageType();
-  const kante = Math.max(1, Math.min(ausschnitt.size, Math.min(width, height)));
-  const x = Math.max(0, Math.min(ausschnitt.x, width - kante));
-  const y = Math.max(0, Math.min(ausschnitt.y, height - kante));
-
   const canvas = document.createElement('canvas');
   canvas.width = AVATAR_EDGE;
   canvas.height = AVATAR_EDGE;
   const context = canvas.getContext('2d');
+  // Erst schwarz, dann das Bild darauf: was ausserhalb des Bildes liegt,
+  // bleibt so schwarz - genau wie im Fenster zu sehen war.
+  context.fillStyle = '#000';
+  context.fillRect(0, 0, AVATAR_EDGE, AVATAR_EDGE);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
-  context.drawImage(source, x, y, kante, kante, 0, 0, AVATAR_EDGE, AVATAR_EDGE);
+
+  const faktor = AVATAR_EDGE / Math.max(1, lage.kante);
+  context.drawImage(
+    vorlage.source,
+    lage.tx * faktor,
+    lage.ty * faktor,
+    lage.breite * faktor,
+    lage.hoehe * faktor,
+  );
   const blob = await canvasToBlob(canvas, preferredType, JPEG_QUALITY);
   return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: preferredType };
 }

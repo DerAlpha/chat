@@ -834,7 +834,11 @@ async function onWelcome(frame) {
     member.role = raw.role === 'admin' ? 'admin' : 'member';
     member.left = raw.left === true;
     member.avatarVer = raw.avatarVer ?? null;
-    if (raw.nickCt) member.nick = (await safeDecrypt(raw.nickCt))?.n ?? '';
+    if (raw.nickCt) {
+      const angaben = await safeDecrypt(raw.nickCt);
+      member.nick = angaben?.n ?? '';
+      member.bio = angaben?.b ?? '';
+    }
   }
   app.myRole = findMember(frame.members, frame.you.id).role === 'admin' ? 'admin' : 'member';
   // Und gleich merken. Ohne das war der Name nur so lange bekannt, wie der
@@ -960,7 +964,7 @@ const typingNow = () => others().filter((member) => member.typing);
 /** Holt ein Mitglied - und legt es an, wenn es noch keines gab. */
 function memberOf(id) {
   const leer = () => ({
-    id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null,
+    id, nick: '', bio: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null,
     role: 'member', left: false, avatarVer: null,
   });
   // Ein Frame ohne Absender darf kein Mitglied erfinden. Sonst steht in der
@@ -1178,6 +1182,7 @@ async function onNick(frame) {
   const value = await safeDecrypt(frame.ct);
   const member = memberOf(frame.from);
   member.nick = value?.n ?? '';
+  member.bio = value?.b ?? '';
   if (!isGroup()) rememberPeerNick(member.nick);
   updatePeerStatus();
   // In der Gruppe steht der Name über jeder fremden Blase - die müssen mit.
@@ -1413,6 +1418,8 @@ function onMemberLeft(frame) {
   member.online = false;
   member.typing = false;
   member.avatarVer = null;
+  member.nick = '';
+  member.bio = '';
   clearTimeout(member.typingTimer);
   for (const eintrag of app.messages.values()) {
     if (eintrag.from !== wer) continue;
@@ -2271,13 +2278,23 @@ const previewOf = (entry) => {
   return '';
 };
 
-function sendNick(nick) {
+/**
+ * Name und Kurzbeschreibung an den Raum melden.
+ *
+ * Beides steckt im selben verschluesselten Paeckchen - der Server sieht so
+ * oder so nur Zeichensalat, und ein Feld weniger heisst eine Sonderregel
+ * weniger auf beiden Servern. Aeltere Fassungen lesen nur `n` und
+ * uebersehen `b`, ohne dass etwas kaputtgeht.
+ */
+function sendNick(nick, bio = app.prefs?.bio ?? '') {
   if (!app.conn) return;
-  if (!nick) {
+  const name = (nick ?? '').trim();
+  const ueberMich = (bio ?? '').trim();
+  if (!name && !ueberMich) {
     app.conn.send({ t: 'nick', ct: null });
     return;
   }
-  encryptJson(app.key, { n: nick })
+  encryptJson(app.key, { n: name, b: ueberMich })
     .then((ct) => app.conn?.send({ t: 'nick', ct }))
     .catch(() => {});
 }
@@ -3218,15 +3235,15 @@ function openChatMenu() {
       hint: t('linkDeviceHint'),
       onClick: shareDeviceLink,
     }]),
-    { icon: 'i-image', label: t('myPicture'), hint: t('myPictureHint'), onClick: openAvatarMenu },
-    // In einer Gruppe: wer sie verwaltet, kann ihr Bild setzen, Rechte
-    // vergeben und weitere Leute einladen. Wer nicht, sieht die Liste
-    // trotzdem - nur ohne Knoepfe.
-    ...(isGroup() ? [{ icon: 'i-users', label: t('members'), onClick: showMembers }] : []),
-    ...(isGroup() && app.myRole === 'admin' ? [
-      { icon: 'i-image', label: t('groupPicture'), hint: t('groupPictureHint'), onClick: () => void chooseGroupAvatar() },
-      { icon: 'i-plus', label: t('inviteMore'), onClick: () => void inviteMore() },
-    ] : []),
+    { icon: 'i-user', label: t('myProfile'), hint: t('myProfileHint'), onClick: openMyProfile },
+    // Das Gegenueber - oder in einer Gruppe die Gruppe selbst, mit dem Weg
+    // zu jedem einzelnen Mitglied.
+    {
+      icon: isGroup() ? 'i-users' : 'i-user',
+      label: isGroup() ? t('groupProfile') : t('profile'),
+      value: peerName(),
+      onClick: openChatProfile,
+    },
     { icon: 'i-bell', label: t('notifications'), value: notificationLabel, onClick: toggleNotifications },
     {
       icon: app.prefs.sound ? 'i-sound' : 'i-sound-off',
@@ -3335,9 +3352,19 @@ function showAbout() {
 // Profilbild waehlen und zuschneiden
 // ===========================================================================
 
-/** Kleinste und groesste Vergroesserung beim Zuschneiden. */
-const CROP_MIN = 1;
-const CROP_MAX = 4;
+/**
+ * Wie weit sich hinein- und herauszoomen laesst.
+ *
+ * Bezugsgroesse ist nicht das Bild, sondern das Fenster: bei "deckend"
+ * fuellt das Bild das Quadrat gerade aus, bei "hineinpassend" ist es
+ * vollstaendig zu sehen. Herauszoomen geht bewusst noch deutlich darueber
+ * hinaus - wer sein Bild klein und mittig haben will, soll das koennen. Was
+ * dann rundherum frei bleibt, wird schwarz.
+ */
+const CROP_MIN_FAKTOR = 0.4;
+const CROP_MAX_FAKTOR = 4;
+/** Feinheit des Reglers. */
+const CROP_STUFEN = 1000;
 
 /** Laesst eine Bilddatei auswaehlen. */
 function pickImageFile() {
@@ -3363,10 +3390,10 @@ function pickImageFile() {
 /**
  * Zeigt das Bild in einem quadratischen Fenster: schieben, zoomen, fertig.
  *
- * Gerechnet wird in zwei Massen. Auf dem Bildschirm liegt das Bild um `tx`
- * und `ty` verschoben und um `massstab` vergroessert im Fenster. Der
- * Ausschnitt, der am Ende herausgeschnitten wird, steht dagegen in
- * Bildpunkten der Vorlage - das ist die Umrechnung ganz unten.
+ * Das Fenster ist genau der Ausschnitt, der spaeter das Profilbild wird -
+ * einschliesslich der Stellen, an denen kein Bild mehr ist. Der Kreis
+ * darueber zeigt, was davon rund angezeigt wird; er ist dem Quadrat
+ * einbeschrieben, denn genau so schneidet die runde Anzeige spaeter zu.
  *
  * @returns {Promise<{bytes: Uint8Array, mime: string}|null>}
  */
@@ -3388,48 +3415,74 @@ function cropSheet(vorlage) {
 
     const regler = make('input', 'crop__zoom');
     regler.type = 'range';
-    regler.min = String(CROP_MIN * 100);
-    regler.max = String(CROP_MAX * 100);
-    regler.value = '100';
+    regler.min = '0';
+    regler.max = String(CROP_STUFEN);
+    regler.value = String(CROP_STUFEN);
     regler.setAttribute('aria-label', t('cropZoom'));
 
-    let zoom = 1;
-    let tx = 0;
-    let ty = 0;
     /** Seitenlaenge des Fensters in Bildschirmpunkten. */
     let kante = 0;
-    /** Vergroesserung, bei der die Vorlage das Fenster gerade ausfuellt. */
+    /** Massstab, bei dem das Bild das Fenster gerade ausfuellt. */
     let deckung = 1;
+    /** Massstab, bei dem das Bild vollstaendig hineinpasst. */
+    let passend = 1;
+    let massstab = 1;
+    let tx = 0;
+    let ty = 0;
 
-    const massstab = () => deckung * zoom;
+    const kleinster = () => passend * CROP_MIN_FAKTOR;
+    const groesster = () => deckung * CROP_MAX_FAKTOR;
+
+    /** Reglerstellung -> Massstab, logarithmisch: so fuehlt sich Zoom richtig an. */
+    const ausRegler = (wert) => {
+      const klein = kleinster();
+      const gross = groesster();
+      return klein * ((gross / klein) ** (wert / CROP_STUFEN));
+    };
+    const zuRegler = (wert) => {
+      const klein = kleinster();
+      const gross = groesster();
+      return Math.round((Math.log(wert / klein) / Math.log(gross / klein)) * CROP_STUFEN);
+    };
 
     const zeichnen = () => {
-      const gross = massstab();
-      const breit = vorlage.width * gross;
-      const hoch = vorlage.height * gross;
-      // Nie eine Luecke: das Bild muss das Fenster immer ganz bedecken.
-      tx = Math.min(0, Math.max(kante - breit, tx));
-      ty = Math.min(0, Math.max(kante - hoch, ty));
-      bild.style.width = `${breit}px`;
-      bild.style.height = `${hoch}px`;
+      const breite = vorlage.width * massstab;
+      const hoehe = vorlage.height * massstab;
+      // Ist das Bild groesser als das Fenster, darf keine Luecke entstehen.
+      // Ist es kleiner, bleibt es innerhalb des Fensters - rundherum
+      // schwarz, aber nie ganz weggeschoben.
+      const grenze = (versatz, mass) => (mass >= kante
+        ? Math.min(0, Math.max(kante - mass, versatz))
+        : Math.max(0, Math.min(kante - mass, versatz)));
+      tx = grenze(tx, breite);
+      ty = grenze(ty, hoehe);
+      bild.style.width = `${breite}px`;
+      bild.style.height = `${hoehe}px`;
       bild.style.transform = `translate(${tx}px, ${ty}px)`;
     };
 
     const vermessen = () => {
-      kante = fenster.clientWidth || 240;
+      const neuKante = fenster.clientWidth || 240;
+      if (neuKante === kante) return;
+      kante = neuKante;
       deckung = kante / Math.min(vorlage.width, vorlage.height);
+      passend = kante / Math.max(vorlage.width, vorlage.height);
+      massstab = deckung;
+      regler.value = String(zuRegler(massstab));
+      // Mittig anfangen - das ist bei einem Portraet fast immer richtig.
+      tx = (kante - vorlage.width * massstab) / 2;
+      ty = (kante - vorlage.height * massstab) / 2;
       zeichnen();
     };
 
     regler.addEventListener('input', () => {
-      const vorher = massstab();
+      const vorher = massstab;
       const mitteX = (kante / 2 - tx) / vorher;
       const mitteY = (kante / 2 - ty) / vorher;
-      zoom = Math.max(CROP_MIN, Math.min(CROP_MAX, Number(regler.value) / 100));
-      const nachher = massstab();
+      massstab = ausRegler(Number(regler.value));
       // Beim Zoomen bleibt die Mitte die Mitte - sonst springt das Bild weg.
-      tx = kante / 2 - mitteX * nachher;
-      ty = kante / 2 - mitteY * nachher;
+      tx = kante / 2 - mitteX * massstab;
+      ty = kante / 2 - mitteY * massstab;
       zeichnen();
     });
 
@@ -3456,8 +3509,13 @@ function cropSheet(vorlage) {
     uebernehmen.id = 'crop-apply';
     uebernehmen.textContent = t('cropApply');
     uebernehmen.addEventListener('click', () => {
-      const gross = massstab();
-      antwort({ x: -tx / gross, y: -ty / gross, size: kante / gross });
+      antwort({
+        tx,
+        ty,
+        breite: vorlage.width * massstab,
+        hoehe: vorlage.height * massstab,
+        kante,
+      });
       closeSheet();
     });
 
@@ -3479,9 +3537,9 @@ function cropSheet(vorlage) {
       vermessen();
       requestAnimationFrame(vermessen);
     });
-  }).then(async (ausschnitt) => {
-    if (!ausschnitt) return null;
-    return finishAvatar(vorlage.handle, ausschnitt);
+  }).then(async (lage) => {
+    if (!lage) return null;
+    return finishAvatar(vorlage.handle, lage);
   });
 }
 
@@ -3574,15 +3632,137 @@ function refreshAvatarChip() {
   }
 }
 
-/** Blatt mit den Wahlmoeglichkeiten rund um das eigene Bild. */
-function openAvatarMenu() {
-  openSheet(t('myPicture'), [
-    make('p', 'sheet-note', t('myPictureHint')),
-    { icon: 'i-image', label: app.prefs?.avatar ? t('avatarChange') : t('avatarChoose'), onClick: () => void chooseMyAvatar() },
+// ===========================================================================
+// Profile
+// ===========================================================================
+
+/** So lang darf die Kurzbeschreibung werden. */
+const BIO_MAX = 160;
+
+/**
+ * Der Kopf eines Profils: Bild in gross, Name, Kurzbeschreibung.
+ *
+ * Das Bild laesst sich antippen und geht dann ganz auf - wer wissen will,
+ * wen er vor sich hat, soll nicht auf einen Daumennagel angewiesen sein.
+ */
+function profileHead({ owner, name, bio, url }) {
+  const block = make('div', 'profile');
+  const bildUrl = url ?? (owner ? avatarUrl(owner) : null);
+
+  if (bildUrl) {
+    const knopf = make('button', 'profile__avatar');
+    knopf.type = 'button';
+    knopf.setAttribute('aria-label', t('profilePicture'));
+    const bild = make('img', 'avatar__img');
+    bild.src = bildUrl;
+    bild.alt = '';
+    knopf.appendChild(bild);
+    knopf.addEventListener('click', () => openLightbox(bildUrl, name, 'profil.jpg'));
+    block.appendChild(knopf);
+  } else {
+    const platzhalter = make('div', 'profile__avatar is-empty', initial(name));
+    block.appendChild(platzhalter);
+  }
+
+  block.appendChild(make('strong', 'profile__name', name));
+  const text = (bio ?? '').trim();
+  block.appendChild(make('p', text ? 'profile__bio' : 'profile__bio is-empty', text || t('bioEmpty')));
+  return block;
+}
+
+/**
+ * Das eigene Profil.
+ *
+ * Alles, was andere von einem sehen, an einer Stelle - und daneben die
+ * Knoepfe, um genau das zu aendern.
+ */
+function openMyProfile() {
+  const name = app.prefs?.nick || app.session?.nick || '';
+  openSheet(t('myProfile'), [
+    profileHead({
+      owner: null,
+      url: app.prefs?.avatar ?? null,
+      name: name || t('you'),
+      bio: app.prefs?.bio ?? '',
+    }),
+    make('p', 'sheet-note', t('myProfileHint')),
+    {
+      icon: 'i-image',
+      label: app.prefs?.avatar ? t('avatarChange') : t('avatarChoose'),
+      onClick: () => void chooseMyAvatar(),
+    },
     ...(app.prefs?.avatar
-      ? [{ icon: 'i-trash', label: t('avatarRemove'), danger: true, onClick: removeMyAvatar }]
+      ? [{ icon: 'i-trash', label: t('avatarRemove'), danger: true, onClick: () => void removeMyAvatar() }]
       : []),
+    { icon: 'i-user', label: t('yourName'), value: name || '–', onClick: () => void changeNick() },
+    { icon: 'i-edit', label: t('bio'), hint: t('bioHint'), onClick: () => void changeBio() },
   ]);
+}
+
+/** Das Profil von jemand anderem. */
+function openMemberProfile(member) {
+  if (!member) return;
+  const darfVergeben = isGroup() && app.myRole === 'admin' && member.left !== true;
+  const istAdmin = member.role === 'admin';
+  openSheet(t('profile'), [
+    profileHead({ owner: member.id, name: memberName(member), bio: member.bio }),
+    ...(isGroup()
+      ? [make('p', 'sheet-note', istAdmin ? t('roleAdminNote') : t('roleMemberNote'))]
+      : []),
+    ...(darfVergeben ? [{
+      icon: 'i-shield',
+      label: istAdmin ? t('roleTake') : t('roleGive'),
+      hint: istAdmin ? t('roleTakeHint') : t('roleGiveHint'),
+      onClick: () => setMemberRole(member.id, istAdmin ? 'member' : 'admin'),
+    }] : []),
+  ]);
+}
+
+/**
+ * Das Profil des Chats, den man gerade offen hat.
+ *
+ * Im Zweiergespraech ist das die andere Person, in einer Gruppe die Gruppe
+ * selbst - mit dem Weg zu jedem einzelnen Mitglied.
+ */
+function openChatProfile() {
+  if (!app.session) return;
+  if (!isGroup()) {
+    const gegenueber = peerOf();
+    if (!gegenueber) {
+      toast(t('neverSeen'));
+      return;
+    }
+    openMemberProfile(gegenueber);
+    return;
+  }
+  const darf = app.myRole === 'admin';
+  openSheet(t('groupProfile'), [
+    profileHead({
+      owner: 'group',
+      name: peerName(),
+      bio: t('membersHint', { n: app.session?.capacity ?? others().length + 1 }),
+    }),
+    ...(darf ? [
+      { icon: 'i-image', label: t('groupPicture'), hint: t('groupPictureHint'), onClick: () => void chooseGroupAvatar() },
+      { icon: 'i-plus', label: t('inviteMore'), onClick: () => void inviteMore() },
+    ] : []),
+    { icon: 'i-users', label: t('members'), value: String(others().length + 1), onClick: showMembers },
+  ]);
+}
+
+/** Ein paar Zeilen ueber sich - gehen in jeden Chat mit. */
+async function changeBio() {
+  const next = await promptSheet(t('bio'), {
+    value: app.prefs?.bio ?? '',
+    placeholder: t('bioPlaceholder'),
+    note: t('bioHint'),
+    maxLength: BIO_MAX,
+  });
+  if (next == null) return;
+  app.prefs = setPrefs({ bio: next });
+  // In den offenen Chat sofort, in alle anderen beim naechsten Betreten.
+  sendNick(app.session?.nick ?? app.prefs.nick ?? '', next);
+  toast(t('saved'));
 }
 
 /** Das Bild der Gruppe - nur Verwalter duerfen es aendern. */
@@ -3618,16 +3798,19 @@ function showMembers() {
     icon: 'i-user',
     label: `${app.session?.nick || t('yourName')} (${t('memberYou')})`,
     value: app.myRole === 'admin' ? t('roleAdmin') : t('roleMember'),
+    onClick: openMyProfile,
   };
   const andere = others().map((member) => {
-    const darf = app.myRole === 'admin';
     const istAdmin = member.role === 'admin';
     return {
       icon: istAdmin ? 'i-shield' : 'i-user',
       label: memberName(member),
-      hint: darf ? (istAdmin ? t('roleTakeHint') : t('roleGiveHint')) : undefined,
+      hint: t('openProfileHint'),
       value: istAdmin ? t('roleAdmin') : t('roleMember'),
-      onClick: darf ? () => setMemberRole(member.id, istAdmin ? 'member' : 'admin') : undefined,
+      // Antippen fuehrt zum Profil - dort steht auch, was man mit dieser
+      // Person tun darf. Rechte aus Versehen zu vergeben, weil man nur
+      // nachsehen wollte, waere ein schlechter Tausch.
+      onClick: () => openMemberProfile(member),
     };
   });
   openSheet(t('members'), [
@@ -4350,7 +4533,10 @@ function wireStaticHandlers() {
   el('btn-lang').addEventListener('click', cycleLanguage);
   el('btn-theme').addEventListener('click', cycleTheme);
   el('btn-about').addEventListener('click', showAbout);
-  el('btn-avatar')?.addEventListener('click', openAvatarMenu);
+  // Bild und Name in der Kopfzeile fuehren zum Profil - dort, wo man
+  // danach greift.
+  el('peer-open')?.addEventListener('click', openChatProfile);
+  el('btn-avatar')?.addEventListener('click', openMyProfile);
   refreshAvatarChip();
 
   // --- Einladen ---
