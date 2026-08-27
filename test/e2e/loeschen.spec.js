@@ -269,3 +269,132 @@ test('Nach dem Löschen bleibt nichts von der App zurück - und nichts Fremdes g
   expect(eigene, `noch gespeichert: ${eigene.join(', ')}`).toEqual([]);
   await kontext.close();
 });
+
+/**
+ * Eine Gruppe gehoert nicht einem allein.
+ *
+ * Wer alles loescht, nimmt sie den anderen nicht weg - er tritt aus. Seine
+ * Nachrichten verschwinden trotzdem: an ihrer Stelle steht eine Zeile, und
+ * die Unterhaltung der uebrigen bleibt vollstaendig stehen.
+ */
+test('Beim Löschen wird eine Gruppe verlassen, nicht vernichtet', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+
+  await withName(seiteA, 'Anton');
+  await seiteA.goto('./');
+  await seiteA.getByRole('button', { name: /Gruppe erstellen/i }).click();
+  await seiteA.locator('#sheet input[type="text"]').fill('Verein');
+  await seiteA.locator('#group-size').fill('2');
+  await seiteA.locator('#sheet').getByRole('button', { name: /^Anlegen$/ }).click();
+  await expect(seiteA.locator('#screen-group')).toBeVisible({ timeout: 20_000 });
+  const codes = await seiteA.locator('#group-codes .invite-row__code').allInnerTexts();
+  const basis = new URL(seiteA.url());
+
+  await withName(seiteB, 'Mira');
+  await seiteB.goto(`${basis.origin}${basis.pathname}#g:${encodeURIComponent(codes[0].trim())}`);
+  await expect(seiteB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+
+  await seiteA.locator('#btn-group-to-chat').click();
+  await sendText(seiteA, 'Das hier verschwindet');
+  await expect(seiteB.locator('#messages .msg--in')).toContainText('Das hier verschwindet', { timeout: 30_000 });
+  await sendText(seiteB, 'Das hier bleibt');
+  await expect(seiteA.locator('#messages .msg--in')).toContainText('Das hier bleibt', { timeout: 30_000 });
+
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible();
+  await loeschenOeffnen(seiteA);
+  // Der zweite Hinweis sagt bei Gruppen etwas anderes - naemlich, dass sie
+  // bestehen bleibt.
+  await weiter(seiteA);
+  await expect(seiteA.locator('#sheet')).toContainText(/trittst du aus/i);
+  await weiter(seiteA);
+  const knopf = endknopf(seiteA);
+  await expect(knopf).toBeEnabled({ timeout: 25_000 });
+  await knopf.click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible({ timeout: 30_000 });
+  await expect(seiteA.locator('#chat-list .chat-list__item')).toHaveCount(0, { timeout: 25_000 });
+
+  // Bei B steht die Gruppe noch - mit der eigenen Nachricht, aber ohne die
+  // von Anton. An deren Stelle steht die Zeile.
+  await expect(seiteB.locator('#messages')).toContainText(/hat die Gruppe verlassen/i, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages')).not.toContainText('Das hier verschwindet');
+  await expect(seiteB.locator('#messages')).toContainText('Das hier bleibt');
+
+  // Und nach dem Neuladen ist es immer noch so - der Server hat es also
+  // behalten und nicht bloss die Anzeige nachgezogen.
+  await seiteB.reload();
+  const eintrag = seiteB.locator('#chat-list .chat-list__item').first();
+  await expect(eintrag).toBeVisible({ timeout: 25_000 });
+  await eintrag.click();
+  await expect(seiteB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+  await expect(seiteB.locator('#messages')).toContainText(/hat die Gruppe verlassen/i, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages')).not.toContainText('Das hier verschwindet');
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+/**
+ * Bricht man nach einem Fehlschlag ab, darf nichts Halbes stehen bleiben.
+ *
+ * Was der Server schon erledigt hat, ist erledigt: eine Gruppe, die man
+ * verlassen hat, gehoert nicht mehr in die Liste. Sonst tippt man sie
+ * spaeter an und bekommt eine ratlose Fehlermeldung - und ein zweiter
+ * Loeschversuch scheitert immer wieder an ihr.
+ */
+test('Was schon weg ist, bleibt nach einem Abbruch nicht in der Liste', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+
+  // Eine Gruppe ...
+  await withName(seiteA, 'Anton');
+  await seiteA.goto('./');
+  await seiteA.getByRole('button', { name: /Gruppe erstellen/i }).click();
+  await seiteA.locator('#sheet input[type="text"]').fill('Verein');
+  await seiteA.locator('#group-size').fill('2');
+  await seiteA.locator('#sheet').getByRole('button', { name: /^Anlegen$/ }).click();
+  await expect(seiteA.locator('#screen-group')).toBeVisible({ timeout: 20_000 });
+  await seiteA.locator('#btn-group-to-chat').click();
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#screen-start')).toBeVisible();
+
+  // ... und ein Zweiergespraech.
+  const { link } = await createChat(seiteA, { nick: null });
+  await joinChat(seiteB, link, { nick: 'Mira' });
+  await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
+  await seiteA.locator('#chat-back').click();
+  await expect(seiteA.locator('#chat-list .chat-list__item')).toHaveCount(2);
+
+  // Das Vernichten des Zweiergespraechs schlaegt fehl, das Verlassen der
+  // Gruppe geht durch.
+  await seiteA.route('**/api/rooms/*', async (route) => {
+    if (route.request().method() === 'DELETE') return route.abort();
+    return route.fallback();
+  });
+
+  await loeschenOeffnen(seiteA);
+  await weiter(seiteA);
+  await weiter(seiteA);
+  const knopf = endknopf(seiteA);
+  await expect(knopf).toBeEnabled({ timeout: 25_000 });
+  await knopf.click();
+
+  await expect(seiteA.locator('#sheet-title')).toHaveText(/Nicht alles ist weggegangen/i, { timeout: 25_000 });
+  await seiteA.getByRole('button', { name: /^Abbrechen$/ }).click();
+  await expect(seiteA.locator('#sheet')).toBeHidden();
+
+  // Die Gruppe ist raus, das Zweiergespraech steht noch - und zwar genau so
+  // auch nach dem Neuladen.
+  await expect(seiteA.locator('#chat-list .chat-list__item')).toHaveCount(1);
+  await seiteA.reload();
+  await expect(seiteA.locator('#chat-list .chat-list__item')).toHaveCount(1, { timeout: 25_000 });
+  await expect(seiteA.locator('#chat-list')).not.toContainText('Verein');
+
+  await kontextA.close();
+  await kontextB.close();
+});

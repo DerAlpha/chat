@@ -10,6 +10,11 @@ const UNREAD_CAP = 99;
 /** Raum-IDs sind base64url(SHA-256(code)).slice(0, 22) - der Server sieht den Code nie. */
 export const ROOM_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 export const BLOB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
+/**
+ * Wem ein Profilbild gehoert: einer Mitgliedskennung - oder der Gruppe.
+ * Der Wert wird zum Dateinamen, deshalb wird er streng geprueft.
+ */
+export const AVATAR_OWNER_RE = /^(group|[A-Za-z0-9_-]{1,32})$/;
 
 const SNAPSHOT_VERSION = 1;
 
@@ -224,6 +229,9 @@ export class Store {
       nickCt: null,
       readSeq: 0,
       slotId,
+      role: 'member',
+      avatarVer: null,
+      left: false,
     };
     room.members.set(member.id, member);
     slot.claimedBy = member.id;
@@ -252,6 +260,12 @@ export class Store {
       nickCt: null,
       readSeq: 0,
       slotId: null,
+      // Wer die Gruppe anlegt, verwaltet sie auch: nur so gibt es ueberhaupt
+      // jemanden, der spaeter Rechte vergeben oder weitere Leute einladen
+      // kann. Alle weiteren kommen als gewoehnliche Mitglieder herein.
+      role: 'admin',
+      avatarVer: null,
+      left: false,
     };
     room.members.set(member.id, member);
     room.touch(this.now());
@@ -272,12 +286,129 @@ export class Store {
   }
 
   /**
+   * Weitere Einmal-Plaetze nachtragen.
+   *
+   * Gruppen wachsen. Wer sie verwaltet, wuerfelt neue Codes, verpackt den
+   * Gruppenschluessel fuer jeden davon und legt die Pakete hier ab - genau
+   * wie beim Anlegen. Der Server bekommt wieder nur undurchsichtige Pakete
+   * zu sehen und kann keines davon oeffnen.
+   */
+  addSlots(room, slots) {
+    if (room.slots.size === 0) throw new BadRequest('not_a_group', 'Das ist keine Gruppe.');
+    if (!Array.isArray(slots) || slots.length === 0) {
+      throw new BadRequest('bad_slot', 'Keine Plaetze angegeben.');
+    }
+    if (room.capacity + slots.length > config.maxRoomCapacity) {
+      throw new BadRequest('too_many_slots', 'So gross darf eine Gruppe nicht sein.');
+    }
+    const gesehen = new Set();
+    for (const slot of slots) {
+      const id = String(slot?.id ?? '');
+      const wrapped = String(slot?.wrapped ?? '');
+      if (!ROOM_ID_RE.test(id)) throw new BadRequest('bad_slot_id', 'Ungueltige Platzkennung.');
+      if (!wrapped || wrapped.length > config.maxWrappedKeyChars) {
+        throw new BadRequest('bad_slot', 'Ungueltiges Platzpaket.');
+      }
+      if (gesehen.has(id) || this.slotIndex.has(id)) {
+        throw new BadRequest('slot_exists', 'Diese Platzkennung ist schon vergeben.');
+      }
+      gesehen.add(id);
+    }
+    for (const slot of slots) {
+      room.slots.set(slot.id, {
+        id: slot.id, wrapped: slot.wrapped, claimedBy: null, claimedAt: null, settled: false,
+      });
+      this.slotIndex.set(slot.id, room.id);
+    }
+    room.capacity += slots.length;
+    room.touch(this.now());
+    this.markDirty();
+    return room.capacity;
+  }
+
+  /** Alle, die noch da sind - Gegangene zaehlen nicht mehr mit. */
+  activeMembers(room) {
+    return [...room.members.values()].filter((member) => member.left !== true);
+  }
+
+  /** Wie viele Verwalter hat die Gruppe noch? */
+  adminCount(room) {
+    return this.activeMembers(room).filter((member) => member.role === 'admin').length;
+  }
+
+  /**
+   * Rechte vergeben oder wieder nehmen.
+   *
+   * Nur Verwalter duerfen das, und der letzte Verwalter kann sich seine
+   * Rechte nicht selbst nehmen: eine Gruppe ohne Verwalter liesse sich nie
+   * wieder erweitern und ihr Bild nie wieder aendern.
+   */
+  setRole(room, actor, targetId, role) {
+    if (room.slots.size === 0) throw new BadRequest('not_a_group', 'Das ist keine Gruppe.');
+    if (actor.role !== 'admin') throw new BadRequest('not_admin', 'Nur Verwalter duerfen Rechte vergeben.');
+    if (role !== 'admin' && role !== 'member') throw new BadRequest('bad_role', 'Unbekanntes Recht.');
+    const ziel = room.members.get(String(targetId ?? ''));
+    if (!ziel || ziel.left === true) throw new BadRequest('unknown_member', 'Dieses Mitglied gibt es nicht.');
+    if (role === 'member' && ziel.role === 'admin' && this.adminCount(room) <= 1) {
+      throw new BadRequest('last_admin', 'Die Gruppe braucht mindestens einen Verwalter.');
+    }
+    ziel.role = role;
+    room.touch(this.now());
+    this.markDirty();
+    return ziel;
+  }
+
+  /**
+   * Jemand verlaesst die Gruppe - und nimmt seine Nachrichten mit.
+   *
+   * Anders als beim Vernichten des ganzen Raums bleibt die Gruppe fuer alle
+   * anderen bestehen. Von den Nachrichten des Gehenden bleibt nur ein
+   * Platzhalter uebrig: Chiffrat und Anhaenge sind weg, und `gone` sagt den
+   * Geraeten, dass hier jemand gegangen ist - nicht, dass bloss eine
+   * einzelne Nachricht geloescht wurde. Der Platz selbst bleibt belegt: sein
+   * Code ist verbraucht, und die Nachrichten der anderen verweisen weiter
+   * auf ihn.
+   */
+  leaveRoom(room, member) {
+    const schonWeg = member.left === true;
+    if (!schonWeg) {
+      member.left = true;
+      member.nickCt = null;
+      member.avatarVer = null;
+      member.typingUntil = 0;
+      for (const message of room.messages) {
+        if (message.from !== member.id) continue;
+        message.gone = true;
+        if (message.deleted) continue;
+        message.deleted = true;
+        message.ct = '';
+        message.reactions = {};
+        this.releaseAttachments(room, message);
+        message.att = [];
+      }
+      void this.dropAvatar(room, member.id);
+      // Geht der letzte Verwalter, waere die Gruppe fuehrungslos: niemand
+      // koennte sie je wieder erweitern oder ihr Bild aendern. Also rueckt
+      // der am laengsten Dabeigebliebene nach.
+      const uebrig = this.activeMembers(room);
+      if (room.slots.size > 0 && uebrig.length > 0 && this.adminCount(room) === 0) {
+        const nachfolge = uebrig.slice().sort((a, b) => a.joinedAt - b.joinedAt)[0];
+        nachfolge.role = 'admin';
+      }
+      room.touch(this.now());
+      this.markDirty();
+    }
+    return { alreadyGone: schonWeg, empty: this.activeMembers(room).length === 0 };
+  }
+
+  /**
    * Beitritt. Mit gueltigem `token` kehrt ein bekanntes Mitglied zurueck,
    * ohne Token wird ein neuer Platz belegt - solange noch einer frei ist.
    */
   joinRoom(room, token) {
     if (token) {
-      const member = [...room.members.values()].find((m) => safeEqual(m.token, token));
+      // Gegangene kommen mit ihrem alten Token nicht zurueck.
+      const member = [...room.members.values()].find((m) => safeEqual(m.token, token) && m.left !== true);
       if (member) {
         member.lastSeen = this.now();
         room.touch(this.now());
@@ -302,6 +433,9 @@ export class Store {
       lastSeen: this.now(),
       nickCt: null,
       readSeq: 0,
+      role: 'member',
+      avatarVer: null,
+      left: false,
     };
     room.members.set(member.id, member);
     room.touch(this.now());
@@ -531,6 +665,70 @@ export class Store {
     }
   }
 
+  // ------------------------------------------------------------ Profilbilder
+
+  avatarPath(roomId, ownerId) {
+    return path.join(this.blobDir, roomId, `avatar-${ownerId}.bin`);
+  }
+
+  /**
+   * Legt ein Profilbild ab - verschluesselt, wie alles andere auch.
+   *
+   * Bilder gehen absichtlich nicht durch den Anhang-Speicher: ein Anhang
+   * gehoert zu einer Nachricht und wird weggeraeumt, wenn er nach einer
+   * halben Stunde noch an keiner haengt. Ein Profilbild haengt an niemandem
+   * und soll bleiben. Es ersetzt jedes Mal das vorige, mehr als eines je
+   * Person kann es also nicht geben.
+   *
+   * @param {Room} room
+   * @param {string} ownerId Mitgliedskennung - oder "group" fuer das Gruppenbild.
+   * @param {Buffer} data
+   */
+  async putAvatar(room, ownerId, data) {
+    if (!AVATAR_OWNER_RE.test(ownerId)) throw new BadRequest('bad_owner', 'Ungueltiger Besitzer.');
+    if (!Buffer.isBuffer(data) || data.length === 0) {
+      throw new BadRequest('empty_avatar', 'Leeres Bild.');
+    }
+    if (data.length > config.maxAvatarBytes) {
+      throw new BadRequest('avatar_too_large', 'Bild zu gross.');
+    }
+    const target = this.avatarPath(room.id, ownerId);
+    await fsp.mkdir(path.dirname(target), { recursive: true });
+    await fsp.writeFile(target, data);
+    const ver = newId(8);
+    if (ownerId === 'group') {
+      room.avatarVer = ver;
+    } else {
+      const member = room.members.get(ownerId);
+      if (member) member.avatarVer = ver;
+    }
+    room.touch(this.now());
+    this.markDirty();
+    return ver;
+  }
+
+  async readAvatar(room, ownerId) {
+    if (!AVATAR_OWNER_RE.test(ownerId)) return null;
+    try {
+      return await fsp.readFile(this.avatarPath(room.id, ownerId));
+    } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+
+  async dropAvatar(room, ownerId) {
+    if (!AVATAR_OWNER_RE.test(ownerId)) return;
+    if (ownerId === 'group') {
+      room.avatarVer = null;
+    } else {
+      const member = room.members.get(ownerId);
+      if (member) member.avatarVer = null;
+    }
+    this.markDirty();
+    await fsp.rm(this.avatarPath(room.id, ownerId), { force: true }).catch(() => {});
+  }
+
   /** Loescht verwaiste Uploads, die nie an eine Nachricht gebunden wurden. */
   sweepOrphanBlobs(room, maxAgeMs = 30 * 60 * 1000) {
     const now = this.now();
@@ -583,8 +781,18 @@ export class Room {
      * @type {Map<string, {id:string, wrapped:string, claimedBy:string|null, claimedAt:number|null, settled:boolean}>}
      */
     this.slots = new Map();
-    /** @type {Map<string, {id:string, token:string, joinedAt:number, lastSeen:number, nickCt:string|null, readSeq:number}>} */
+    /**
+     * @type {Map<string, {id:string, token:string, joinedAt:number,
+     *   lastSeen:number, nickCt:string|null, readSeq:number, role:string,
+     *   avatarVer:string|null, left:boolean}>}
+     */
     this.members = new Map();
+    /**
+     * Fassung des Gruppenbildes. Aendert sie sich, holen die Geraete das Bild
+     * neu - vorher liegt es bei ihnen im Zwischenspeicher und wird nicht
+     * jedes Mal wieder heruntergeladen.
+     */
+    this.avatarVer = null;
     /** @type {Array<object>} */
     this.messages = [];
     /** @type {Map<string, {id:string,size:number,createdAt:number,messageId:string|null}>} */
@@ -605,6 +813,13 @@ export class Room {
       nickCt: member.nickCt,
       readSeq: member.readSeq,
       online: onlineIds.has(member.id),
+      // In einer Gruppe darf nicht jeder alles: wer sie angelegt hat, ist
+      // Verwalter und kann Rechte weitergeben.
+      role: member.role === 'admin' ? 'admin' : 'member',
+      // Wer gegangen ist, bleibt als leerer Platz stehen - sonst waeren seine
+      // Nachrichten auf einmal von niemandem.
+      left: member.left === true,
+      avatarVer: member.avatarVer ?? null,
     };
   }
 
@@ -615,6 +830,7 @@ export class Room {
       lastActivity: this.lastActivity,
       seq: this.seq,
       capacity: this.capacity,
+      avatarVer: this.avatarVer,
       slots: [...this.slots.values()],
       blobBytes: this.blobBytes,
       members: [...this.members.values()],
@@ -631,6 +847,7 @@ export class Room {
     // Aeltere Momentaufnahmen kennen weder Kapazitaet noch Plaetze - dann
     // ist es ein Zweierchat, so wie frueher.
     room.capacity = Number.isInteger(plain.capacity) ? plain.capacity : config.maxMembersPerRoom;
+    room.avatarVer = typeof plain.avatarVer === 'string' ? plain.avatarVer : null;
     for (const slot of plain.slots ?? []) {
       if (!slot?.id || typeof slot.wrapped !== 'string') continue;
       room.slots.set(slot.id, {
@@ -652,6 +869,11 @@ export class Room {
         nickCt: member.nickCt ?? null,
         readSeq: member.readSeq ?? 0,
         slotId: member.slotId ?? null,
+        // Aeltere Momentaufnahmen kennen keine Rollen - dann ist niemand
+        // Verwalter, und die Gruppe bleibt so, wie sie war.
+        role: member.role === 'admin' ? 'admin' : 'member',
+        avatarVer: typeof member.avatarVer === 'string' ? member.avatarVer : null,
+        left: member.left === true,
       });
     }
     room.messages = Array.isArray(plain.messages) ? plain.messages : [];

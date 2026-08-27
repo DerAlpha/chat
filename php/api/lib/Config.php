@@ -31,6 +31,12 @@ final class Config
     public int $maxCiphertextBytes = 65536;
     public int $maxBlobBytes = 12 * 1024 * 1024;
     public int $maxRoomBlobBytes = 150 * 1024 * 1024;
+    /**
+     * Ein Profilbild ist klein und quadratisch - 128 KB reichen dafür mit
+     * Abstand. Die Grenze hält auch fest, wie viel Platz eine große Gruppe
+     * höchstens für Bilder braucht.
+     */
+    public int $maxAvatarBytes = 128 * 1024;
 
     /**
      * Wie lange eine Abfrage auf neue Ereignisse wartet, bevor sie leer

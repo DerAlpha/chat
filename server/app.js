@@ -83,6 +83,7 @@ export function createApp(store, hub) {
       limits: {
         maxBlobBytes: config.maxBlobBytes,
         maxCiphertextBytes: config.maxCiphertextBytes,
+        maxAvatarBytes: config.maxAvatarBytes,
       },
       // Anrufe laufen zwischen den Browsern und werden immer angeboten;
       // was an Diensten fehlt, sagt die App als Hinweis dazu.
@@ -186,9 +187,10 @@ export function createApp(store, hub) {
         rooms.push({ roomId, gone: true });
         continue;
       }
-      const member = [...room.members.values()].find((m) => safeEqual(m.token, token));
+      const member = [...room.members.values()].find((m) => safeEqual(m.token, token) && m.left !== true);
       // Ohne gueltiges Token gibt es keine Auskunft - und auch keinen Hinweis
-      // darauf, ob es den Raum gibt.
+      // darauf, ob es den Raum gibt. Wer gegangen ist, hat kein gueltiges
+      // Token mehr.
       if (!member) continue;
       const seq = Number.parseInt(String(eintrag?.seq ?? '0'), 10) || 0;
       rooms.push({ roomId, ...store.summarise(room, member, seq) });
@@ -309,6 +311,142 @@ export function createApp(store, hub) {
     }
   });
 
+  // --- Eine Gruppe nachtraeglich erweitern. ----------------------------------
+  // Wer sie verwaltet, hat neue Codes gewuerfelt und den Gruppenschluessel
+  // dafuer verpackt. Hier kommen nur die Pakete an - der Server kann keines
+  // davon oeffnen und sieht die Codes nie.
+  api.post(
+    '/rooms/:roomId/slots',
+    express.json({ limit: `${8 + config.maxRoomCapacity * 2}kb` }),
+    (req, res, next) => {
+      try {
+        if (!limits.create.take(clientKey(req))) return tooMany(res, limits.create, clientKey(req));
+        const { room, member } = authenticate(req, res, store);
+        if (!room) return;
+        if (member.role !== 'admin') {
+          return res.status(403).json({ error: 'not_admin', message: 'Nur Verwalter duerfen einladen.' });
+        }
+        const slots = Array.isArray(req.body?.slots) ? req.body.slots : [];
+        const capacity = store.addSlots(room, slots);
+        hub.broadcast(room.id, { t: 'capacity', capacity });
+        res.status(201).json({ capacity });
+      } catch (error) {
+        if (error instanceof BadRequest) {
+          return res.status(400).json({ error: error.code, message: error.message });
+        }
+        next(error);
+      }
+    },
+  );
+
+  // --- Eine Gruppe verlassen. ------------------------------------------------
+  // Der Unterschied zum Vernichten: die Gruppe bleibt fuer alle anderen
+  // stehen. Nur die eigenen Nachrichten verlieren ihren Inhalt, und an ihrer
+  // Stelle steht bei den anderen, dass hier jemand gegangen ist.
+  api.post('/rooms/:roomId/leave', async (req, res, next) => {
+    try {
+      const { room, member } = authenticate(req, res, store);
+      if (!room) return;
+      const vorher = new Map([...room.members.values()].map((m) => [m.id, m.role]));
+      const { empty } = store.leaveRoom(room, member);
+      hub.broadcast(room.id, { t: 'left', from: member.id });
+      // Ist jemand nachgerueckt, muss die Gruppe das erfahren - sonst weiss
+      // der neue Verwalter erst beim naechsten Betreten davon.
+      for (const uebrig of store.activeMembers(room)) {
+        if (vorher.get(uebrig.id) !== uebrig.role) {
+          hub.broadcast(room.id, { t: 'role', from: member.id, to: uebrig.id, role: uebrig.role });
+        }
+      }
+      // Und die eigene Leitung kappen: ein offener Socket wuerde sonst
+      // weiterhin Nachrichten annehmen, obwohl das Token nichts mehr oeffnet.
+      hub.disconnectMember(room.id, member.id);
+      if (empty) {
+        // Niemand mehr da: dann kann auch der Raum weg.
+        hub.broadcast(room.id, { t: 'burned' });
+        await store.deleteRoom(room.id, 'last-left');
+      }
+      res.json({ ok: true, empty });
+    } catch (error) {
+      if (error instanceof BadRequest) {
+        return res.status(400).json({ error: error.code, message: error.message });
+      }
+      next(error);
+    }
+  });
+
+  // --- Profilbild setzen. ----------------------------------------------------
+  // Der Inhalt ist schon im Browser verschluesselt; dieser Server legt nur
+  // Bytes ab, die er nicht lesen kann. "group" ist das Bild der Gruppe - das
+  // duerfen nur Verwalter aendern.
+  api.put(
+    '/rooms/:roomId/avatar/:owner',
+    express.raw({ type: () => true, limit: config.maxAvatarBytes + 1024 }),
+    async (req, res, next) => {
+      try {
+        if (!limits.upload.take(clientKey(req))) return tooMany(res, limits.upload, clientKey(req));
+        const { room, member } = authenticate(req, res, store);
+        if (!room) return;
+        const owner = String(req.params.owner ?? '');
+        // Das eigene Bild darf jeder setzen, das der Gruppe nur ihr Verwalter.
+        // Ein fremdes Bild darf niemand setzen.
+        if (owner === 'group') {
+          if (room.slots.size === 0) {
+            return res.status(400).json({ error: 'not_a_group', message: 'Das ist keine Gruppe.' });
+          }
+          if (member.role !== 'admin') {
+            return res.status(403).json({ error: 'not_admin', message: 'Nur Verwalter duerfen das Gruppenbild aendern.' });
+          }
+        } else if (owner !== member.id) {
+          return res.status(403).json({ error: 'not_owner', message: 'Fremdes Bild.' });
+        }
+        const ver = await store.putAvatar(room, owner, req.body);
+        hub.broadcast(room.id, { t: 'avatar', from: owner, ver });
+        res.status(201).json({ ver });
+      } catch (error) {
+        if (error instanceof BadRequest) {
+          return res.status(400).json({ error: error.code, message: error.message });
+        }
+        next(error);
+      }
+    },
+  );
+
+  // --- Profilbild wieder wegnehmen. ------------------------------------------
+  api.delete('/rooms/:roomId/avatar/:owner', async (req, res, next) => {
+    try {
+      const { room, member } = authenticate(req, res, store);
+      if (!room) return;
+      const owner = String(req.params.owner ?? '');
+      if (owner === 'group') {
+        if (member.role !== 'admin') {
+          return res.status(403).json({ error: 'not_admin', message: 'Nur Verwalter duerfen das Gruppenbild aendern.' });
+        }
+      } else if (owner !== member.id) {
+        return res.status(403).json({ error: 'not_owner', message: 'Fremdes Bild.' });
+      }
+      await store.dropAvatar(room, owner);
+      hub.broadcast(room.id, { t: 'avatar', from: owner, ver: null });
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Profilbild holen. -----------------------------------------------------
+  api.get('/rooms/:roomId/avatar/:owner', async (req, res, next) => {
+    try {
+      const { room } = authenticate(req, res, store);
+      if (!room) return;
+      const data = await store.readAvatar(room, String(req.params.owner ?? ''));
+      if (!data) return res.status(404).json({ error: 'avatar_unknown', message: 'Kein Bild hinterlegt.' });
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Length', String(data.length));
+      res.send(data);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // --- Chat komplett loeschen. ----------------------------------------------
   api.delete('/rooms/:roomId', async (req, res, next) => {
     try {
@@ -401,7 +539,10 @@ function authenticate(req, res, store) {
   }
   const token = req.get('x-room-token') ?? '';
   const member = [...room.members.values()].find((m) => safeEqual(m.token, token));
-  if (!member) {
+  // Wer die Gruppe verlassen hat, kommt nicht mehr hinein. Sein Token bleibt
+  // am Platz stehen, damit die alten Nachrichten der anderen weiter auf ihn
+  // verweisen koennen - es oeffnet aber nichts mehr.
+  if (!member || member.left === true) {
     res.status(401).json({ error: 'unauthorized', message: 'Kein Zugriff auf diesen Chat.' });
     return {};
   }

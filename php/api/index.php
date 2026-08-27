@@ -117,6 +117,23 @@ final class App
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/ice$#', $route, $m) && $method === 'GET') {
             $this->ice($m[1]);
         }
+        if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/slots$#', $route, $m) && $method === 'POST') {
+            $this->addSlots($m[1]);
+        }
+        if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/leave$#', $route, $m) && $method === 'POST') {
+            $this->leave($m[1]);
+        }
+        if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/avatar/(group|[A-Za-z0-9_-]{1,32})$#', $route, $m)) {
+            if ($method === 'PUT') {
+                $this->putAvatar($m[1], $m[2]);
+            }
+            if ($method === 'GET') {
+                $this->getAvatar($m[1], $m[2]);
+            }
+            if ($method === 'DELETE') {
+                $this->dropAvatar($m[1], $m[2]);
+            }
+        }
         if (preg_match('#^/rooms/([A-Za-z0-9_-]{22})/blobs$#', $route, $m) && $method === 'POST') {
             $this->uploadBlob($m[1]);
         }
@@ -145,6 +162,7 @@ final class App
             'limits' => [
                 'maxBlobBytes' => $this->config->maxBlobBytes,
                 'maxCiphertextBytes' => $this->config->maxCiphertextBytes,
+                'maxAvatarBytes' => $this->config->maxAvatarBytes,
             ],
             // Woran der Browser merkt, dass seine Kopie alt ist: dieselbe
             // Fassung, die auch in der ausgelieferten js/version.js steht.
@@ -269,6 +287,12 @@ final class App
                     'nickCt' => null,
                     'readSeq' => 0,
                     'slotId' => null,
+                    // Wer die Gruppe anlegt, verwaltet sie auch: nur so gibt
+                    // es überhaupt jemanden, der später Rechte vergeben oder
+                    // weitere Leute einladen kann.
+                    'role' => 'admin',
+                    'avatarVer' => null,
+                    'left' => false,
                 ];
                 $raum['members'][$mitglied['id']] = $mitglied;
                 return [$raum, $mitglied];
@@ -285,12 +309,12 @@ final class App
      *
      * @return list<array{id: string, wrapped: string}>
      */
-    private function readSlots(mixed $roh): array
+    private function readSlots(mixed $roh, ?int $hoechstens = null): array
     {
         if (!is_array($roh) || $roh === []) {
             return [];
         }
-        if (count($roh) > $this->config->maxRoomCapacity - 1) {
+        if (count($roh) > ($hoechstens ?? $this->config->maxRoomCapacity - 1)) {
             Http::fail(400, 'too_many_slots', 'So gross darf eine Gruppe nicht sein.');
         }
         $slots = [];
@@ -356,6 +380,9 @@ final class App
                 'nickCt' => null,
                 'readSeq' => 0,
                 'slotId' => $slotId,
+                'role' => 'member',
+                'avatarVer' => null,
+                'left' => false,
             ];
             $room['members'][$mitglied['id']] = $mitglied;
             $room['slots'][$slotId]['claimedBy'] = $mitglied['id'];
@@ -415,6 +442,13 @@ final class App
             }
             $memberId = null;
             foreach ((array) ($room['members'] ?? []) as $id => $member) {
+                // Wer gegangen ist, hat kein gültiges Token mehr - auch nicht
+                // für die Übersicht. Sonst bliebe ihm ein Lesekanal in die
+                // Gruppe: Ungelesen-Zähler, Zeitpunkt der letzten Nachricht
+                // und wer gerade tippt.
+                if (($member['left'] ?? false) === true) {
+                    continue;
+                }
                 if (hash_equals((string) ($member['token'] ?? ''), $token)) {
                     $memberId = (string) $id;
                     break;
@@ -509,6 +543,9 @@ final class App
         $result = $this->store->mutate($roomId, function (array $room) use ($roomId, $token): array {
             $members = (array) ($room['members'] ?? []);
             foreach ($members as $id => $member) {
+                if (($member['left'] ?? false) === true) {
+                    continue;
+                }
                 if (Http::safeEquals((string) ($member['token'] ?? ''), $token)) {
                     // Rückkehrer: das Gegenüber soll gleich sehen, dass wieder jemand da ist.
                     [$room] = $this->store->appendEvent($roomId, $room, [
@@ -539,6 +576,9 @@ final class App
                 'joinedAt' => time(),
                 'nickCt' => null,
                 'readSeq' => 0,
+                'role' => 'member',
+                'avatarVer' => null,
+                'left' => false,
             ];
             $room['members'] = $members;
             // Wichtig: als Ereignis eintragen, sonst wartet der Abruf des
@@ -566,9 +606,12 @@ final class App
                 'seq' => (int) ($room['seq'] ?? 0),
                 'capacity' => (int) ($room['capacity'] ?? $this->config->maxMembersPerRoom),
                 'group' => ((array) ($room['slots'] ?? [])) !== [],
+                'avatarVer' => isset($room['avatarVer']) && is_string($room['avatarVer'])
+                    ? $room['avatarVer'] : null,
                 'limits' => [
                     'maxBlobBytes' => $this->config->maxBlobBytes,
                     'maxCiphertextBytes' => $this->config->maxCiphertextBytes,
+                    'maxAvatarBytes' => $this->config->maxAvatarBytes,
                 ],
             ],
             'members' => $presence->summarise((array) $room['members']),
@@ -699,6 +742,240 @@ final class App
         exit;
     }
 
+    /**
+     * Eine Gruppe nachträglich erweitern.
+     *
+     * Wer sie verwaltet, hat neue Codes gewürfelt und den Gruppenschlüssel
+     * dafür verpackt. Hier kommen nur die Pakete an - dieser Server kann
+     * keines davon öffnen und sieht die Codes nie.
+     */
+    private function addSlots(string $roomId): never
+    {
+        $this->limit('create', $this->config->createRoomPerHour, 3600);
+        [$room, $memberId] = $this->authenticate($roomId);
+        if (((array) ($room['slots'] ?? [])) === []) {
+            Http::fail(400, 'not_a_group', 'Das ist keine Gruppe.');
+        }
+        if ((($room['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+            Http::fail(403, 'not_admin', 'Nur Verwalter duerfen einladen.');
+        }
+        $body = Http::jsonBody(2048 + $this->config->maxRoomCapacity * 2048);
+        $roh = $body['slots'] ?? [];
+        if (!is_array($roh) || $roh === []) {
+            Http::fail(400, 'bad_slot', 'Keine Plaetze angegeben.');
+        }
+        $slots = $this->readSlots($roh, $this->config->maxRoomCapacity);
+
+        $capacity = $this->store->mutate($roomId, function (array $raum) use ($slots, $memberId): array {
+            if ((($raum['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+                Http::fail(403, 'not_admin', 'Nur Verwalter duerfen einladen.');
+            }
+            // Die Obergrenze wird hier drinnen geprüft, nicht davor: zwei
+            // Anfragen gleichzeitig hätten sonst beide "passt schon" gelesen
+            // und die Gruppe zusammen über die Grenze gehoben.
+            $platz = (int) ($raum['capacity'] ?? $this->config->maxMembersPerRoom);
+            if ($platz + count($slots) > $this->config->maxRoomCapacity) {
+                Http::fail(400, 'too_many_slots', 'So gross darf eine Gruppe nicht sein.');
+            }
+            foreach ($slots as $slot) {
+                if (isset($raum['slots'][$slot['id']])) {
+                    Http::fail(400, 'slot_exists', 'Diese Platzkennung ist schon vergeben.');
+                }
+                $raum['slots'][$slot['id']] = [
+                    'id' => $slot['id'],
+                    'wrapped' => $slot['wrapped'],
+                    'claimedBy' => null,
+                    'claimedAt' => null,
+                    'settled' => false,
+                ];
+            }
+            $raum['capacity'] = (int) ($raum['capacity'] ?? 0) + count($slots);
+            [$raum] = $this->store->appendEvent($raum['id'], $raum, [
+                't' => 'capacity', 'capacity' => $raum['capacity'],
+            ]);
+            return [$raum, $raum['capacity']];
+        });
+        foreach ($slots as $slot) {
+            $this->store->writeSlotRef($slot['id'], $roomId);
+        }
+        Http::json(['capacity' => $capacity], 201);
+    }
+
+    /**
+     * Eine Gruppe verlassen.
+     *
+     * Der Unterschied zum Vernichten: die Gruppe bleibt für alle anderen
+     * stehen. Nur die eigenen Nachrichten verlieren ihren Inhalt, und an
+     * ihrer Stelle steht bei den anderen, dass hier jemand gegangen ist.
+     */
+    private function leave(string $roomId): never
+    {
+        [$room, $memberId] = $this->authenticate($roomId);
+
+        // Alles unter derselben Sperre: waehrend hier die eigenen
+        // Nachrichten zu Platzhaltern werden, koennte sonst nebenan jemand
+        // eine neue schreiben - und die waere danach weg.
+        $leer = $this->store->mutate($roomId, function (array $raum) use ($memberId): array {
+            $nachrichten = $this->store->loadMessages($raum['id']);
+            $frei = [];
+            foreach ($nachrichten as $i => $nachricht) {
+                if ((string) ($nachricht['from'] ?? '') !== $memberId) {
+                    continue;
+                }
+                foreach ((array) ($nachricht['att'] ?? []) as $blobId) {
+                    $frei[] = (string) $blobId;
+                }
+                $nachrichten[$i]['gone'] = true;
+                $nachrichten[$i]['deleted'] = true;
+                $nachrichten[$i]['ct'] = '';
+                $nachrichten[$i]['att'] = [];
+                $nachrichten[$i]['reactions'] = (object) [];
+            }
+            $this->store->saveMessages($raum['id'], $nachrichten);
+            foreach ($frei as $blobId) {
+                if (isset($raum['blobs'][$blobId])) {
+                    $raum['blobBytes'] = max(0, (int) ($raum['blobBytes'] ?? 0) - (int) ($raum['blobs'][$blobId]['size'] ?? 0));
+                    unset($raum['blobs'][$blobId]);
+                }
+                $this->store->removeBlob($raum['id'], $blobId);
+            }
+            $this->store->removeAvatar($raum['id'], $memberId);
+
+            if (isset($raum['members'][$memberId])) {
+                $raum['members'][$memberId]['left'] = true;
+                $raum['members'][$memberId]['nickCt'] = null;
+                $raum['members'][$memberId]['avatarVer'] = null;
+            }
+            // Geht der letzte Verwalter, wäre die Gruppe führungslos: niemand
+            // könnte sie je wieder erweitern oder ihr Bild ändern. Also rückt
+            // der am längsten Dabeigebliebene nach.
+            if (((array) ($raum['slots'] ?? [])) !== []) {
+                $verwalter = 0;
+                $kandidaten = [];
+                foreach ((array) ($raum['members'] ?? []) as $id => $mitglied) {
+                    if (($mitglied['left'] ?? false) === true) {
+                        continue;
+                    }
+                    if (($mitglied['role'] ?? 'member') === 'admin') {
+                        $verwalter++;
+                    }
+                    $kandidaten[(string) $id] = (int) ($mitglied['joinedAt'] ?? 0);
+                }
+                if ($verwalter === 0 && $kandidaten !== []) {
+                    asort($kandidaten);
+                    $nachfolge = (string) array_key_first($kandidaten);
+                    $raum['members'][$nachfolge]['role'] = 'admin';
+                    [$raum] = $this->store->appendEvent($raum['id'], $raum, [
+                        't' => 'role', 'from' => $memberId, 'to' => $nachfolge, 'role' => 'admin',
+                    ]);
+                }
+            }
+
+            [$raum] = $this->store->appendEvent($raum['id'], $raum, ['t' => 'left', 'from' => $memberId]);
+
+            $uebrig = 0;
+            foreach ((array) ($raum['members'] ?? []) as $mitglied) {
+                if (($mitglied['left'] ?? false) !== true) {
+                    $uebrig++;
+                }
+            }
+            return [$raum, $uebrig === 0];
+        });
+
+        if ($leer === true) {
+            // Niemand mehr da: dann kann auch der Raum weg.
+            $this->store->deleteRoom($roomId);
+        }
+        Http::json(['ok' => true, 'empty' => $leer === true]);
+    }
+
+    /**
+     * Profilbild setzen. Der Inhalt ist schon im Browser verschlüsselt -
+     * dieser Server legt nur Bytes ab, die er nicht lesen kann.
+     */
+    private function putAvatar(string $roomId, string $owner): never
+    {
+        $this->limit('upload', $this->config->uploadsPerHour, 3600);
+        [$room, $memberId] = $this->authenticate($roomId);
+
+        // Das eigene Bild darf jeder setzen, das der Gruppe nur ihr
+        // Verwalter. Ein fremdes Bild darf niemand setzen.
+        if ($owner === 'group') {
+            if (((array) ($room['slots'] ?? [])) === []) {
+                Http::fail(400, 'not_a_group', 'Das ist keine Gruppe.');
+            }
+            if ((($room['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+                Http::fail(403, 'not_admin', 'Nur Verwalter duerfen das Gruppenbild aendern.');
+            }
+        } elseif ($owner !== $memberId) {
+            Http::fail(403, 'not_owner', 'Fremdes Bild.');
+        }
+
+        $bytes = Http::rawBody($this->config->maxAvatarBytes);
+        if ($bytes === '') {
+            Http::fail(400, 'empty_avatar', 'Leeres Bild.');
+        }
+        $this->store->writeAvatar($roomId, $owner, $bytes);
+        $ver = Http::randomId(8);
+        $this->store->mutate($roomId, function (array $raum) use ($owner, $ver, $memberId): array {
+            // Die Rolle noch einmal unter der Sperre: zwischen Prüfung und
+            // Schreiben könnte sie jemand genommen haben.
+            if ($owner === 'group' && (($raum['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+                Http::fail(403, 'not_admin', 'Nur Verwalter duerfen das Gruppenbild aendern.');
+            }
+            if ($owner === 'group') {
+                $raum['avatarVer'] = $ver;
+            } elseif (isset($raum['members'][$owner])) {
+                $raum['members'][$owner]['avatarVer'] = $ver;
+            }
+            [$raum] = $this->store->appendEvent($raum['id'], $raum, [
+                't' => 'avatar', 'from' => $owner, 'ver' => $ver,
+            ]);
+            return [$raum, null];
+        });
+        Http::json(['ver' => $ver], 201);
+    }
+
+    /** Bild wieder wegnehmen - dieselben Regeln wie beim Setzen. */
+    private function dropAvatar(string $roomId, string $owner): never
+    {
+        [$room, $memberId] = $this->authenticate($roomId);
+        if ($owner === 'group') {
+            if ((($room['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+                Http::fail(403, 'not_admin', 'Nur Verwalter duerfen das Gruppenbild aendern.');
+            }
+        } elseif ($owner !== $memberId) {
+            Http::fail(403, 'not_owner', 'Fremdes Bild.');
+        }
+        $this->store->removeAvatar($roomId, $owner);
+        $this->store->mutate($roomId, function (array $raum) use ($owner): array {
+            if ($owner === 'group') {
+                $raum['avatarVer'] = null;
+            } elseif (isset($raum['members'][$owner])) {
+                $raum['members'][$owner]['avatarVer'] = null;
+            }
+            [$raum] = $this->store->appendEvent($raum['id'], $raum, [
+                't' => 'avatar', 'from' => $owner, 'ver' => null,
+            ]);
+            return [$raum, null];
+        });
+        Http::json(['ok' => true]);
+    }
+
+    private function getAvatar(string $roomId, string $owner): never
+    {
+        $this->authenticate($roomId);
+        $bytes = $this->store->readAvatar($roomId, $owner);
+        if ($bytes === null) {
+            Http::fail(404, 'avatar_unknown', 'Kein Bild hinterlegt.');
+        }
+        header('Content-Type: application/octet-stream');
+        header('Content-Length: ' . strlen($bytes));
+        header('Cache-Control: private, max-age=86400');
+        echo $bytes;
+        exit;
+    }
+
     private function burn(string $roomId): never
     {
         $this->authenticate($roomId);
@@ -723,6 +1000,12 @@ final class App
         }
         $token = Http::header('x-room-token');
         foreach ((array) ($room['members'] ?? []) as $id => $member) {
+            // Wer die Gruppe verlassen hat, kommt nicht mehr hinein. Sein
+            // Token bleibt am Platz stehen, damit die alten Nachrichten der
+            // anderen weiter auf ihn verweisen können - es öffnet aber nichts.
+            if (($member['left'] ?? false) === true) {
+                continue;
+            }
             if (Http::safeEquals((string) ($member['token'] ?? ''), $token)) {
                 return [$room, (string) $id];
             }

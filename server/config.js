@@ -78,6 +78,10 @@ export const config = {
   // Groesse eines einzelnen verschluesselten Anhangs in Bytes.
   maxBlobBytes: int('MAX_BLOB_BYTES', 12 * 1024 * 1024),
   maxRoomBlobBytes: int('MAX_ROOM_BLOB_BYTES', 150 * 1024 * 1024),
+  // Ein Profilbild ist klein und quadratisch - 128 KB reichen dafuer mit
+  // Abstand. Die Grenze haelt auch fest, wie viel Platz eine grosse Gruppe
+  // hoechstens fuer Bilder braucht.
+  maxAvatarBytes: int('MAX_AVATAR_BYTES', 128 * 1024),
   maxSocketsPerMember: int('MAX_SOCKETS_PER_MEMBER', 4),
 
   // Rate-Limits

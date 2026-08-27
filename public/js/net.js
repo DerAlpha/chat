@@ -135,6 +135,62 @@ export const iceConfig = (roomId, token) =>
     headers: { 'x-room-token': token },
   });
 
+/**
+ * Weitere Plaetze in einer bestehenden Gruppe anlegen.
+ *
+ * Wie beim Anlegen gehen nur die verpackten Pakete an den Server - die neuen
+ * Codes bleiben hier.
+ */
+export const addSlots = (roomId, token, slots) =>
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}/slots`), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-room-token': token },
+    body: JSON.stringify({ slots }),
+  });
+
+/**
+ * Eine Gruppe verlassen: die eigenen Nachrichten verlieren ihren Inhalt,
+ * die Gruppe selbst bleibt fuer alle anderen bestehen.
+ */
+export const leaveRoom = (roomId, token) =>
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}/leave`), {
+    method: 'POST',
+    headers: { 'x-room-token': token },
+  });
+
+/** Ein verschluesseltes Profilbild ablegen. `owner` ist "group" oder die eigene Kennung. */
+export const putAvatar = (roomId, token, owner, bytes) =>
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}/avatar/${encodeURIComponent(owner)}`), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/octet-stream', 'x-room-token': token },
+    body: bytes,
+  });
+
+/** Ein Profilbild wieder wegnehmen. */
+export const deleteAvatar = (roomId, token, owner) =>
+  request(appPath(`api/rooms/${encodeURIComponent(roomId)}/avatar/${encodeURIComponent(owner)}`), {
+    method: 'DELETE',
+    headers: { 'x-room-token': token },
+  });
+
+/**
+ * Und wieder holen. Gibt es keines, kommt null zurueck - kein Fehler.
+ *
+ * Die Fassung haengt hinten an der Adresse. Der Server darf das Bild einen
+ * Tag lang zwischenspeichern lassen - aendert es sich, aendert sich die
+ * Adresse, und der Browser holt es neu statt das alte weiterzuzeigen.
+ */
+export async function fetchAvatar(roomId, token, owner, ver = '') {
+  const frage = ver ? `?v=${encodeURIComponent(ver)}` : '';
+  const response = await fetch(
+    appPath(`api/rooms/${encodeURIComponent(roomId)}/avatar/${encodeURIComponent(owner)}${frage}`),
+    { headers: { 'x-room-token': token } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError('avatar_failed', 'Bild nicht abrufbar', response.status);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 export const burnRoom = (roomId, token) =>
   request(appPath(`api/rooms/${encodeURIComponent(roomId)}`), {
     method: 'DELETE',

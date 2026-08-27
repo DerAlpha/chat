@@ -58,6 +58,7 @@ final class Frames
             'read' => $this->read($frame),
             'typing' => $this->typing($frame),
             'nick' => $this->nick($frame),
+            'role' => $this->role($frame),
             'sig' => $this->signal($frame),
             'history' => $this->history($frame),
             'burn' => $this->burn(),
@@ -270,6 +271,53 @@ final class Frames
             $room['members'][$memberId]['nickCt'] = $ct;
             [$room] = $this->store->appendEvent($this->roomId, $room, [
                 't' => 'nick', 'from' => $memberId, 'ct' => $ct,
+            ]);
+            return [$room, null];
+        });
+    }
+
+    /**
+     * Rechte in einer Gruppe vergeben oder wieder nehmen.
+     *
+     * Der Server prüft das selbst - eine Oberfläche, die den Knopf versteckt,
+     * ist keine Sicherung. Und der letzte Verwalter kann sich seine Rechte
+     * nicht selbst nehmen: eine Gruppe ohne Verwalter ließe sich nie wieder
+     * erweitern und ihr Bild nie wieder ändern.
+     *
+     * @param array<string,mixed> $frame
+     */
+    private function role(array $frame): void
+    {
+        $ziel = (string) ($frame['to'] ?? '');
+        $recht = (string) ($frame['role'] ?? '');
+        if ($recht !== 'admin' && $recht !== 'member') {
+            Http::fail(400, 'bad_role', 'Unbekanntes Recht.');
+        }
+        $memberId = $this->memberId;
+        $this->store->mutate($this->roomId, function (array $room) use ($ziel, $recht, $memberId): array {
+            if (((array) ($room['slots'] ?? [])) === []) {
+                Http::fail(400, 'not_a_group', 'Das ist keine Gruppe.');
+            }
+            if ((($room['members'][$memberId]['role'] ?? 'member')) !== 'admin') {
+                Http::fail(403, 'not_admin', 'Nur Verwalter duerfen Rechte vergeben.');
+            }
+            if (!isset($room['members'][$ziel]) || ($room['members'][$ziel]['left'] ?? false) === true) {
+                Http::fail(400, 'unknown_member', 'Dieses Mitglied gibt es nicht.');
+            }
+            if ($recht === 'member' && ($room['members'][$ziel]['role'] ?? 'member') === 'admin') {
+                $verwalter = 0;
+                foreach ((array) ($room['members'] ?? []) as $mitglied) {
+                    if (($mitglied['left'] ?? false) !== true && ($mitglied['role'] ?? 'member') === 'admin') {
+                        $verwalter++;
+                    }
+                }
+                if ($verwalter <= 1) {
+                    Http::fail(400, 'last_admin', 'Die Gruppe braucht mindestens einen Verwalter.');
+                }
+            }
+            $room['members'][$ziel]['role'] = $recht;
+            [$room] = $this->store->appendEvent($this->roomId, $room, [
+                't' => 'role', 'from' => $memberId, 'to' => $ziel, 'role' => $recht,
             ]);
             return [$room, null];
         });

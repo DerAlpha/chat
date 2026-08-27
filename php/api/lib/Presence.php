@@ -79,6 +79,14 @@ final class Presence
                 'nickCt' => $member['nickCt'] ?? null,
                 'readSeq' => (int) ($member['readSeq'] ?? 0),
                 'online' => time() - $seen <= $this->timeout,
+                // In einer Gruppe darf nicht jeder alles: wer sie angelegt
+                // hat, verwaltet sie und kann Rechte weitergeben.
+                'role' => ($member['role'] ?? 'member') === 'admin' ? 'admin' : 'member',
+                // Wer gegangen ist, bleibt als leerer Platz stehen - sonst
+                // wären seine Nachrichten auf einmal von niemandem.
+                'left' => ($member['left'] ?? false) === true,
+                'avatarVer' => isset($member['avatarVer']) && is_string($member['avatarVer'])
+                    ? $member['avatarVer'] : null,
             ];
         }
         return $out;

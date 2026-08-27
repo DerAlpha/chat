@@ -45,6 +45,11 @@ final class Store
 
     public const ROOM_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
     public const BLOB_ID_RE = '/^[A-Za-z0-9_-]{22}$/';
+    /**
+     * Wem ein Profilbild gehört: einer Mitgliedskennung - oder der Gruppe.
+     * Der Wert wird zum Dateinamen, deshalb wird er streng geprüft.
+     */
+    public const AVATAR_OWNER_RE = '/^(group|[A-Za-z0-9_-]{1,32})$/';
 
     public function __construct(private Config $config)
     {
@@ -76,6 +81,16 @@ final class Store
      * Datei enthält nichts als die Raum-ID; das Paket mit dem Schlüssel liegt
      * im Raum und ist verschlüsselt.
      */
+    /**
+     * Der Verweis vom Platz auf den Raum. Wer beitritt, kennt nur seinen
+     * Code und rechnet daraus die Platzkennung - über diesen Verweis findet
+     * er den Raum, den er nie gesehen hat.
+     */
+    public function writeSlotRef(string $slotId, string $roomId): void
+    {
+        $this->writeAtomic($this->slotPath($slotId), $roomId);
+    }
+
     public function slotPath(string $slotId): string
     {
         $this->ensureDir($this->slotsDir());
@@ -262,7 +277,7 @@ final class Store
             // Ein Verweis je Platz: der Beitretende kennt nur seinen Code,
             // nicht den Raum. Über diesen Verweis findet er ihn.
             foreach ($room['slots'] as $slot) {
-                $this->writeAtomic($this->slotPath($slot['id']), $roomId);
+                $this->writeSlotRef($slot['id'], $roomId);
             }
             return $room;
         } finally {
@@ -433,6 +448,38 @@ final class Store
     public function removeBlob(string $roomId, string $blobId): void
     {
         @unlink($this->blobPath($roomId, $blobId));
+    }
+
+    // --------------------------------------------------------- Profilbilder
+
+    public function avatarPath(string $roomId, string $ownerId): string
+    {
+        return $this->roomDir($roomId) . '/avatars/' . $ownerId . '.bin';
+    }
+
+    /**
+     * Legt ein Profilbild ab - verschlüsselt, wie alles andere auch.
+     *
+     * Bewusst nicht im Anhang-Speicher: ein Anhang gehört zu einer Nachricht
+     * und wird weggeräumt, wenn er an keiner hängt. Ein Profilbild hängt an
+     * niemandem und soll bleiben. Es ersetzt jedes Mal das vorige - mehr als
+     * eines je Person kann es also nicht geben.
+     */
+    public function writeAvatar(string $roomId, string $ownerId, string $bytes): void
+    {
+        $this->ensureDir($this->roomDir($roomId) . '/avatars');
+        $this->writeAtomic($this->avatarPath($roomId, $ownerId), $bytes);
+    }
+
+    public function readAvatar(string $roomId, string $ownerId): ?string
+    {
+        $bytes = @file_get_contents($this->avatarPath($roomId, $ownerId));
+        return $bytes === false ? null : $bytes;
+    }
+
+    public function removeAvatar(string $roomId, string $ownerId): void
+    {
+        @unlink($this->avatarPath($roomId, $ownerId));
     }
 
     // ------------------------------------------------------------ Aufräumen

@@ -41,7 +41,10 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   an die Pakete der anderen nicht heran
 - In eine Gruppe kommt niemand allein über die Raum-ID – nur über einen
   eingelösten Platz
-- Der Unterbau steht und ist geprüft; die Bedienoberfläche fehlt noch
+- Verwalterrechte prüft der Server, nicht die Oberfläche: wer keine hat,
+  bekommt auch beim Aufruf von Hand ein 403
+- Profilbilder gehen verschlüsselt über den Server – für jeden Raum einzeln,
+  mit dem Schlüssel genau dieses Raums
 
 **Sprechen statt tippen**
 - Sprach- und Videoanrufe zwischen den beiden Geräten, direkt im Browser
@@ -70,7 +73,34 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   Server, der jemanden in einen fremden Raum lotst
 - Über fremden Blasen steht, von wem sie kommen; in der Kopfzeile, wie viele
   gerade da sind
+- Wer die Gruppe anlegt, verwaltet sie. Verwalter können das Gruppenbild
+  setzen, Rechte weitergeben und nachträglich weitere Leute einladen – der
+  Server prüft die Rolle selbst, ein versteckter Knopf ist keine Sicherung
+- Die letzte Verwalterin kann sich ihre Rechte nicht selbst nehmen; eine
+  Gruppe ohne Verwaltung ließe sich nie wieder erweitern
+- Nachträglich einladen heißt: neue Codes, neue Plätze, derselbe
+  Gruppenschlüssel – wieder einzeln verpackt, wieder nur einmal einlösbar
 - Anrufe bleiben in Gruppen vorerst aus (siehe *Was noch fehlt*)
+
+**Profilbilder**
+- Ein Bild auswählen, quadratisch zuschneiden (schieben und zoomen), fertig –
+  es gilt in allen Chats
+- Der Weg über die Leinwand ist auch hier die Metadatenentfernung: kopiert
+  werden nur Bildpunkte, GPS und Kameramodell bleiben zurück
+- In jeden Raum geht das Bild einzeln, verschlüsselt mit dem Schlüssel genau
+  dieses Raums. Der Server legt Bytes ab, die er nicht ansehen kann
+- Gruppen haben ein eigenes Bild – setzen dürfen es nur Verwalter
+- Für die Liste auf der Startseite bleibt eine winzige Fassung auf dem Gerät;
+  sie braucht keine Verbindung zu zwanzig Räumen
+
+**Wenn der Text nicht passt**
+- „zuletzt gesehen vor 3 Std." ist auf einem Telefon länger als die Zeile.
+  Abgeschnitten fehlt genau die Angabe, um die es ging
+- Passt der Text nicht, wandert er langsam nach links, wartet und kommt
+  zurück – und nur dann. Wer „prefers-reduced-motion" gesetzt hat, bekommt
+  Auslassungspunkte statt Bewegung
+- Der Rahmen schneidet ab, der Streifen darin bewegt sich: so bleibt die
+  Kopfzeile schmal, statt das Fenster nach rechts wachsen zu lassen
 
 **Wie es klingt**
 - Neun Klänge, alle aus einer Fünftonleiter: was hintereinander erklingt,
@@ -395,8 +425,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 303 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 88 Tests am Smartphone + 15 am Rechner
+npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
+npm run test:e2e          # 108 Tests am Smartphone + 15 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -431,13 +461,25 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 103 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 123 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
-- Beim Löschen aller Daten wird beides nachgemessen: dass die Chats bei den
-  anderen wirklich verschwinden, und dass im Speicher des Geräts nichts von
-  der App zurückbleibt – während Daten fremder Seiten auf derselben Domain
+- Bei den Rechten wird nicht geprüft, ob der Knopf fehlt, sondern ob es ohne
+  ihn geht: ein gewöhnliches Mitglied ruft die Verwalter-Wege mit seinem
+  eigenen gültigen Token direkt auf und bekommt zweimal 403.
+- Beim Profilbild schneidet ein Test mit, was wirklich über die Leitung geht:
+  weder PNG noch JPEG noch WebP – nichts, was ein Bildbetrachter öffnet.
+- Bei der Laufschrift wird nicht die Klasse geprüft, sondern die Bewegung:
+  dieselbe Stelle, zwei Zeitpunkte, und dazwischen muss sich etwas getan
+  haben.
+- Beim Austritt wird nachgemessen, dass das alte Token wirklich nichts mehr
+  öffnet – auch nicht die Übersicht, die sonst weiter verraten hätte, wann in
+  der Gruppe zuletzt etwas ankam und wer gerade tippt.
+- Beim Löschen aller Daten wird beides nachgemessen: dass Zweiergespräche bei
+  den anderen wirklich verschwinden, dass eine Gruppe dagegen stehen bleibt
+  und dort nur noch „Diese Person hat die Gruppe verlassen" steht, und dass im
+  Speicher des Geräts nichts von der App zurückbleibt – während Daten fremder Seiten auf derselben Domain
   unangetastet stehen bleiben. Und dass man nicht hineinstolpert: ein Test
   tippt zweimal schnell auf dieselbe Stelle, ein zweiter drückt die
   Eingabetaste – beide Male steht der Hinweis danach immer noch da.

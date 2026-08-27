@@ -124,6 +124,60 @@ export async function prepareImage(file) {
   };
 }
 
+/**
+ * Kantenlaenge eines Profilbildes. Gross genug fuer ein scharfes Bild auch
+ * auf einem dichten Bildschirm, klein genug, dass es in jeder Gruppe bei
+ * jedem Mitglied liegen kann, ohne dass es weh tut.
+ */
+export const AVATAR_EDGE = 256;
+
+/**
+ * Laedt ein Bild so, dass man es anzeigen und ausschneiden kann.
+ *
+ * Zurueck kommt die Quelle samt ihren echten Abmessungen - der Zuschnitt
+ * rechnet damit, und `finishAvatar` zeichnet daraus den Ausschnitt.
+ */
+export async function openForCrop(file) {
+  const source = await loadBitmap(file);
+  const width = source.width || source.naturalWidth;
+  const height = source.height || source.naturalHeight;
+  if (!width || !height) throw new Error('Bild ohne Abmessungen.');
+  return { source, width, height };
+}
+
+/**
+ * Schneidet den gewaehlten Ausschnitt heraus und macht ein Profilbild daraus.
+ *
+ * Der Ausschnitt kommt in Bildpunkten der Quelle: linke obere Ecke und
+ * Kantenlaenge, immer quadratisch. Auch hier ist der Umweg ueber die
+ * Leinwand die Metadatenentfernung - GPS, Kameramodell, Aufnahmezeit bleiben
+ * zurueck, weil nur Bildpunkte kopiert werden.
+ *
+ * @returns {Promise<{bytes: Uint8Array, mime: string}>}
+ */
+export async function finishAvatar({ source, width, height }, ausschnitt) {
+  preferredType ??= pickImageType();
+  const kante = Math.max(1, Math.min(ausschnitt.size, Math.min(width, height)));
+  const x = Math.max(0, Math.min(ausschnitt.x, width - kante));
+  const y = Math.max(0, Math.min(ausschnitt.y, height - kante));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = AVATAR_EDGE;
+  canvas.height = AVATAR_EDGE;
+  const context = canvas.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(source, x, y, kante, kante, 0, 0, AVATAR_EDGE, AVATAR_EDGE);
+  const blob = await canvasToBlob(canvas, preferredType, JPEG_QUALITY);
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: preferredType };
+}
+
+/** Gibt die Bildquelle wieder frei. */
+export function closeSource(handle) {
+  const source = handle?.source;
+  if (source && typeof source.close === 'function') source.close();
+}
+
 /** Liest eine beliebige Datei roh ein. */
 /** Dateiendung zum Bildformat - fuer einen neutralen Namen ohne Handy-Spuren. */
 export function extensionFor(mime) {

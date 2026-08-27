@@ -19,8 +19,8 @@ import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, storageAvailable } from './session.js';
-import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
-import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording } from './media.js';
+import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, leaveRoom, addSlots, putAvatar, fetchAvatar, deleteAvatar, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
+import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, openForCrop, finishAvatar, closeSource, AVATAR_EDGE } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
@@ -60,6 +60,16 @@ const app = {
    * Gegenüber. Wer selbst dran ist, steht in `me` und nicht hier.
    */
   members: new Map(),
+  /** Das eigene Recht in diesem Raum: 'admin' oder 'member'. */
+  myRole: 'member',
+  /** Fassung des Gruppenbildes - aendert sie sich, wird es neu geholt. */
+  groupAvatarVer: null,
+  /**
+   * Profilbilder dieses Raums, entschluesselt: Besitzer -> {ver, url}.
+   * Die Bilder gehoeren zum Raum, nicht zum Geraet - beim Verlassen des
+   * Chats werden die Adressen wieder freigegeben.
+   */
+  avatars: new Map(),
   messages: new Map(),
   order: [],
   pending: new Map(),
@@ -110,6 +120,7 @@ function boot() {
   applyTheme(app.prefs.theme);
   applyTranslations();
   wireStaticHandlers();
+  watchStatusWidth();
   onLayoutChange(placeFeatures);
   onLanguageChange(() => {
     applyTranslations();
@@ -600,6 +611,10 @@ function teardownChat() {
   app.objectUrls.clear();
   blobCache.clear();
   urlCache.clear();
+  for (const bild of app.avatars.values()) URL.revokeObjectURL(bild.url);
+  app.avatars.clear();
+  app.groupAvatarVer = null;
+  app.myRole = 'member';
   typingNode = null;
   clearTimeout(app.typingTimer);
   for (const member of app.members.values()) clearTimeout(member.typingTimer);
@@ -786,6 +801,10 @@ function handleFrame(frame) {
     case 'nick': return onNick(frame);
     case 'sig': return onSignal(frame);
     case 'presence': return onPresence(frame);
+    case 'role': return onRole(frame);
+    case 'avatar': return onAvatarChanged(frame);
+    case 'left': return onMemberLeft(frame);
+    case 'capacity': return onCapacity(frame);
     case 'history': return onHistory(frame);
     case 'burned': return onBurned();
     case 'err': return onServerError(frame);
@@ -804,14 +823,19 @@ async function onWelcome(frame) {
   if (app.conn) app.conn.token = frame.you.token;
 
   app.members.clear();
+  app.groupAvatarVer = frame.room?.avatarVer ?? null;
   for (const raw of frame.members ?? []) {
     if (raw.id === frame.you.id) continue;
     const member = memberOf(raw.id);
     member.online = raw.online === true;
     member.lastSeen = raw.lastSeen ?? 0;
     member.readSeq = raw.readSeq ?? 0;
+    member.role = raw.role === 'admin' ? 'admin' : 'member';
+    member.left = raw.left === true;
+    member.avatarVer = raw.avatarVer ?? null;
     if (raw.nickCt) member.nick = (await safeDecrypt(raw.nickCt))?.n ?? '';
   }
+  app.myRole = findMember(frame.members, frame.you.id).role === 'admin' ? 'admin' : 'member';
   // Und gleich merken. Ohne das war der Name nur so lange bekannt, wie der
   // Chat offen stand - in der Übersicht stand danach wieder "Gegenüber",
   // bei jedem Chat, und keiner liess sich vom anderen unterscheiden. In einer
@@ -825,6 +849,9 @@ async function onWelcome(frame) {
 
   app.hasMore = frame.hasMore === true;
   await renderHistory(frame.messages, { replace: true });
+  // Bilder kommen nach: sie sind Beiwerk und sollen den Chat nicht aufhalten.
+  void loadAvatars();
+  void publishMyAvatar();
 
   if (currentScreen() === 'group') {
     // Wer gerade Codes verteilt, wird nicht in den Chat geschoben - er ist
@@ -895,6 +922,8 @@ async function toEntry(message) {
     from: message.from,
     ts: message.ts,
     deleted: message.deleted === true,
+    // Der Absender hat die Gruppe verlassen - hier stand einmal etwas von ihm.
+    gone: message.gone === true,
     editedAt: message.editedAt ?? null,
     att: message.att ?? [],
     payload,
@@ -912,8 +941,14 @@ const isMine = (entry) => entry.pending === true || entry.from === app.me?.id;
 
 /** Ist das hier eine Gruppe oder ein Zweiergespräch? */
 const isGroup = () => app.session?.kind === 'group';
-/** Alle anderen, in der Reihenfolge, in der sie bekannt wurden. */
-const others = () => [...app.members.values()];
+/**
+ * Alle anderen, in der Reihenfolge, in der sie bekannt wurden.
+ *
+ * Wer die Gruppe verlassen hat, zaehlt nicht mehr mit: nicht bei "3 von 5
+ * da", nicht beim Tippen und nicht bei der Nummerierung der Namenlosen.
+ * Sein Platz bleibt trotzdem belegt - sein Code ist verbraucht.
+ */
+const others = () => [...app.members.values()].filter((member) => member.left !== true);
 /** Im Zweiergespräch das Gegenüber; in einer Gruppe niemand Bestimmtes. */
 const peerOf = () => (isGroup() ? null : others()[0] ?? null);
 /** Ist gerade überhaupt jemand da? */
@@ -923,7 +958,10 @@ const typingNow = () => others().filter((member) => member.typing);
 
 /** Holt ein Mitglied - und legt es an, wenn es noch keines gab. */
 function memberOf(id) {
-  const leer = () => ({ id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null });
+  const leer = () => ({
+    id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null,
+    role: 'member', left: false, avatarVer: null,
+  });
   // Ein Frame ohne Absender darf kein Mitglied erfinden. Sonst steht in der
   // Gruppe jemand in der Liste, den es nicht gibt - und weil Namenlose
   // durchnummeriert werden, verschieben sich damit auch die Namen aller
@@ -966,7 +1004,11 @@ function memberName(member) {
   const eigener = (member?.nick || '').trim();
   if (eigener) return eigener;
   if (!isGroup() || !member) return t('partner');
-  const namenlos = others()
+  // Bewusst ueber ALLE bekannten Mitglieder, auch ueber die gegangenen:
+  // sonst ruecken beim Austritt eines Namenlosen alle dahinter eine Nummer
+  // vor, und der ganze schon gelesene Verlauf traegt ploetzlich andere
+  // Namen.
+  const namenlos = [...app.members.values()]
     .filter((anderer) => !(anderer.nick || '').trim())
     .map((anderer) => anderer.id)
     .sort();
@@ -1146,6 +1188,245 @@ function rememberPeerNick(nick) {
   renderChatList();
 }
 
+// ===========================================================================
+// Profilbilder
+// ===========================================================================
+
+/**
+ * Kantenlaenge des Bildchens, das fuer die Chatliste im Geraet bleibt.
+ *
+ * Das grosse Bild gehoert zum Raum und wird dort geholt. Fuer die Liste auf
+ * der Startseite gibt es aber keine Verbindung zu zwanzig Raeumen - also
+ * bleibt von jedem Chat eine winzige Fassung hier liegen. Bei 64 Punkten
+ * sind das ein paar Kilobyte je Chat.
+ */
+const LIST_AVATAR_EDGE = 64;
+
+/**
+ * Holt ein Profilbild, entschluesselt es und merkt es sich.
+ *
+ * Verglichen wird ueber die Fassung: aendert jemand sein Bild, bekommt es
+ * eine neue Kennung, und erst dann wird neu geladen. Sonst liegt es hier.
+ */
+async function ensureAvatar(owner, ver) {
+  if (!app.session?.token || !app.key) return null;
+  if (!ver) {
+    const alt = app.avatars.get(owner);
+    if (alt) {
+      URL.revokeObjectURL(alt.url);
+      app.avatars.delete(owner);
+    }
+    return null;
+  }
+  const bekannt = app.avatars.get(owner);
+  if (bekannt?.ver === ver) return bekannt.url;
+  try {
+    const sealed = await fetchAvatar(app.session.roomId, app.session.token, owner, ver);
+    if (!sealed) return null;
+    const bytes = await decryptBytes(app.key, sealed);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/*' }));
+    if (bekannt) URL.revokeObjectURL(bekannt.url);
+    app.avatars.set(owner, { ver, url, bytes });
+    return url;
+  } catch {
+    // Kein Bild ist kein Fehler - dann bleibt der Anfangsbuchstabe stehen.
+    return null;
+  }
+}
+
+/** Alle Bilder dieses Raums holen und danach einmal neu zeichnen. */
+async function loadAvatars() {
+  const wer = [...app.members.values()].filter((member) => member.avatarVer).map((member) => [member.id, member.avatarVer]);
+  if (app.groupAvatarVer) wer.push(['group', app.groupAvatarVer]);
+  if (wer.length === 0) return;
+  await Promise.all(wer.map(([owner, ver]) => ensureAvatar(owner, ver)));
+  rememberChatAvatar();
+  updatePeerStatus();
+  redrawAll();
+}
+
+/** Die Adresse des Bildes von jemandem - oder null. */
+const avatarUrl = (owner) => app.avatars.get(owner)?.url ?? null;
+
+/** Welches Bild steht fuer diesen Chat? In einer Gruppe ihres, sonst das des Gegenuebers. */
+function chatAvatarOwner() {
+  if (isGroup()) return 'group';
+  return peerOf()?.id ?? null;
+}
+
+/**
+ * Ein rundes Bildfeld: das Bild, wenn es eines gibt, sonst der Anfangsbuchstabe.
+ */
+function avatarNode(owner, name, extra = '') {
+  const knoten = make('div', `avatar${extra ? ` ${extra}` : ''}`);
+  const url = owner ? avatarUrl(owner) : null;
+  if (url) {
+    const bild = make('img', 'avatar__img');
+    bild.src = url;
+    bild.alt = '';
+    knoten.appendChild(bild);
+    knoten.classList.add('has-image');
+  } else {
+    knoten.textContent = initial(name);
+  }
+  return knoten;
+}
+
+/** Setzt ein vorhandenes Bildfeld neu - Bild oder Buchstabe. */
+function fillAvatar(knoten, owner, name) {
+  if (!knoten) return;
+  const url = owner ? avatarUrl(owner) : null;
+  if (!url) {
+    knoten.classList.remove('has-image');
+    knoten.textContent = initial(name);
+    return;
+  }
+  const vorhanden = knoten.querySelector('img');
+  if (vorhanden?.src === url) return;
+  knoten.classList.add('has-image');
+  const bild = make('img', 'avatar__img');
+  bild.src = url;
+  bild.alt = '';
+  knoten.replaceChildren(bild);
+}
+
+/**
+ * Legt eine winzige Fassung des Chatbildes ins Geraet - fuer die Liste auf
+ * der Startseite, die keine Verbindung zu diesem Raum hat.
+ */
+function rememberChatAvatar() {
+  if (!app.session) return;
+  const owner = chatAvatarOwner();
+  const eintrag = owner ? app.avatars.get(owner) : null;
+  if (!eintrag?.bytes) return;
+  // Den Raum jetzt festhalten: das Verkleinern dauert, und wer inzwischen
+  // in einen anderen Chat gewechselt ist, bekaeme dort sonst dieses Bild
+  // in die Liste geschrieben.
+  const roomId = app.session.roomId;
+  shrinkToDataUrl(eintrag.bytes).then((klein) => {
+    if (!klein) return;
+    // Nichts schreiben, wenn sich nichts geaendert hat: jeder Schreibvorgang
+    // legt die ganze Chatliste neu ab.
+    if (getSession(roomId)?.listAvatar === klein) return;
+    const gemerkt = patchSession(roomId, { listAvatar: klein });
+    if (!gemerkt) return;
+    if (app.session?.roomId === roomId) app.session = gemerkt;
+    renderChatList();
+  }).catch(() => { /* ohne Bildchen eben mit Buchstabe */ });
+}
+
+/** Verkleinert Bildbytes zu einer kleinen Data-URL. */
+async function shrinkToDataUrl(bytes) {
+  const blob = new Blob([bytes]);
+  const bild = await createImageBitmap(blob).catch(() => null);
+  if (!bild) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = LIST_AVATAR_EDGE;
+  canvas.height = LIST_AVATAR_EDGE;
+  const stift = canvas.getContext('2d');
+  stift.imageSmoothingQuality = 'high';
+  stift.drawImage(bild, 0, 0, LIST_AVATAR_EDGE, LIST_AVATAR_EDGE);
+  if (typeof bild.close === 'function') bild.close();
+  const url = canvas.toDataURL('image/jpeg', 0.7);
+  return url.length < 24_000 ? url : null;
+}
+
+/**
+ * Schickt das eigene Bild in diesen Raum - aber nur, wenn es dort noch nicht
+ * (oder in einer aelteren Fassung) liegt.
+ *
+ * Das Bild selbst wohnt in den Einstellungen und gilt fuer alle Chats. In
+ * jeden Raum muss es trotzdem einzeln: es wird mit dem Schluessel DIESES
+ * Raums verschluesselt, und niemand sonst soll es aufmachen koennen.
+ */
+async function publishMyAvatar({ force = false } = {}) {
+  const roh = app.prefs?.avatar;
+  if (!app.session?.token || !app.key) return;
+  if (!roh) return;
+  const marke = app.prefs.avatarSig ?? '';
+  if (!force && app.session.avatarSig === marke) return;
+  try {
+    const bytes = fromBase64(roh.slice(roh.indexOf(',') + 1));
+    const sealed = await encryptBytes(app.key, bytes);
+    await putAvatar(app.session.roomId, app.session.token, app.me.id, sealed);
+    const patch = { avatarSig: marke };
+    app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  } catch {
+    // Beim naechsten Betreten wieder - ein Bild ist kein Grund fuer eine Fehlermeldung.
+  }
+}
+
+function onAvatarChanged(frame) {
+  const owner = String(frame.from ?? '');
+  const ver = frame.ver ?? null;
+  // Das eigene Bild kommt als Meldung zurueck - der Server schickt sie an
+  // alle im Raum, und das sind wir selbst auch. Wuerde memberOf() darauf
+  // anspringen, staende man als eigenes Gegenueber in der eigenen
+  // Mitgliederliste: "2 von 3 da", obwohl nur einer da ist.
+  if (owner === app.me?.id) return;
+  if (owner === 'group') app.groupAvatarVer = ver;
+  else memberOf(owner).avatarVer = ver;
+  // Verschwindet das Bild dieses Chats, muss auch das Bildchen in der Liste
+  // weg - sonst zeigt die Startseite noch tagelang, was es nicht mehr gibt.
+  if (!ver && owner === chatAvatarOwner() && app.session) {
+    const gemerkt = patchSession(app.session.roomId, { listAvatar: null });
+    if (gemerkt) app.session = gemerkt;
+    renderChatList();
+  }
+  void ensureAvatar(owner, ver).then(() => {
+    rememberChatAvatar();
+    updatePeerStatus();
+    redrawAll();
+  });
+}
+
+function onRole(frame) {
+  const ziel = String(frame.to ?? '');
+  const recht = frame.role === 'admin' ? 'admin' : 'member';
+  if (ziel === app.me?.id) {
+    app.myRole = recht;
+    toast(recht === 'admin' ? t('roleYouAdmin') : t('roleYouMember'));
+  } else {
+    memberOf(ziel).role = recht;
+  }
+  updatePeerStatus();
+}
+
+/**
+ * Jemand hat die Gruppe verlassen. Seine Nachrichten sind schon auf dem
+ * Server zu Platzhaltern geworden - die Anzeige zieht nach.
+ */
+function onMemberLeft(frame) {
+  const wer = String(frame.from ?? '');
+  if (wer === app.me?.id) return;
+  const member = memberOf(wer);
+  member.left = true;
+  member.online = false;
+  member.typing = false;
+  member.avatarVer = null;
+  clearTimeout(member.typingTimer);
+  for (const eintrag of app.messages.values()) {
+    if (eintrag.from !== wer) continue;
+    eintrag.gone = true;
+    eintrag.deleted = true;
+    eintrag.payload = null;
+    eintrag.reactions = {};
+    eintrag.att = [];
+  }
+  redrawAll();
+  updatePeerStatus();
+}
+
+/** Die Gruppe hat weitere Plaetze bekommen. */
+function onCapacity(frame) {
+  const platz = Number(frame.capacity);
+  if (!Number.isInteger(platz) || platz <= 0) return;
+  if (app.session) {
+    app.session = patchSession(app.session.roomId, { capacity: platz }) ?? { ...app.session, capacity: platz };
+  }
+  updatePeerStatus();
+}
+
 function onPresence(frame) {
   if (frame.from === app.me?.id) return;
   const member = memberOf(frame.from);
@@ -1268,6 +1549,17 @@ function redrawAll() {
     if (!entry) continue;
     if (!previous || !sameDay(previous.ts, entry.ts)) {
       fragment.appendChild(make('div', 'day-sep', formatDay(entry.ts)));
+    }
+    // Wer die Gruppe verlassen hat, nimmt seine Nachrichten mit. An ihrer
+    // Stelle steht eine Zeile - und zwar eine je Person, nicht eine je
+    // verschwundener Nachricht: sonst stuende dasselbe zwanzigmal
+    // untereinander.
+    if (entry.gone) {
+      if (!previous?.gone || previous.from !== entry.from) {
+        fragment.appendChild(make('div', 'day-sep day-sep--left', t('memberLeft')));
+      }
+      previous = entry;
+      continue;
     }
     // Ohne bekannten Absender wird nicht zusammengefasst: zwei Blasen ohne
     // Absender kaemen sonst als eine Folge derselben Person heraus, und die
@@ -1654,17 +1946,17 @@ function peerName() {
 function updatePeerStatus() {
   if (currentScreen() !== 'chat') return;
   el('peer-name').textContent = peerName();
-  el('peer-avatar').textContent = initial(peerName());
+  fillAvatar(el('peer-avatar'), chatAvatarOwner(), peerName());
 
   const status = el('peer-status');
   status.classList.remove('is-online', 'is-typing');
   if (app.connectionStatus === 'connecting' || app.connectionStatus === 'reconnecting') {
-    status.textContent = t('connecting');
+    setStatusText(t('connecting'));
     return;
   }
   const tippen = typingNow();
   if (tippen.length > 0) {
-    status.textContent = isGroup() ? t('typingSome', { names: nameList(tippen) }) : t('typing');
+    setStatusText(isGroup() ? t('typingSome', { names: nameList(tippen) }) : t('typing'));
     status.classList.add('is-typing');
     return;
   }
@@ -1674,21 +1966,94 @@ function updatePeerStatus() {
     // während man selbst im Chat sitzt.
     const da = onlineCount() + 1;
     const alle = app.session?.capacity || app.members.size + 1;
-    status.textContent = t('groupPresence', { online: da, total: alle });
+    setStatusText(t('groupPresence', { online: da, total: alle }));
     if (da > 1) status.classList.add('is-online');
     return;
   }
   const gegenueber = peerOf();
   if (!gegenueber) {
-    status.textContent = t('neverSeen');
+    setStatusText(t('neverSeen'));
     return;
   }
   if (gegenueber.online) {
-    status.textContent = t('online');
+    setStatusText(t('online'));
     status.classList.add('is-online');
     return;
   }
-  status.textContent = gegenueber.lastSeen ? t('lastSeen', { time: relativeTime(gegenueber.lastSeen) }) : t('offline');
+  setStatusText(gegenueber.lastSeen ? t('lastSeen', { time: relativeTime(gegenueber.lastSeen) }) : t('offline'));
+}
+
+// ------------------------------------------------------- Laufende Statuszeile
+
+/** Bildpunkte je Sekunde - langsam genug zum Mitlesen. */
+const LAUF_TEMPO = 26;
+/**
+ * Anteil der Laufzeit, in dem der Text tatsaechlich unterwegs ist. Der Rest
+ * sind die beiden Ruhepausen aus den Keyframes (16 % am Anfang, 16 % am
+ * fernen Ende). Aus diesem Anteil wird die Dauer so berechnet, dass die
+ * Geschwindigkeit gleich bleibt, egal wie weit der Weg ist.
+ */
+const LAUF_ANTEIL = 0.64;
+const LAUF_MIN = 6;
+const LAUF_MAX = 40;
+
+/**
+ * Schreibt die Statuszeile - und laesst sie laufen, wenn sie nicht passt.
+ *
+ * "zuletzt gesehen vor 3 Std." ist auf einem schmalen Telefon laenger als
+ * die Zeile. Abgeschnitten steht da "zuletzt gesehen vor 3 …" - also genau
+ * das nicht, was man wissen wollte.
+ */
+function setStatusText(text) {
+  const feld = el('peer-status-text');
+  if (!feld) return;
+  // Nur bei echter Aenderung anfassen. updatePeerStatus() laeuft bei jedem
+  // Lebenszeichen, jeder Lesebestaetigung, jedem Tastenanschlag des
+  // Gegenuebers - wuerde jedes Mal neu gemessen, finge die Laufschrift
+  // jedes Mal wieder von vorne an und kaeme nie bis zum Ende.
+  if (feld.textContent === text) return;
+  feld.textContent = text;
+  measureStatus();
+}
+
+/**
+ * Misst nach, ob der Text passt, und stellt Weg und Dauer ein.
+ *
+ * Die Klasse wird zum Messen abgenommen: mit ihr steht der Text womoeglich
+ * gerade verschoben, und dann misst man den Versatz mit.
+ */
+function measureStatus() {
+  const rahmen = el('peer-status');
+  const feld = el('peer-status-text');
+  if (!rahmen || !feld) return;
+  rahmen.classList.remove('is-lauf');
+  const platz = rahmen.clientWidth;
+  const breite = feld.scrollWidth;
+  const zuviel = breite - platz;
+  // Kein Platz gemessen (Bildschirm nicht sichtbar) oder es passt: nichts tun.
+  if (platz <= 0 || zuviel <= 2) return;
+  const weg = zuviel + 4;
+  const dauer = Math.min(LAUF_MAX, Math.max(LAUF_MIN, (2 * weg) / LAUF_TEMPO / LAUF_ANTEIL));
+  rahmen.style.setProperty('--lauf-weg', `${-weg}px`);
+  rahmen.style.setProperty('--lauf-dauer', `${dauer.toFixed(2)}s`);
+  rahmen.classList.add('is-lauf');
+}
+
+/**
+ * Dreht sich das Geraet oder wird das Fenster schmaler, passt der Text auf
+ * einmal nicht mehr - oder wieder doch. Also nachmessen, wenn sich die
+ * Breite der Zeile aendert.
+ */
+function watchStatusWidth() {
+  const rahmen = el('peer-status');
+  if (!rahmen || typeof ResizeObserver !== 'function') return;
+  let zuletzt = 0;
+  new ResizeObserver(() => {
+    const breit = rahmen.clientWidth;
+    if (breit === zuletzt) return;
+    zuletzt = breit;
+    measureStatus();
+  }).observe(rahmen);
 }
 
 function showBanner(text, warn = false) {
@@ -1994,7 +2359,7 @@ function renderCall(state) {
   overlay.dataset.kind = state.kind;
 
   el('call-name').textContent = peerName();
-  el('call-avatar').textContent = initial(peerName());
+  fillAvatar(el('call-avatar'), chatAvatarOwner(), peerName());
   el('call-state').textContent = callStateLabel(state);
 
   bindStream(el('call-remote'), state.remoteStream, 'remote');
@@ -2779,6 +3144,15 @@ function openChatMenu() {
       hint: t('linkDeviceHint'),
       onClick: shareDeviceLink,
     }]),
+    { icon: 'i-image', label: t('myPicture'), hint: t('myPictureHint'), onClick: openAvatarMenu },
+    // In einer Gruppe: wer sie verwaltet, kann ihr Bild setzen, Rechte
+    // vergeben und weitere Leute einladen. Wer nicht, sieht die Liste
+    // trotzdem - nur ohne Knoepfe.
+    ...(isGroup() ? [{ icon: 'i-users', label: t('members'), onClick: showMembers }] : []),
+    ...(isGroup() && app.myRole === 'admin' ? [
+      { icon: 'i-image', label: t('groupPicture'), hint: t('groupPictureHint'), onClick: () => void chooseGroupAvatar() },
+      { icon: 'i-plus', label: t('inviteMore'), onClick: () => void inviteMore() },
+    ] : []),
     { icon: 'i-bell', label: t('notifications'), value: notificationLabel, onClick: toggleNotifications },
     {
       icon: app.prefs.sound ? 'i-sound' : 'i-sound-off',
@@ -2884,6 +3258,374 @@ function showAbout() {
 }
 
 // ===========================================================================
+// Profilbild waehlen und zuschneiden
+// ===========================================================================
+
+/** Kleinste und groesste Vergroesserung beim Zuschneiden. */
+const CROP_MIN = 1;
+const CROP_MAX = 4;
+
+/** Laesst eine Bilddatei auswaehlen. */
+function pickImageFile() {
+  return new Promise((resolve) => {
+    const feld = el('file-avatar');
+    if (!feld) return resolve(null);
+    let fertig = false;
+    const antwort = (datei) => {
+      if (fertig) return;
+      fertig = true;
+      feld.value = '';
+      resolve(datei);
+    };
+    feld.onchange = () => antwort(feld.files?.[0] ?? null);
+    // Bricht jemand den Dateidialog ab, kommt gar kein Ereignis. Damit das
+    // Versprechen nicht ewig offen bleibt, macht der naechste Blick auf die
+    // Seite Schluss.
+    window.addEventListener('focus', () => setTimeout(() => antwort(feld.files?.[0] ?? null), 800), { once: true });
+    feld.click();
+  });
+}
+
+/**
+ * Zeigt das Bild in einem quadratischen Fenster: schieben, zoomen, fertig.
+ *
+ * Gerechnet wird in zwei Massen. Auf dem Bildschirm liegt das Bild um `tx`
+ * und `ty` verschoben und um `massstab` vergroessert im Fenster. Der
+ * Ausschnitt, der am Ende herausgeschnitten wird, steht dagegen in
+ * Bildpunkten der Vorlage - das ist die Umrechnung ganz unten.
+ *
+ * @returns {Promise<{bytes: Uint8Array, mime: string}|null>}
+ */
+function cropSheet(vorlage) {
+  return new Promise((fertig) => {
+    let entschieden = false;
+    const antwort = (wert) => {
+      if (entschieden) return;
+      entschieden = true;
+      fertig(wert);
+    };
+
+    const fenster = make('div', 'crop');
+    const bild = make('img', 'crop__img');
+    bild.alt = '';
+    bild.draggable = false;
+    fenster.appendChild(bild);
+    fenster.appendChild(make('div', 'crop__mask'));
+
+    const regler = make('input', 'crop__zoom');
+    regler.type = 'range';
+    regler.min = String(CROP_MIN * 100);
+    regler.max = String(CROP_MAX * 100);
+    regler.value = '100';
+    regler.setAttribute('aria-label', t('cropZoom'));
+
+    let zoom = 1;
+    let tx = 0;
+    let ty = 0;
+    /** Seitenlaenge des Fensters in Bildschirmpunkten. */
+    let kante = 0;
+    /** Vergroesserung, bei der die Vorlage das Fenster gerade ausfuellt. */
+    let deckung = 1;
+
+    const massstab = () => deckung * zoom;
+
+    const zeichnen = () => {
+      const gross = massstab();
+      const breit = vorlage.width * gross;
+      const hoch = vorlage.height * gross;
+      // Nie eine Luecke: das Bild muss das Fenster immer ganz bedecken.
+      tx = Math.min(0, Math.max(kante - breit, tx));
+      ty = Math.min(0, Math.max(kante - hoch, ty));
+      bild.style.width = `${breit}px`;
+      bild.style.height = `${hoch}px`;
+      bild.style.transform = `translate(${tx}px, ${ty}px)`;
+    };
+
+    const vermessen = () => {
+      kante = fenster.clientWidth || 240;
+      deckung = kante / Math.min(vorlage.width, vorlage.height);
+      zeichnen();
+    };
+
+    regler.addEventListener('input', () => {
+      const vorher = massstab();
+      const mitteX = (kante / 2 - tx) / vorher;
+      const mitteY = (kante / 2 - ty) / vorher;
+      zoom = Math.max(CROP_MIN, Math.min(CROP_MAX, Number(regler.value) / 100));
+      const nachher = massstab();
+      // Beim Zoomen bleibt die Mitte die Mitte - sonst springt das Bild weg.
+      tx = kante / 2 - mitteX * nachher;
+      ty = kante / 2 - mitteY * nachher;
+      zeichnen();
+    });
+
+    let zieht = null;
+    fenster.addEventListener('pointerdown', (event) => {
+      zieht = { id: event.pointerId, x: event.clientX - tx, y: event.clientY - ty };
+      fenster.setPointerCapture(event.pointerId);
+    });
+    fenster.addEventListener('pointermove', (event) => {
+      if (!zieht || zieht.id !== event.pointerId) return;
+      tx = event.clientX - zieht.x;
+      ty = event.clientY - zieht.y;
+      zeichnen();
+    });
+    const loslassen = (event) => {
+      if (zieht?.id !== event.pointerId) return;
+      zieht = null;
+    };
+    fenster.addEventListener('pointerup', loslassen);
+    fenster.addEventListener('pointercancel', loslassen);
+
+    const uebernehmen = make('button', 'btn btn--primary btn--lg');
+    uebernehmen.type = 'button';
+    uebernehmen.id = 'crop-apply';
+    uebernehmen.textContent = t('cropApply');
+    uebernehmen.addEventListener('click', () => {
+      const gross = massstab();
+      antwort({ x: -tx / gross, y: -ty / gross, size: kante / gross });
+      closeSheet();
+    });
+
+    const zeile = make('div', 'sheet-field');
+    zeile.appendChild(uebernehmen);
+
+    openSheet(t('cropTitle'), [
+      make('p', 'sheet-note', t('cropHint')),
+      fenster,
+      regler,
+      zeile,
+      { icon: 'i-close', label: t('cancel'), keepOpen: true, onClick: () => { antwort(null); closeSheet(); } },
+    ], { onClose: () => antwort(null), autofocus: false });
+
+    // Das Bild erst anhaengen, wenn das Blatt steht - vorher hat das Fenster
+    // noch keine Breite, und dann waere die Deckung falsch gerechnet.
+    bild.src = vorlage.url;
+    requestAnimationFrame(() => {
+      vermessen();
+      requestAnimationFrame(vermessen);
+    });
+  }).then(async (ausschnitt) => {
+    if (!ausschnitt) return null;
+    return finishAvatar(vorlage.handle, ausschnitt);
+  });
+}
+
+/** Datei waehlen, zuschneiden, fertiges Bild zurueck. */
+async function askForAvatar() {
+  const datei = await pickImageFile();
+  if (!datei) return null;
+  let handle = null;
+  let url = null;
+  try {
+    handle = await openForCrop(datei);
+    url = URL.createObjectURL(datei);
+    return await cropSheet({ handle, url, width: handle.width, height: handle.height });
+  } catch {
+    // Eine Datei, die kein Bild ist (oder eines, das dieser Browser nicht
+    // kennt): das ist ein Missgriff, kein Fehler der App. Ein Hinweis am
+    // Rand reicht - die Vollbild-Fehlerseite waere hier voellig verkehrt,
+    // sie spraeche noch dazu vom Server, mit dem gar nicht geredet wurde.
+    toast(t('avatarUnreadable'));
+    return null;
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    if (handle) closeSource(handle);
+  }
+}
+
+/**
+ * Das eigene Bild.
+ *
+ * Es wohnt in den Einstellungen und gilt fuer alle Chats. In jeden Raum geht
+ * es trotzdem einzeln - verschluesselt mit dem Schluessel genau dieses
+ * Raums, damit es niemand ausserhalb aufmachen kann.
+ */
+async function chooseMyAvatar() {
+  const bild = await askForAvatar();
+  if (!bild) return;
+  const daten = `data:${bild.mime};base64,${toBase64(bild.bytes)}`;
+  app.prefs = setPrefs({ avatar: daten, avatarSig: randomId(6) });
+  if (app.session?.token && app.key) {
+    busy(true, t('avatarSaving'));
+    await publishMyAvatar({ force: true });
+    busy(false);
+  }
+  toast(t('avatarSaved'));
+  refreshAvatarChip();
+}
+
+/**
+ * Das eigene Bild wieder wegnehmen - und zwar ueberall.
+ *
+ * Es hier zu vergessen und in zwanzig Raeumen liegen zu lassen waere das
+ * Gegenteil von dem, was man beim Antippen erwartet.
+ */
+async function removeMyAvatar() {
+  app.prefs = setPrefs({ avatar: null, avatarSig: null });
+  refreshAvatarChip();
+  const raeume = listSessions().filter((session) => session.token && session.memberId);
+  if (raeume.length > 0) {
+    busy(true, t('avatarSaving'));
+    await Promise.all(raeume.map(async (session) => {
+      try {
+        await deleteAvatar(session.roomId, session.token, session.memberId);
+      } catch {
+        // Ein Raum, der gerade nicht erreichbar ist, bekommt es beim
+        // naechsten Betreten mit: dort steht dann kein Bild mehr an.
+      }
+      patchSession(session.roomId, { avatarSig: null });
+    }));
+    busy(false);
+  }
+  toast(t('avatarRemoved'));
+}
+
+/** Der Knopf in der Fusszeile zeigt, ob schon ein Bild hinterlegt ist. */
+function refreshAvatarChip() {
+  const knopf = el('btn-avatar');
+  if (!knopf) return;
+  const feld = knopf.querySelector('.avatar');
+  if (!feld) return;
+  feld.replaceChildren();
+  if (app.prefs?.avatar) {
+    const bild = make('img', 'avatar__img');
+    bild.src = app.prefs.avatar;
+    bild.alt = '';
+    feld.appendChild(bild);
+    feld.classList.add('has-image');
+  } else {
+    feld.classList.remove('has-image');
+    feld.textContent = initial(app.prefs?.nick || '');
+  }
+}
+
+/** Blatt mit den Wahlmoeglichkeiten rund um das eigene Bild. */
+function openAvatarMenu() {
+  openSheet(t('myPicture'), [
+    make('p', 'sheet-note', t('myPictureHint')),
+    { icon: 'i-image', label: app.prefs?.avatar ? t('avatarChange') : t('avatarChoose'), onClick: () => void chooseMyAvatar() },
+    ...(app.prefs?.avatar
+      ? [{ icon: 'i-trash', label: t('avatarRemove'), danger: true, onClick: removeMyAvatar }]
+      : []),
+  ]);
+}
+
+/** Das Bild der Gruppe - nur Verwalter duerfen es aendern. */
+async function chooseGroupAvatar() {
+  if (!isGroup() || app.myRole !== 'admin') return;
+  const bild = await askForAvatar();
+  if (!bild) return;
+  busy(true, t('avatarSaving'));
+  try {
+    const sealed = await encryptBytes(app.key, bild.bytes);
+    await putAvatar(app.session.roomId, app.session.token, 'group', sealed);
+    toast(t('avatarSaved'));
+  } catch (error) {
+    reportError(error);
+  } finally {
+    busy(false);
+  }
+}
+
+// ===========================================================================
+// Mitglieder und Rechte
+// ===========================================================================
+
+/**
+ * Wer ist in dieser Gruppe - und wer darf was?
+ *
+ * Verwalter koennen Rechte weitergeben und wieder einsammeln. Wer keine hat,
+ * sieht dieselbe Liste, nur ohne Knoepfe: dass man nichts darf, gehoert zu
+ * den Dingen, die man wissen sollte, bevor man es vergeblich versucht.
+ */
+function showMembers() {
+  const ich = {
+    icon: 'i-user',
+    label: `${app.session?.nick || t('yourName')} (${t('memberYou')})`,
+    value: app.myRole === 'admin' ? t('roleAdmin') : t('roleMember'),
+  };
+  const andere = others().map((member) => {
+    const darf = app.myRole === 'admin';
+    const istAdmin = member.role === 'admin';
+    return {
+      icon: istAdmin ? 'i-shield' : 'i-user',
+      label: memberName(member),
+      hint: darf ? (istAdmin ? t('roleTakeHint') : t('roleGiveHint')) : undefined,
+      value: istAdmin ? t('roleAdmin') : t('roleMember'),
+      onClick: darf ? () => setMemberRole(member.id, istAdmin ? 'member' : 'admin') : undefined,
+    };
+  });
+  openSheet(t('members'), [
+    make('p', 'sheet-note', t('membersHint', { n: (app.session?.capacity ?? others().length + 1) })),
+    ich,
+    ...andere,
+  ]);
+}
+
+function setMemberRole(id, role) {
+  if (!app.conn) return;
+  app.conn.send({ t: 'role', to: id, role });
+  // Die Antwort kommt als Frame zurueck und traegt die Liste nach.
+  memberOf(id).role = role;
+  toast(role === 'admin' ? t('roleGiven') : t('roleTaken'));
+}
+
+/**
+ * Nachtraeglich weitere Leute einladen.
+ *
+ * Dieselbe Rechnung wie beim Anlegen: je Person ein Code, daraus ein Platz,
+ * und darauf der Gruppenschluessel - verpackt fuer genau diesen einen Code.
+ * Der Server bekommt nur die Pakete.
+ */
+async function inviteMore() {
+  if (!isGroup() || app.myRole !== 'admin') return;
+  const frei = Math.max(0, (app.features.maxGroup ?? 8) - (app.session?.capacity ?? 0));
+  if (frei <= 0) {
+    toast(t('inviteMoreFull'));
+    return;
+  }
+  const antwort = await promptSheet(t('inviteMore'), {
+    value: '1',
+    note: t('inviteMoreHint', { n: frei }),
+    maxLength: 2,
+    confirmLabel: t('create'),
+  });
+  if (!antwort) return;
+  const wieViele = Math.max(1, Math.min(frei, Number.parseInt(String(antwort), 10) || 0));
+
+  busy(true, t('joining'));
+  try {
+    const key = fromBase64(app.session.key);
+    const codes = [];
+    const slots = [];
+    for (let i = 0; i < wieViele; i += 1) {
+      const code = generateCode();
+      const { slotId, wrapKeyRaw } = await deriveSlot(code);
+      slots.push({
+        id: slotId,
+        wrapped: await wrapGroupKey(wrapKeyRaw, {
+          key, roomId: app.session.roomId, name: app.session.label ?? '',
+        }),
+      });
+      codes.push(formatCode(code));
+    }
+    const antwortServer = await addSlots(app.session.roomId, app.session.token, slots);
+    const alle = [...(app.session.codes ?? []), ...codes];
+    const patch = { codes: alle, capacity: antwortServer?.capacity ?? app.session.capacity };
+    app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+    busy(false);
+    showGroupCodes(app.session);
+    toast(t('inviteMoreDone', { n: wieViele }));
+  } catch (error) {
+    busy(false);
+    reportError(error);
+  } finally {
+    busy(false);
+  }
+}
+
+// ===========================================================================
 // Alles löschen
 // ===========================================================================
 
@@ -2910,12 +3652,19 @@ async function wipeFlow() {
   // seltener benutzt und damit seltener bemerkt, wenn er kaputt ist.
   if (!await wipeStep(t('wipeStep1Title'), t('wipeStep1Text'), t('continue'))) return;
 
-  // Der zweite Schritt handelt von den anderen. Gibt es keine, waere das
-  // Gerede - dann sagt er das.
-  const zweiter = sessions.length > 0 ? t('wipeStep2Text') : t('wipeNothingRemote');
+  // Der zweite Schritt handelt von den anderen. Und der faellt fuer Gruppen
+  // anders aus als fuer Zweiergespraeche: ein Zweiergespraech wird
+  // vernichtet, eine Gruppe nur verlassen. Wer beides hat, soll beides
+  // lesen - sonst erfaehrt er die Haelfte nicht.
+  const gruppenZahl = sessions.filter((session) => session.kind === 'group').length;
+  const einzelZahl = sessions.length - gruppenZahl;
+  let zweiter = t('wipeNothingRemote');
+  if (einzelZahl > 0 && gruppenZahl > 0) zweiter = `${t('wipeStep2Text')}\n\n${t('wipeStep2Group')}`;
+  else if (einzelZahl > 0) zweiter = t('wipeStep2Text');
+  else if (gruppenZahl > 0) zweiter = t('wipeStep2Group');
   if (!await wipeStep(t('wipeStep2Title'), zweiter, t('continue'))) return;
 
-  const gruppen = sessions.filter((session) => session.kind === 'group').length;
+  const gruppen = gruppenZahl;
   let zahlen = t('wipeScopeNone');
   if (gruppen > 0) zahlen = t('wipeScopeGroups', { chats: sessions.length, groups: gruppen });
   else if (sessions.length === 1) zahlen = t('wipeScopeOne');
@@ -2955,14 +3704,31 @@ async function runWipe(sessions) {
       return;
     }
     try {
-      await burnRoom(session.roomId, session.token);
+      // Eine Gruppe gehoert nicht einem allein: sie wird verlassen, nicht
+      // vernichtet. Die eigenen Nachrichten verschwinden trotzdem - an ihrer
+      // Stelle steht bei den anderen, dass hier jemand gegangen ist. Ein
+      // Zweiergespraech dagegen ist mit dem Gegenueber zu Ende.
+      if (session.kind === 'group') await leaveRoom(session.roomId, session.token);
+      else await burnRoom(session.roomId, session.token);
     } catch (error) {
-      // Schon weg ist auch weg.
-      if (error instanceof ApiError && (error.status === 404 || error.status === 410)) return;
-      offen.push(session);
+      // Schon weg ist auch weg. Und wer schon draussen ist, kommt nicht
+      // noch einmal heraus: nach dem Verlassen oeffnet das Token nichts
+      // mehr, der Server antwortet 401.
+      const erledigt = error instanceof ApiError
+        && (error.status === 404 || error.status === 410 || error.status === 401);
+      if (!erledigt) {
+        offen.push(session);
+        return;
+      }
     }
+    // Erledigt heisst erledigt: sofort aus der Liste. Bricht jemand gleich
+    // danach am Fehlerblatt ab, bleibt sonst eine Gruppe stehen, die er
+    // laengst verlassen hat - beim naechsten Antippen gaebe es dafuer eine
+    // ratlose Fehlermeldung.
+    removeSession(session.roomId);
   }));
   busy(false);
+  renderChatList();
 
   if (offen.length > 0) {
     const weiter = await wipeAfterFailure(offen.length);
@@ -3252,7 +4018,16 @@ function renderChatList() {
       button.setAttribute('aria-current', 'true');
     }
     const name = chatTitle(session);
-    const avatar = make('div', 'avatar avatar--sm', initial(name));
+    const avatar = make('div', 'avatar avatar--sm');
+    if (session.listAvatar) {
+      const bild = make('img', 'avatar__img');
+      bild.src = session.listAvatar;
+      bild.alt = '';
+      avatar.appendChild(bild);
+      avatar.classList.add('has-image');
+    } else {
+      avatar.textContent = initial(name);
+    }
     const text = make('div', 'chat-list__text');
     text.appendChild(make('span', 'chat-list__name', name));
     text.appendChild(chatListMeta(session));
@@ -3501,6 +4276,8 @@ function wireStaticHandlers() {
   el('btn-lang').addEventListener('click', cycleLanguage);
   el('btn-theme').addEventListener('click', cycleTheme);
   el('btn-about').addEventListener('click', showAbout);
+  el('btn-avatar')?.addEventListener('click', openAvatarMenu);
+  refreshAvatarChip();
 
   // --- Einladen ---
   el('invite-back').addEventListener('click', () => {

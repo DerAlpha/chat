@@ -270,6 +270,50 @@ button, input, textarea { font: inherit; color: inherit; }
   text-transform: uppercase;
 }
 .avatar--sm { width: 32px; height: 32px; font-size: .85rem; }
+/* Das Bildchen im Knopf "Mein Bild" - so gross wie ein Symbol. */
+.avatar--chip { width: 22px; height: 22px; font-size: .7rem; }
+
+/* Ein Profilbild fuellt das runde Feld ganz aus. Der Hintergrund faellt weg:
+   sonst blitzt bei durchsichtigen Bildern die Grundfarbe durch. */
+.avatar.has-image { background: var(--bg-sunken); overflow: hidden; }
+.avatar__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ------------------------------------------------------------- Zuschneiden
+   Ein quadratisches Fenster, in dem das Bild verschoben und vergroessert
+   wird. Der Kreis darueber zeigt, was spaeter zu sehen ist - geschnitten
+   wird trotzdem quadratisch, denn rund ist nur die Anzeige. */
+.crop {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  margin: 4px auto 10px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg-sunken);
+  touch-action: none;
+  cursor: grab;
+}
+.crop:active { cursor: grabbing; }
+.crop__img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  max-width: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* Alles ausserhalb des Kreises abdunkeln - ohne den Zeiger abzufangen. */
+.crop__mask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(6, 10, 18, .45);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 49.5%, #000 50%);
+  mask: radial-gradient(circle at 50% 50%, transparent 49.5%, #000 50%);
+}
+.crop__zoom { width: 100%; margin: 0 0 10px; accent-color: var(--accent); }
 
 .pill {
   font-size: .72rem;
@@ -408,9 +452,37 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .chat-header__text { flex: 1; min-width: 0; }
 .chat-header__text strong { display: block; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-header__status { display: block; font-size: .79rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Die Statuszeile ist die schmalste Stelle der App: "zuletzt gesehen vor 3
+   Std." passt auf einem Telefon nicht, und abgeschnitten fehlt genau die
+   Angabe, um die es geht. Passt der Text nicht, wandert er deshalb langsam
+   nach links, wartet am Ende kurz und kommt zurueck.
+
+   Der Rahmen schneidet ab, der innere Streifen bewegt sich - so bleibt die
+   Kopfzeile schmal (kein Wachsen nach rechts, siehe oben) und der Text ist
+   trotzdem ganz zu lesen. */
+.chat-header__status { display: block; font-size: .79rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.chat-header__status > span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.chat-header__status.is-lauf > span {
+  max-width: none;
+  overflow: visible;
+  animation: statuslauf var(--lauf-dauer, 12s) linear infinite;
+}
 .chat-header__status.is-online { color: var(--success); }
 .chat-header__status.is-typing { color: var(--accent); font-style: italic; }
+
+/* Erst stehen bleiben, damit man ueberhaupt anfangen kann zu lesen, dann
+   gleichmaessig nach links, am Ende wieder eine Ruhepause, dann zurueck. */
+@keyframes statuslauf {
+  0%, 16% { transform: translateX(0); }
+  48%, 64% { transform: translateX(var(--lauf-weg, 0px)); }
+  96%, 100% { transform: translateX(0); }
+}
 
 .banner {
   padding: 8px 16px;
@@ -435,6 +507,9 @@ button, input, textarea { font: inherit; color: inherit; }
 .messages:focus { outline: none; }
 
 .load-more { align-self: center; margin: 6px 0 2px; min-height: 40px; font-size: .88rem; }
+/* Wo jemand die Gruppe verlassen hat, steht statt seiner Nachrichten eine
+   Zeile - unaufgeregt und in der Mitte, wie ein Datum. */
+.day-sep--left { font-weight: 500; font-style: italic; }
 .day-sep { align-self: center; margin: 14px 0 8px; padding: 4px 12px; font-size: .76rem; font-weight: 600; color: var(--text-muted); background: var(--bg-sunken); border-radius: 999px; }
 .unread-sep { align-self: stretch; display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--accent); font-size: .76rem; font-weight: 600; }
 .unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35; }
@@ -1294,6 +1369,16 @@ body.is-calling { overflow: hidden; }
 
 @media (min-width: 900px) {
   .update__box { max-width: 440px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Ohne Bewegung gibt es keine Laufschrift - dann wenigstens die
+     Auslassungspunkte, statt den Text hart abzuschneiden. */
+  .chat-header__status.is-lauf > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

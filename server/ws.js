@@ -123,9 +123,11 @@ export class Hub {
         seq: room.seq,
         capacity: room.capacity,
         group: room.slots.size > 0,
+        avatarVer: room.avatarVer ?? null,
         limits: {
           maxBlobBytes: config.maxBlobBytes,
           maxCiphertextBytes: config.maxCiphertextBytes,
+          maxAvatarBytes: config.maxAvatarBytes,
         },
       },
       members: [...room.members.values()].map((m) => room.publicMember(m, this.onlineIds(roomId))),
@@ -179,7 +181,10 @@ export class Hub {
       return;
     }
     const member = room.members.get(ws.memberId);
-    if (!member) {
+    // Wer die Gruppe verlassen hat, ist weg - auch wenn seine Leitung noch
+    // steht. Ohne diese Pruefung koennte er ueber den offenen Socket
+    // weiterschreiben, obwohl sein Token nichts mehr oeffnet.
+    if (!member || member.left === true) {
       ws.close(CLOSE.ROOM_UNKNOWN, 'member_unknown');
       return;
     }
@@ -256,6 +261,13 @@ export class Hub {
         return this.broadcast(room.id, { t: 'nick', from: member.id, ct }, ws);
       }
 
+      case 'role': {
+        // Rechte in einer Gruppe. Der Server prueft das selbst - eine
+        // Oberflaeche, die den Knopf versteckt, ist keine Sicherung.
+        const ziel = this.store.setRole(room, member, String(frame.to ?? ''), String(frame.role ?? ''));
+        return this.broadcast(room.id, { t: 'role', from: member.id, to: ziel.id, role: ziel.role });
+      }
+
       case 'sig': {
         // Aushandlung eines Anrufs. Der Inhalt ist schon im Browser
         // verschlüsselt - dieser Server reicht ihn weiter, ohne zu wissen,
@@ -324,6 +336,17 @@ export class Hub {
 
   onlineIds(roomId) {
     return new Set(this.presence.get(roomId)?.keys() ?? []);
+  }
+
+  /** Alle Leitungen eines Mitglieds kappen - etwa, wenn es die Gruppe verlaesst. */
+  disconnectMember(roomId, memberId) {
+    const sockets = this.presence.get(roomId)?.get(memberId);
+    if (!sockets) return;
+    for (const socket of [...sockets]) {
+      try {
+        socket.close(CLOSE.ROOM_UNKNOWN, 'member_unknown');
+      } catch { /* egal */ }
+    }
   }
 
   *socketsInRoom(roomId) {

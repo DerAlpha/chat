@@ -319,3 +319,72 @@ test('Namenlose in einer Gruppe bleiben unterscheidbar', async ({ browser }) => 
   await kontextB.close();
   await kontextC.close();
 });
+
+/**
+ * Die Nummern der Namenlosen bleiben, auch wenn jemand geht.
+ *
+ * Sonst ruecken alle dahinter eine Nummer vor - und der ganze schon gelesene
+ * Verlauf traegt ploetzlich andere Namen. Wer gestern mit "Ohne Namen 2"
+ * geschrieben hat, redet heute scheinbar mit einer anderen Person.
+ */
+test('Geht ein Namenloser, behalten die anderen ihre Nummer', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const kontextC = await browser.newContext(HANDY);
+  await ohneNamen(kontextB);
+  await ohneNamen(kontextC);
+
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+  const seiteC = await kontextC.newPage();
+  const [linkB, linkC] = await createGroup(seiteA, { count: 2, nick: 'Anton' });
+
+  for (const [seite, link] of [[seiteB, linkB], [seiteC, linkC]]) {
+    await seite.goto(link);
+    await expect(seite.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+    await expect(seite.locator('#sheet')).toBeVisible({ timeout: 10_000 });
+    await seite.keyboard.press('Escape');
+    await expect(seite.locator('#sheet')).toBeHidden();
+  }
+  await seiteA.locator('#btn-group-to-chat').click();
+  await senden(seiteB, 'Eins');
+  await senden(seiteC, 'Zwei');
+  await expect(seiteA.locator('#messages .msg--in')).toHaveCount(2, { timeout: 25_000 });
+
+  // Wer ist wer? Aus A's Sicht: welcher Name steht ueber welcher Nachricht.
+  const zuordnung = await seiteA.evaluate(() => {
+    const paare = {};
+    for (const blase of document.querySelectorAll('#messages .msg--in .bubble')) {
+      const name = blase.querySelector('.bubble__from')?.textContent?.trim();
+      const text = blase.querySelector('.bubble__text')?.textContent?.trim();
+      if (name && text) paare[text] = name;
+    }
+    return paare;
+  });
+  expect(Object.keys(zuordnung).sort()).toEqual(['Eins', 'Zwei']);
+
+  // Es geht der, der "Ohne Namen 1" heisst - nur so ist ueberhaupt eine
+  // Nummer da, die vorruecken koennte.
+  const ersterText = Object.keys(zuordnung).find((text) => /1$/.test(zuordnung[text]));
+  expect(ersterText, `Namen: ${JSON.stringify(zuordnung)}`).toBeTruthy();
+  const bleibt = ersterText === 'Eins' ? 'Zwei' : 'Eins';
+  const gehtSeite = ersterText === 'Eins' ? seiteB : seiteC;
+
+  await gehtSeite.evaluate(async () => {
+    const [sitzung] = JSON.parse(localStorage.getItem('fc:sessions:v1') ?? '[]');
+    await fetch(new URL(`api/rooms/${sitzung.roomId}/leave`, location.href), {
+      method: 'POST',
+      headers: { 'x-room-token': sitzung.token },
+    });
+  });
+  await expect(seiteA.locator('#messages')).toContainText(/hat die Gruppe verlassen/i, { timeout: 30_000 });
+
+  // Die verbliebene Blase traegt genau denselben Namen wie vorher.
+  const nachher = await seiteA.locator('#messages .msg--in .bubble__from').allInnerTexts();
+  expect(nachher).toHaveLength(1);
+  expect(nachher[0], `vorher hiess "${bleibt}" noch ${zuordnung[bleibt]}`).toBe(zuordnung[bleibt]);
+
+  await kontextA.close();
+  await kontextB.close();
+  await kontextC.close();
+});
