@@ -341,7 +341,7 @@ button, input, textarea { font: inherit; color: inherit; }
   user-select: none;
   -webkit-user-drag: none;
 }
-/* Alles ausserhalb des Kreises abdunkeln - ohne den Zeiger abzufangen.
+/* Alles ausserhalb des Kreises abdecken - ohne den Zeiger abzufangen.
 
    "closest-side" ist hier entscheidend: ohne die Angabe reicht der Verlauf
    bis zur weitesten Ecke, und der freie Kreis waere nur etwa 70 % so gross
@@ -352,7 +352,10 @@ button, input, textarea { font: inherit; color: inherit; }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: rgba(6, 10, 18, .45);
+  /* Deckend schwarz, nicht bloss abgedunkelt: was hier steht, steht auch im
+     fertigen Bild. Ein Schleier, durch den man das Bild noch ahnt, hat genau
+     den Eindruck erzeugt, der Ausschnitt sei groesser als der Kreis. */
+  background: #000;
   -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
   mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
 }

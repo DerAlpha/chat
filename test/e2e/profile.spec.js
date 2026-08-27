@@ -203,3 +203,86 @@ test('Der Kreis im Ausschnitt zeigt, was wirklich zu sehen sein wird', async ({ 
   expect(Math.abs(form.breit - form.hoch)).toBeLessThanOrEqual(1);
   expect(form.maske, `Maske: ${form.maske}`).toContain('closest-side');
 });
+
+/**
+ * Das Entscheidende: was der Kreis zeigt, ist das Bild - nicht mehr.
+ *
+ * Frueher wurde das ganze Quadrat gespeichert. Rund angezeigt fiel das nicht
+ * auf, aber sobald das Bild einmal gross und unbeschnitten zu sehen war,
+ * standen darin Teile, die nie ausgewaehlt worden waren. Hier wird beides
+ * nachgerechnet: dass ausserhalb des Kreises wirklich nichts steht, und dass
+ * innerhalb genau die Stellen der Vorlage landen, die im Fenster zu sehen
+ * waren.
+ */
+test('Der Ausschnitt ist genau der Kreis - nicht mehr und nicht weniger', async ({ page }) => {
+  await withName(page, 'Anton');
+  await page.goto('./');
+  await page.locator('#btn-avatar').click();
+  // Ein Querformat mit bekanntem Verlauf: rot waechst nach rechts, gruen nach
+  // unten. Aus einer Farbe laesst sich damit die Stelle zurueckrechnen.
+  const BREIT = 800;
+  const HOCH = 400;
+  await bildWaehlen(page, () => page.getByRole('button', { name: /Bild auswählen/i }).click(),
+    { breite: BREIT, hoehe: HOCH });
+
+  // Wie liegt das Bild gerade im Fenster?
+  const lage = await page.evaluate(() => {
+    const fenster = document.querySelector('.crop');
+    const bild = document.querySelector('.crop__img');
+    const versatz = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(bild.style.transform);
+    return {
+      kante: fenster.clientWidth,
+      breite: Number.parseFloat(bild.style.width),
+      tx: Number.parseFloat(versatz[1]),
+      ty: Number.parseFloat(versatz[2]),
+      deckend: getComputedStyle(document.querySelector('.crop__mask')).backgroundColor,
+    };
+  });
+  // Der Bereich ausserhalb des Kreises ist im Fenster deckend - was dort zu
+  // sehen ist, ist auch im Ergebnis zu sehen.
+  expect(lage.deckend).toBe('rgb(0, 0, 0)');
+
+  await page.locator('#crop-apply').click();
+  await expect(page.locator('#btn-avatar .avatar.has-image')).toBeVisible({ timeout: 15_000 });
+
+  const bild = await page.locator('#btn-avatar .avatar img').evaluate((element) => new Promise((fertig) => {
+    const lesen = () => {
+      const leinwand = document.createElement('canvas');
+      leinwand.width = 256;
+      leinwand.height = 256;
+      const stift = leinwand.getContext('2d');
+      stift.drawImage(element, 0, 0, 256, 256);
+      const daten = stift.getImageData(0, 0, 256, 256).data;
+      const bei = (x, y) => [...daten.slice((y * 256 + x) * 4, (y * 256 + x) * 4 + 4)];
+      fertig({
+        ecken: [bei(3, 3), bei(252, 3), bei(3, 252), bei(252, 252)],
+        innen: [[40, 128], [128, 40], [200, 128], [128, 200], [128, 128]].map(([x, y]) => ({ x, y, farbe: bei(x, y) })),
+      });
+    };
+    if (element.complete && element.naturalWidth > 0) lesen();
+    else element.addEventListener('load', lesen, { once: true });
+  }));
+
+  // Ausserhalb des Kreises: schwarz und undurchsichtig.
+  for (const ecke of bild.ecken) {
+    expect(ecke[0] + ecke[1] + ecke[2], `Ecke: ${ecke.join(',')}`).toBeLessThan(30);
+    expect(ecke[3], `Ecke: ${ecke.join(',')}`).toBe(255);
+  }
+
+  // Innerhalb: genau die Stellen, die im Fenster zu sehen waren.
+  const massstab = lage.breite / BREIT;
+  for (const punkt of bild.innen) {
+    // Bildpunkt im Ergebnis -> Stelle im Fenster -> Stelle in der Vorlage.
+    const imFenster = (punkt.x / 256) * lage.kante;
+    const imFensterY = (punkt.y / 256) * lage.kante;
+    const quelleX = (imFenster - lage.tx) / massstab;
+    const quelleY = (imFensterY - lage.ty) / massstab;
+    // Und aus der Farbe zurueckgerechnet, was tatsaechlich dort steht.
+    const istX = (punkt.farbe[0] / 255) * BREIT;
+    const istY = (punkt.farbe[1] / 255) * HOCH;
+    expect(Math.abs(istX - quelleX), `bei (${punkt.x}|${punkt.y}): erwartet x≈${Math.round(quelleX)}, gefunden ${Math.round(istX)}`)
+      .toBeLessThan(BREIT * 0.04);
+    expect(Math.abs(istY - quelleY), `bei (${punkt.x}|${punkt.y}): erwartet y≈${Math.round(quelleY)}, gefunden ${Math.round(istY)}`)
+      .toBeLessThan(HOCH * 0.04);
+  }
+});

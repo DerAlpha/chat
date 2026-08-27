@@ -97,9 +97,14 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   es gilt in allen Chats
 - Herauszoomen geht bis weit über den Bildrand hinaus. Was dann frei bleibt,
   ist schwarz – im Ausschnittfenster genauso wie im fertigen Bild
-- Der Kreis im Ausschnitt zeigt wirklich, was später rund zu sehen ist. Vorher
-  reichte der Verlauf bis zur weitesten Ecke, und der Kreis war rund 30 %
-  zu klein
+- Der Kreis im Ausschnitt ist das Bild: was außerhalb liegt, wird schwarz –
+  nicht nur abgedunkelt angezeigt und dann doch mitgespeichert. Vorher wurde
+  das ganze Quadrat gesichert; rund angezeigt fiel das nicht auf, aber sobald
+  das Bild groß und unbeschnitten zu sehen war, standen darin Stellen, die
+  niemand ausgewählt hatte
+- Und der Kreis hat die richtige Größe: ohne `closest-side` reicht ein
+  radialer Verlauf bis zur weitesten Ecke, der freie Kreis war rund 30 % zu
+  klein
 - Der Weg über die Leinwand ist auch hier die Metadatenentfernung: kopiert
   werden nur Bildpunkte, GPS und Kameramodell bleiben zurück
 - In jeden Raum geht das Bild einzeln, verschlüsselt mit dem Schlüssel genau
@@ -455,7 +460,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 117 Tests am Smartphone + 15 am Rechner
+npm run test:e2e          # 118 Tests am Smartphone + 15 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -490,7 +495,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 132 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 133 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -503,6 +508,10 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   Klartext auftauchen.
 - Beim Zuschneiden werden Bildpunkte gezählt: nach dem Herauszoomen muss die
   Ecke des fertigen Bildes schwarz UND undurchsichtig sein, die Mitte nicht.
+- Und es wird nachgerechnet, dass der Ausschnitt genau der Kreis ist: die
+  Vorlage ist ein Farbverlauf, aus dem sich zu jedem Bildpunkt des Ergebnisses
+  zurückrechnen lässt, welche Stelle der Vorlage dort steht – sie muss auf
+  wenige Prozent genau die sein, die im Fenster an dieser Stelle stand.
 - Beim Scrollen wird nicht die Absicht geprüft, sondern das Ergebnis: ein
   langer Chat mit Bildern wird geöffnet, und der Abstand zum unteren Ende
   muss null sein und null bleiben. Ein zweiter Test zählt die

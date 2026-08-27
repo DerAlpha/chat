@@ -175,6 +175,16 @@ export async function finishAvatar(vorlage, lage) {
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
 
+  // Und nur in den Kreis hinein. Das Bild ist zwar quadratisch gespeichert,
+  // gezeigt wird aber ueberall der einbeschriebene Kreis - genau der, den
+  // das Ausschnittfenster anzeigt. Ohne diese Beschneidung steckten in den
+  // Ecken Teile des Bildes, die man nie ausgewaehlt hat und die trotzdem
+  // auftauchen, sobald das Bild einmal nicht rund dargestellt wird.
+  context.save();
+  context.beginPath();
+  context.arc(AVATAR_EDGE / 2, AVATAR_EDGE / 2, AVATAR_EDGE / 2, 0, Math.PI * 2);
+  context.clip();
+
   const faktor = AVATAR_EDGE / Math.max(1, lage.kante);
   context.drawImage(
     vorlage.source,
@@ -183,6 +193,7 @@ export async function finishAvatar(vorlage, lage) {
     lage.breite * faktor,
     lage.hoehe * faktor,
   );
+  context.restore();
   const blob = await canvasToBlob(canvas, preferredType, JPEG_QUALITY);
   return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: preferredType };
 }
