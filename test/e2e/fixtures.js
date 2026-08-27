@@ -32,10 +32,27 @@ export async function ohneNamen(target) {
   }, PREFS_KEY);
 }
 
+/**
+ * Der unveraenderte Weg, einen Kontext aufzumachen - ohne den vorab
+ * gesetzten Namen.
+ *
+ * Gebraucht von Tests, die pruefen, was die App im Speicher des Geraets
+ * HINTERLAESST: der vorab gesetzte Name wird bei jedem Seitenaufruf neu
+ * geschrieben, auch nach einem Neuladen. Wer aufraeumen prueft, saehe ihn
+ * danach wieder und hielte das faelschlich fuer einen Rueckstand der App.
+ */
+const roheKontexte = new WeakMap();
+
+export function rawContext(browser, options) {
+  const original = roheKontexte.get(browser);
+  return (original ?? browser.newContext.bind(browser))(options);
+}
+
 export const test = base.extend({
   browser: async ({ browser }, use) => {
     // Auch Kontexte, die ein Test selbst aufmacht, sollen den Namen haben.
     const original = browser.newContext.bind(browser);
+    roheKontexte.set(browser, original);
     browser.newContext = async (options) => {
       const context = await original(options);
       await context.addInitScript(seed, 'Testkind');
@@ -43,6 +60,7 @@ export const test = base.extend({
     };
     await use(browser);
     browser.newContext = original;
+    roheKontexte.delete(browser);
   },
   context: async ({ context }, use) => {
     await context.addInitScript(seed, 'Testkind');

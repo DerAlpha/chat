@@ -18,7 +18,7 @@ import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
-import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
+import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
@@ -923,9 +923,15 @@ const typingNow = () => others().filter((member) => member.typing);
 
 /** Holt ein Mitglied - und legt es an, wenn es noch keines gab. */
 function memberOf(id) {
+  const leer = () => ({ id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null });
+  // Ein Frame ohne Absender darf kein Mitglied erfinden. Sonst steht in der
+  // Gruppe jemand in der Liste, den es nicht gibt - und weil Namenlose
+  // durchnummeriert werden, verschieben sich damit auch die Namen aller
+  // anderen.
+  if (typeof id !== 'string' || id === '') return leer();
   let member = app.members.get(id);
   if (!member) {
-    member = { id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null };
+    member = leer();
     app.members.set(id, member);
   }
   return member;
@@ -1263,7 +1269,11 @@ function redrawAll() {
     if (!previous || !sameDay(previous.ts, entry.ts)) {
       fragment.appendChild(make('div', 'day-sep', formatDay(entry.ts)));
     }
+    // Ohne bekannten Absender wird nicht zusammengefasst: zwei Blasen ohne
+    // Absender kaemen sonst als eine Folge derselben Person heraus, und die
+    // zweite verloere ihren Namen darueber.
     const sameSender = previous
+      && Boolean(entry.from)
       && previous.from === entry.from
       && sameDay(previous.ts, entry.ts)
       && entry.ts - previous.ts < 5 * 60 * 1000;
@@ -2866,7 +2876,216 @@ function showAbout() {
   openSheet(t('about'), [
     make('p', 'sheet-note', t('aboutText')),
     make('p', 'sheet-note', t('aboutRetention')),
+    // Ganz unten und als Gefahr gekennzeichnet: hier landet niemand aus
+    // Versehen, und wer es sucht, findet es an der Stelle, an der man
+    // so etwas sucht.
+    { icon: 'i-trash', label: t('wipeAll'), hint: t('wipeAllHint'), danger: true, onClick: () => void wipeFlow() },
   ]);
+}
+
+// ===========================================================================
+// Alles löschen
+// ===========================================================================
+
+/** So lange muss der letzte Knopf unberührbar bleiben. */
+const WIPE_DELAY_MS = 15_000;
+
+/**
+ * Alles löschen - in drei Schritten, weil es drei verschiedene Dinge sind,
+ * die man verstanden haben sollte.
+ *
+ * Der erste Schritt sagt, was von diesem Gerät verschwindet. Der zweite, was
+ * es für die anderen bedeutet - das ist der Teil, den man leicht übersieht:
+ * die Unterhaltungen werden auch bei ihnen vernichtet, ohne dass sie gefragt
+ * werden. Der dritte sagt, dass es kein Zurück gibt, nennt die Zahlen und
+ * lässt den Knopf erst nach einer Weile zu.
+ *
+ * Dreimal dasselbe zu sagen waere Theater. Dreimal etwas anderes zu sagen
+ * ist eine Aufklärung.
+ */
+async function wipeFlow() {
+  const sessions = listSessions();
+  // Immer dieselben drei Schritte, auch wenn gerade kein Chat da ist. Ein
+  // kuerzerer Weg fuer den einen Fall waere ein zweiter Weg - und der wird
+  // seltener benutzt und damit seltener bemerkt, wenn er kaputt ist.
+  if (!await wipeStep(t('wipeStep1Title'), t('wipeStep1Text'), t('continue'))) return;
+
+  // Der zweite Schritt handelt von den anderen. Gibt es keine, waere das
+  // Gerede - dann sagt er das.
+  const zweiter = sessions.length > 0 ? t('wipeStep2Text') : t('wipeNothingRemote');
+  if (!await wipeStep(t('wipeStep2Title'), zweiter, t('continue'))) return;
+
+  const gruppen = sessions.filter((session) => session.kind === 'group').length;
+  let zahlen = t('wipeScopeNone');
+  if (gruppen > 0) zahlen = t('wipeScopeGroups', { chats: sessions.length, groups: gruppen });
+  else if (sessions.length === 1) zahlen = t('wipeScopeOne');
+  else if (sessions.length > 1) zahlen = t('wipeScope', { chats: sessions.length });
+  if (!await wipeConfirmDelayed(zahlen)) return;
+
+  await runWipe(sessions);
+}
+
+/**
+ * Führt es aus.
+ *
+ * Reihenfolge ist hier keine Geschmacksfrage: erst auf dem Server vernichten,
+ * dann hier löschen. Andersherum wären die Token weg, mit denen man die Räume
+ * überhaupt vernichten kann - die Unterhaltungen blieben dann bei allen
+ * anderen stehen, und man käme selbst nie wieder an sie heran, um das
+ * nachzuholen.
+ *
+ * Deshalb wird auch nicht lokal gelöscht, solange ein Raum nicht wegging.
+ * Stattdessen wird gefragt: nochmal versuchen, oder wirklich nur hier löschen
+ * und die Chats bei den anderen stehen lassen.
+ */
+async function runWipe(sessions) {
+  busy(true, t('wipeWorking'));
+  // Erst die eigene Leitung kappen. Der Server meldet das Vernichten an alle,
+  // die im Raum sind - und das sind wir selbst auch. Ohne diesen Schritt
+  // fiele uns mitten im Löschen unsere eigene Meldung "Chat gelöscht" in den
+  // Ablauf, samt Sprung auf die Startseite.
+  stopOverview();
+  teardownChat();
+
+  const offen = [];
+  await Promise.all(sessions.map(async (session) => {
+    if (!session.token) {
+      // Nie betreten, also gibt es dort auch nichts zu vernichten - der Raum
+      // verfällt von allein.
+      return;
+    }
+    try {
+      await burnRoom(session.roomId, session.token);
+    } catch (error) {
+      // Schon weg ist auch weg.
+      if (error instanceof ApiError && (error.status === 404 || error.status === 410)) return;
+      offen.push(session);
+    }
+  }));
+  busy(false);
+
+  if (offen.length > 0) {
+    const weiter = await wipeAfterFailure(offen.length);
+    if (weiter === 'retry') return runWipe(offen);
+    if (weiter !== 'local') return;
+  }
+
+  await wipeLocally();
+}
+
+/** Was tun, wenn ein Raum nicht wegging? Ehrlich fragen statt still weitermachen. */
+function wipeAfterFailure(anzahl) {
+  return new Promise((fertig) => {
+    let entschieden = false;
+    const antwort = (wert) => {
+      if (entschieden) return;
+      entschieden = true;
+      fertig(wert);
+    };
+    openSheet(t('wipeFailedTitle'), [
+      make('p', 'sheet-note', t('wipeFailedText', { n: anzahl })),
+      { icon: 'i-flip', label: t('wipeRetry'), keepOpen: true, onClick: () => { antwort('retry'); closeSheet(); } },
+      { icon: 'i-trash', label: t('wipeLocalOnly'), danger: true, keepOpen: true, onClick: () => { antwort('local'); closeSheet(); } },
+      { icon: 'i-close', label: t('cancel'), keepOpen: true, onClick: () => { antwort('abort'); closeSheet(); } },
+    ], { onClose: () => antwort('abort') });
+  });
+}
+
+/**
+ * Und jetzt dieses Gerät: Chats, Einstellungen, Zwischenspeicher, der Service
+ * Worker. Danach wird frisch vom Server geladen - was noch im Arbeitsspeicher
+ * stünde, ist damit auch weg.
+ */
+async function wipeLocally() {
+  busy(true, t('wipeWorking'));
+  wipeStorage();
+  await dropCachesAndWorkers();
+  reloadFromServer();
+}
+
+/**
+ * So lange nimmt ein frisch aufgeschlagener Hinweis kein "Weiter" an.
+ *
+ * Die drei Blätter sind gleich aufgebaut, der Weiter-Knopf sitzt also jedes
+ * Mal an derselben Stelle. Ohne diese Sperre reicht ein Doppeltipp, um einen
+ * ganzen Hinweis zu überspringen - und drei Hinweise, die man mit zwei
+ * Tippern durchklickt, sind keine drei Hinweise.
+ */
+const WIPE_SETTLE_MS = 600;
+
+/** Ein Hinweis mit Weiter und Abbrechen. Gibt zurueck, ob weitergegangen wird. */
+function wipeStep(titel, text, weiter) {
+  return new Promise((fertig) => {
+    let entschieden = false;
+    const offenSeit = Date.now();
+    const antwort = (wert) => {
+      if (entschieden) return;
+      entschieden = true;
+      fertig(wert);
+    };
+    const weiterGehen = () => {
+      // Zu schnell: das war noch der Tipp vom vorigen Blatt.
+      if (Date.now() - offenSeit < WIPE_SETTLE_MS) return;
+      antwort(true);
+      closeSheet();
+    };
+    openSheet(titel, [
+      make('p', 'sheet-note', text),
+      { icon: 'i-warning', label: weiter, danger: true, keepOpen: true, onClick: weiterGehen },
+      { icon: 'i-close', label: t('cancel'), keepOpen: true, onClick: () => { antwort(false); closeSheet(); } },
+    ], { onClose: () => antwort(false), autofocus: false });
+  });
+}
+
+/**
+ * Der letzte Schritt. Der Knopf zaehlt herunter, bevor er sich druecken
+ * laesst - fuenfzehn Sekunden sind lang genug, um den Text darueber wirklich
+ * gelesen zu haben, und kurz genug, um niemanden zu aergern, der es ernst
+ * meint.
+ */
+function wipeConfirmDelayed(zahlen) {
+  return new Promise((fertig) => {
+    let entschieden = false;
+    let ticker = null;
+    const antwort = (wert) => {
+      if (entschieden) return;
+      entschieden = true;
+      clearInterval(ticker);
+      fertig(wert);
+    };
+
+    const knopf = make('button', 'btn btn--danger btn--lg');
+    knopf.type = 'button';
+    knopf.disabled = true;
+    let rest = Math.round(WIPE_DELAY_MS / 1000);
+    knopf.textContent = t('wipeCountdown', { n: rest });
+    knopf.addEventListener('click', () => {
+      if (knopf.disabled) return;
+      antwort(true);
+      closeSheet();
+    });
+    ticker = setInterval(() => {
+      rest -= 1;
+      if (rest > 0) {
+        knopf.textContent = t('wipeCountdown', { n: rest });
+        return;
+      }
+      clearInterval(ticker);
+      ticker = null;
+      knopf.disabled = false;
+      knopf.textContent = t('wipeFinal');
+    }, 1000);
+
+    const zeile = make('div', 'sheet-field');
+    zeile.appendChild(knopf);
+
+    openSheet(t('wipeStep3Title'), [
+      make('p', 'sheet-note', t('wipeStep3Text')),
+      make('p', 'sheet-note sheet-note--strong', zahlen),
+      zeile,
+      { icon: 'i-close', label: t('cancel'), keepOpen: true, onClick: () => { antwort(false); closeSheet(); } },
+    ], { onClose: () => antwort(false), autofocus: false });
+  });
 }
 
 // ===========================================================================
@@ -3537,6 +3756,19 @@ async function applyUpdate() {
     const beschriftung = knopf.querySelector('span');
     if (beschriftung) beschriftung.textContent = t('updateWorking');
   }
+  await dropCachesAndWorkers();
+  reloadFromServer();
+}
+
+/**
+ * Zwischenspeicher leeren und den Service Worker abmelden.
+ *
+ * Gebraucht an zwei Stellen: beim erzwungenen Aktualisieren und beim
+ * Löschen aller Daten. Beide Male gilt dasselbe - erst die Speicher leeren,
+ * dann abmelden. Andersherum legt ein noch laufender Worker sie beim
+ * Abmelden gleich wieder an.
+ */
+async function dropCachesAndWorkers() {
   try {
     const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
     for (const registration of registrations) {
@@ -3546,13 +3778,10 @@ async function applyUpdate() {
       const namen = await caches.keys();
       await Promise.all(namen.map((name) => caches.delete(name)));
     }
-    // Erst abmelden, wenn die Speicher leer sind - sonst legt ein noch
-    // laufender Worker sie beim Abmelden gleich wieder an.
     await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
   } catch {
     // Auch wenn das Aufräumen scheitert: neu laden ist besser als bleiben.
   }
-  reloadFromServer();
 }
 
 /**

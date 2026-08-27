@@ -4,8 +4,17 @@
  * nur die Raum-ID und das Token zu sehen.
  */
 
-const SESSIONS_KEY = 'fc:sessions:v1';
-const PREFS_KEY = 'fc:prefs:v1';
+/**
+ * Alles, was diese App im Speicher des Geraets ablegt, faengt damit an.
+ *
+ * Wichtig fuers Loeschen: die App wohnt womoeglich unter einem Unterpfad
+ * einer Domain, auf der noch ganz andere Seiten liegen. Ein pauschales
+ * localStorage.clear() wuerde deren Daten gleich mit wegraeumen. Deshalb wird
+ * nur weggeworfen, was dieses Praefix traegt.
+ */
+const KEY_PREFIX = 'fc:';
+const SESSIONS_KEY = `${KEY_PREFIX}sessions:v1`;
+const PREFS_KEY = `${KEY_PREFIX}prefs:v1`;
 
 const DEFAULT_PREFS = {
   lang: null,
@@ -114,6 +123,26 @@ export function patchSessions(patches) {
   });
   if (geaendert) writeJson(SESSIONS_KEY, neu);
   return geaendert;
+}
+
+/**
+ * Wirft alles weg, was diese App gespeichert hat - und nichts sonst.
+ *
+ * @returns {number} wie viele Eintraege entfernt wurden
+ */
+export function wipeStorage() {
+  try {
+    const unsere = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const schluessel = localStorage.key(i);
+      if (schluessel?.startsWith(KEY_PREFIX)) unsere.push(schluessel);
+    }
+    for (const schluessel of unsere) localStorage.removeItem(schluessel);
+    return unsere.length;
+  } catch {
+    // Kein Speicher, nichts zu loeschen.
+    return 0;
+  }
 }
 
 export function removeSession(roomId) {

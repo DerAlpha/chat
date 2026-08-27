@@ -791,6 +791,25 @@ button, input, textarea { font: inherit; color: inherit; }
 .sheet-item__value { font-size: .85rem; color: var(--text-muted); }
 
 .sheet-note { padding: 4px 10px 8px; font-size: .87rem; color: var(--text-muted); }
+/* Der Satz, der die Zahlen nennt: keine Nebenbemerkung mehr. */
+.sheet-note--strong { color: var(--text); font-weight: 600; }
+
+/* Der Knopf, der wirklich etwas zerstört. Solange er noch nicht darf, sieht
+   man ihm das an - grau und ohne Zeigefinger, aber an seinem Platz, damit
+   nichts springt, sobald er aufgeht. */
+.btn--danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+  width: 100%;
+}
+.btn--danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, #000); }
+.btn--danger:disabled {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  border-color: var(--border);
+  cursor: default;
+}
 .sheet-field { display: flex; flex-direction: column; gap: 8px; padding: 4px 10px 10px; }
 .sheet-field input {
   width: 100%;

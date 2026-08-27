@@ -314,3 +314,89 @@ test('Die Bildmarke wird am Rechner nicht ins Quadrat gequetscht', async ({ page
   // Und gross genug, dass das Wort noch zu lesen ist.
   expect(kasten.width).toBeGreaterThanOrEqual(28);
 });
+
+/**
+ * Weiter zum naechsten Loeschhinweis.
+ *
+ * Ein frisch aufgeschlagenes Blatt nimmt fuer einen kurzen Moment kein
+ * "Weiter" an - sonst liesse sich ein Hinweis mit einem Doppelklick
+ * ueberspringen. Also warten wie jemand, der den Text liest.
+ */
+async function weiterImLoeschen(seite) {
+  await seite.waitForTimeout(700);
+  await seite.getByRole('button', { name: /^Weiter$/ }).click();
+}
+
+/**
+ * Am Rechner steht die Startseite dauerhaft als Seitenleiste daneben - der
+ * Weg zu "Alle Daten löschen" ist also auch dann offen, wenn gerade ein Chat
+ * läuft. Genau dann muss die eigene Leitung als Erstes gekappt werden: der
+ * Server meldet das Vernichten an alle im Raum, und das sind wir selbst auch.
+ */
+test('Alles löschen geht auch mit offenem Chat', async ({ browser }) => {
+  const { contextA, contextB, pageA } = await pairUp(browser);
+  await sendText(pageA, 'Steht gleich nicht mehr da');
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+
+  await pageA.locator('#btn-about').click();
+  await pageA.getByRole('button', { name: /Alle Daten löschen/i }).click();
+  await weiterImLoeschen(pageA);
+  await weiterImLoeschen(pageA);
+
+  const knopf = pageA.locator('#sheet .btn--danger');
+  await expect(knopf).toBeEnabled({ timeout: 25_000 });
+  await knopf.click();
+
+  // Danach steht der Platzhalter da, nicht mehr die Unterhaltung.
+  await expect(pageA.locator('#screen-empty')).toBeVisible({ timeout: 30_000 });
+  await expect(pageA.locator('#chat-list .chat-list__item')).toHaveCount(0, { timeout: 25_000 });
+  await expect(pageA.locator('#screen-chat')).toBeHidden();
+
+  await contextA.close();
+  await contextB.close();
+});
+
+/**
+ * Bricht man ab, weil ein Raum nicht wegging, darf NICHTS gelöscht sein -
+ * auch nicht der Chat, der gerade offen ist.
+ *
+ * Früher hat die App dem Server beim offenen Chat über die eigene Leitung
+ * Bescheid gegeben. Der Server meldet das Vernichten aber an alle im Raum,
+ * und das sind wir selbst auch: die eingehende Meldung hat den offenen Chat
+ * sofort aus der Liste geworfen. Wer danach am Fehlerdialog abbrach, stand
+ * trotzdem ohne ihn da.
+ */
+test('Abbruch nach einem Fehlschlag lässt auch den offenen Chat stehen', async ({ browser }) => {
+  const { contextA, contextB, pageA } = await pairUp(browser);
+  await sendText(pageA, 'Bleibt hoffentlich');
+  await expect(pageA.locator('#screen-chat')).toBeVisible();
+  await expect(pageA.locator('#chat-list .chat-list__item')).toHaveCount(1);
+
+  // Der Server nimmt das Vernichten nicht an.
+  await pageA.route('**/api/rooms/*', async (route) => {
+    if (route.request().method() === 'DELETE') return route.abort();
+    return route.fallback();
+  });
+
+  await pageA.locator('#btn-about').click();
+  await pageA.getByRole('button', { name: /Alle Daten löschen/i }).click();
+  await weiterImLoeschen(pageA);
+  await weiterImLoeschen(pageA);
+  const knopf = pageA.locator('#sheet .btn--danger');
+  await expect(knopf).toBeEnabled({ timeout: 25_000 });
+  await knopf.click();
+
+  // Die App sagt, dass nicht alles wegging - und fragt, statt einfach
+  // weiterzumachen.
+  await expect(pageA.locator('#sheet-title')).toHaveText(/Nicht alles ist weggegangen/i, { timeout: 25_000 });
+  await pageA.getByRole('button', { name: /^Abbrechen$/ }).click();
+  await expect(pageA.locator('#sheet')).toBeHidden();
+
+  // Und der Chat steht noch da - auf dem Gerät wie im Speicher.
+  await expect(pageA.locator('#chat-list .chat-list__item')).toHaveCount(1);
+  const gemerkt = await pageA.evaluate(() => JSON.parse(localStorage.getItem('fc:sessions:v1') ?? '[]').length);
+  expect(gemerkt, 'die Sitzung wurde trotz Abbruch entfernt').toBe(1);
+
+  await contextA.close();
+  await contextB.close();
+});

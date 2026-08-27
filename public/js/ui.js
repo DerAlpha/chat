@@ -106,8 +106,12 @@ let sheetCloser = null;
  * Halbhohes Menue von unten.
  * @param {string} title
  * @param {Array<Node|{icon?:string,label:string,hint?:string,value?:string,danger?:boolean,onClick?:Function}>} items
+ * @param {{onClose?: Function, autofocus?: boolean}} [options] `autofocus:
+ *   false` legt den Fokus auf das Blatt selbst statt auf den ersten Knopf.
+ *   Für Blätter, deren erster Knopf etwas zerstört: sonst genügt ein
+ *   Tastendruck, der noch vom vorigen Blatt stammt.
  */
-export function openSheet(title, items, { onClose } = {}) {
+export function openSheet(title, items, { onClose, autofocus = true } = {}) {
   const sheet = el('sheet');
   el('sheet-title').textContent = title;
   const body = el('sheet-body');
@@ -136,7 +140,15 @@ export function openSheet(title, items, { onClose } = {}) {
   sheet.hidden = false;
   sheetCloser = onClose ?? null;
   // Fokus in das Sheet holen, damit Tastatur- und Screenreader-Nutzung funktioniert.
-  requestAnimationFrame(() => body.querySelector('button, input')?.focus({ preventScroll: true }));
+  requestAnimationFrame(() => {
+    if (autofocus) {
+      body.querySelector('button, input')?.focus({ preventScroll: true });
+      return;
+    }
+    // Trotzdem in das Blatt hinein - nur eben nicht auf den Knopf.
+    sheet.setAttribute('tabindex', '-1');
+    sheet.focus({ preventScroll: true });
+  });
 }
 
 export function closeSheet() {

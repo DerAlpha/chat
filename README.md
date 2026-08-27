@@ -112,6 +112,10 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Liegt auf dem Server eine neue Fassung, legt sich ein Fenster über alles, das
   sich nicht wegklicken lässt; ein Knopf holt die App komplett frisch
 - „Chat löschen" räumt sofort alles ab – bei beiden und auf dem Server
+- „Alle Daten löschen" räumt das ganze Gerät ab und vernichtet dabei jeden
+  Chat auch bei allen anderen Beteiligten. Drei Hinweise stehen davor, jeder
+  sagt etwas anderes; der letzte Knopf lässt sich erst nach 15 Sekunden
+  drücken – lang genug, um gelesen zu haben, was er anrichtet
 
 **Fürs Smartphone gemacht**
 - Nichts scrollt seitlich weg, auch nicht auf 320 px schmalen Displays
@@ -302,6 +306,28 @@ Ehrlichkeit gehört dazu. Der Server sieht:
 
 Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
 
+### Alles löschen
+
+Unter „Über" steht ganz unten **Alle Daten löschen**. Der Knopf tut zwei Dinge,
+und das zweite übersieht man leicht:
+
+1. Er vernichtet jeden Chat **auf dem Server**. Damit verschwindet dieselbe
+   Unterhaltung auch bei allen, mit denen man geschrieben hat – samt Bildern,
+   Sprachnachrichten und Dateien. Sie werden nicht gefragt. In Gruppen trifft
+   es jedes Mitglied.
+2. Erst danach räumt er dieses Gerät ab: Chats, Name, Einstellungen,
+   Zwischenspeicher, Service Worker.
+
+Die Reihenfolge ist keine Geschmacksfrage. Andersherum wären die Zugangstoken
+weg, mit denen sich die Räume überhaupt vernichten lassen – die Unterhaltungen
+blieben bei allen anderen stehen, und man käme selbst nie wieder an sie heran,
+um das nachzuholen. Geht ein Raum nicht weg, wird deshalb auch lokal nichts
+gelöscht; stattdessen fragt die App, ob sie es noch einmal versuchen soll.
+
+Weggeworfen wird nur, was diese App angelegt hat (Präfix `fc:`). Ein pauschales
+Leeren des Speichers würde auf einer Domain mit anderen Seiten deren Daten
+gleich mitnehmen.
+
 ### Was das Modell nicht leistet
 
 - Wer den Code hat, ist im Chat. Gib ihn über einen Kanal weiter, dem du traust –
@@ -370,7 +396,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 303 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 81 Tests am Smartphone + 13 am Rechner
+npm run test:e2e          # 88 Tests am Smartphone + 15 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -405,10 +431,16 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 94 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 103 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
+- Beim Löschen aller Daten wird beides nachgemessen: dass die Chats bei den
+  anderen wirklich verschwinden, und dass im Speicher des Geräts nichts von
+  der App zurückbleibt – während Daten fremder Seiten auf derselben Domain
+  unangetastet stehen bleiben. Und dass man nicht hineinstolpert: ein Test
+  tippt zweimal schnell auf dieselbe Stelle, ein zweiter drückt die
+  Eingabetaste – beide Male steht der Hinweis danach immer noch da.
 - Bei Gruppen wird nicht nur geprüft, dass drei Leute miteinander reden
   können, sondern auch, dass ein Code sich kein zweites Mal einlösen lässt –
   und dass ein Server, der im Platzpaket einen anderen Raum nennt, abgewiesen
