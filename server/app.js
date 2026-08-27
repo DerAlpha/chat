@@ -72,6 +72,10 @@ export function createApp(store, hub) {
       // Woran der Browser merkt, dass seine Kopie alt ist.
       version: appVersion(config.publicDir),
       capacity: config.maxMembersPerRoom,
+      // Wie gross eine Gruppe hoechstens werden darf. Steht hier, weil es
+      // der Server entscheidet - die Oberflaeche soll keine Zahl anbieten,
+      // die beim Anlegen dann abgewiesen wird.
+      maxGroup: config.maxRoomCapacity,
       limits: {
         maxBlobBytes: config.maxBlobBytes,
         maxCiphertextBytes: config.maxCiphertextBytes,

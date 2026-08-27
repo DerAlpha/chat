@@ -214,22 +214,3 @@ export async function startRecording({ onLevel, onTick } = {}) {
     },
   };
 }
-
-/** Kurzer, dezenter Hinweiston - ohne Audiodatei im Repo. */
-export function playPing() {
-  try {
-    const context = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.09, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.26);
-    oscillator.onended = () => context.close().catch(() => {});
-  } catch { /* Ton ist Beiwerk */ }
-}

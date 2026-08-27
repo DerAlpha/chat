@@ -292,3 +292,25 @@ test('Der Platzhalter bleibt in einem niedrigen Fenster erreichbar', async ({ pa
   });
   expect(erreichbar).toBe(true);
 });
+
+/**
+ * Am Rechner sitzt die Marke in einer schmalen Kopfzeile und wird kleiner
+ * gezeichnet. Sie ist aber breiter als hoch - eine Sprechblase mit Spitze.
+ * Wird sie in einen quadratischen Kasten gesteckt, schrumpft sie an der
+ * langen Seite mit, und "psst..." ist nur noch ein Fleck.
+ */
+test('Die Bildmarke wird am Rechner nicht ins Quadrat gequetscht', async ({ page }) => {
+  await page.goto('./');
+  const marke = page.locator('#screen-start .logo--mark svg');
+  await expect(marke).toBeVisible();
+  const kasten = await marke.boundingBox();
+  const vorlage = await page.locator('#i-logo').getAttribute('viewBox');
+  const [, , breit, hoch] = vorlage.split(/\s+/).map(Number);
+
+  // Dasselbe Seitenverhaeltnis wie die Vorlage, auf ein paar Prozent genau.
+  const soll = breit / hoch;
+  const ist = kasten.width / kasten.height;
+  expect(Math.abs(ist - soll) / soll, `Vorlage ${soll.toFixed(2)}, gezeichnet ${ist.toFixed(2)}`).toBeLessThan(0.08);
+  // Und gross genug, dass das Wort noch zu lesen ist.
+  expect(kasten.width).toBeGreaterThanOrEqual(28);
+});

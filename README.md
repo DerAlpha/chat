@@ -57,6 +57,28 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Auf Wunsch alles über den eigenen Relaisdienst – dann sieht das Gegenüber
   die eigene IP-Adresse nicht
 
+**Wie es klingt**
+- Neun Klänge, alle aus einer Fünftonleiter: was hintereinander erklingt,
+  passt zusammen
+- Gerechnet statt geladen – keine Tondateien, kein Byte mehr Download,
+  offline klingt es genauso
+- Gedämpft mit einem Tiefpass, weicher Ein- und Ausschwung: ein Hinweis,
+  kein Alarm. Die Marke sagt „psst…", so klingt sie auch
+- Wer hinsieht, bekommt nur eine leise Bestätigung; wer woanders ist, den
+  eigentlichen Benachrichtigungston
+- Ton aus heißt Ton aus – ein Test im echten Browser zählt nach, dass dann
+  wirklich kein einziger Ton mehr entsteht
+
+**Wie es aussieht**
+- Die Marke ist eine Sprechblase, in der „psst…" steht – ein Bild für das,
+  worum es geht: leise miteinander reden
+- Dieselbe Marke überall: im Browser-Reiter, als App-Symbol auf dem
+  Startbildschirm und auf der Startseite der App. Vorher stand dort ein
+  Schloss, das eher nach Bank als nach Gespräch aussah
+- Ein einziges SVG liefert alles; die PNG-Größen fürs Betriebssystem werden
+  daraus gebaut (`npm run icons`)
+- Bis 32 px ist das Wort zu lesen, darunter trägt der Umriss allein
+
 **Drumherum**
 - Tippanzeige, Online-Status, „zuletzt gesehen", Lesebestätigung
 - Verlauf bleibt erhalten – auch nach Neuladen, Verbindungsabbruch oder Serverneustart
@@ -296,6 +318,7 @@ public/
   js/media.js   Bilder verkleinern, Ton aufnehmen
   js/session.js Was das Gerät sich merkt
   js/i18n.js    Deutsch und Englisch
+  js/sound.js   Die Klangpalette - gerechnet, nicht geladen
   js/emoji.js   Mitgelieferter Emoji-Katalog samt Suche
   js/call.js    Anrufe: Aushandlung, Prüfzeichen, Mikrofon und Kamera
   js/framecrypto.js Die zweite Schicht über Ton und Bild
@@ -320,8 +343,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 224 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Fassung)
-npm run test:e2e          # 58 Tests am Smartphone + 12 am Rechner
+npm test                  # 289 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Klang, Bildmarke, Fassung)
+npm run test:e2e          # 64 Tests am Smartphone + 13 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -356,8 +379,16 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 70 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 77 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
+- Beim Ton wird nicht gezählt, was eingeplant wurde, sondern was am Ausgang
+  ankommt: der Test hängt einen Messknoten vor den Lautsprecher. Kappt man
+  eine einzige Verbindung im Klangweg, ist die App still – und genau dann
+  wird der Test rot, statt weiter Töne zu zählen, die niemand hört.
+- Die Bildmarke wird an den ausgelieferten PNG-Bytes nachgemessen: dass die
+  Ecken der runden Symbole durchsichtig sind (dort lag vorher eine flache
+  Farbe hinter einem Verlauf – ein blauer Viertelmond im violetten Eck) und
+  dass das Abzeichen für die Statusleiste seine Leinwand ausfüllt.
 - Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
   `mod_php` und der mitgelieferten `.htaccess` durchgetestet. Dabei fiel auf,
   dass Apache vielerorts ein `Alias /icons/` auf sein eigenes Symbolverzeichnis

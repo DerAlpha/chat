@@ -167,6 +167,9 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .logo svg { width: 34px; height: 34px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .logo--warn { background: linear-gradient(150deg, #f0a020, var(--danger)); }
+/* Die Bildmarke ist gefüllt, nicht gestrichelt. Sie ist breiter als hoch -
+   eine Sprechblase mit Spitze -, deshalb kein Quadrat. */
+.logo--mark svg { width: 48px; height: 39px; stroke: none; }
 
 /* Bei "Automatisch" setzt das Skript data-system anhand von prefers-color-scheme. */
 
@@ -467,6 +470,18 @@ button, input, textarea { font: inherit; color: inherit; }
   .msg:hover .msg__more,
   .msg__more:focus-visible { opacity: 1; }
   .msg__more:hover { color: var(--text); background: var(--bg-sunken); }
+}
+
+/* In einer Gruppe steht über fremden Blasen, von wem sie kommt. Eine eigene
+   Farbe je Person wäre hübsch, aber Namen sind hier frei wählbar und nicht
+   eindeutig - eine Farbe würde also eine Sicherheit vortäuschen, die es
+   nicht gibt. Deshalb nur der Name, klein und zurückhaltend. */
+.bubble__from {
+  display: block;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
 }
 
 .bubble__text { white-space: pre-wrap; }
@@ -930,6 +945,9 @@ button, input, textarea { font: inherit; color: inherit; }
   #screen-start .hero__tagline { display: none; }
   #screen-start .logo { width: 42px; height: 42px; border-radius: 13px; }
   #screen-start .logo svg { width: 23px; height: 23px; }
+  /* Die Bildmarke ist breiter als hoch. Ohne eigene Regel gewinnt hier die
+     Zeile darueber (ID schlaegt Klasse), und "psst..." wird zum Fleck. */
+  #screen-start .logo--mark svg { width: 30px; height: 24px; }
   #screen-start .btn--lg { min-height: 46px; font-size: .96rem; }
   #screen-start .stack { gap: 8px; }
   /* Die Liste scrollt für sich. Ohne overflow läuft sie aus ihrer Box heraus

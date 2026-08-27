@@ -19,7 +19,8 @@ import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, removeSession, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, roomStatus, uploadBlob, downloadBlob, burnRoom, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
-import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, playPing } from './media.js';
+import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording } from './media.js';
+import { configureSound, playSound, primeSound } from './sound.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
   openSheet, closeSheet, sheetOpen,
@@ -52,7 +53,12 @@ const app = {
   /** Die Anmeldung des Service Workers - über sie kommt die Update-Meldung. */
   swRegistration: null,
   me: null,
-  peer: null,
+  /**
+   * Alle anderen im Raum. In einem Zweiergespräch genau einer, in einer
+   * Gruppe entsprechend mehr - deshalb eine Zuordnung und kein einzelnes
+   * Gegenüber. Wer selbst dran ist, steht in `me` und nicht hier.
+   */
+  members: new Map(),
   messages: new Map(),
   order: [],
   pending: new Map(),
@@ -66,7 +72,6 @@ const app = {
   hasMore: false,
   loadingMore: false,
   typingTimer: null,
-  peerTypingTimer: null,
   lastTypingSent: 0,
   connectionStatus: 'idle',
   mediaObserver: null,
@@ -81,6 +86,23 @@ const app = {
 function boot() {
   dropCacheBuster();
   app.prefs = getPrefs();
+  configureSound({ enabled: app.prefs.sound !== false });
+  // Browser lassen Ton erst zu, wenn jemand etwas getan hat. Der erste Tipp
+  // weckt den Kanal - sonst bliebe die erste Nachricht stumm, die kommt,
+  // bevor man selbst etwas angefasst hat.
+  //
+  // Bewusst dauerhaft und nicht nur einmal: Ein Kanal kann später wieder
+  // angehalten werden - iOS tut das nach einem Telefonanruf oder nach Siri,
+  // und jeder längere Aufenthalt im Hintergrund tut es auch. Wer nur beim
+  // ersten Antippen weckt, ist danach für den Rest der Sitzung stumm, ohne
+  // dass irgendetwas darauf hindeutet. primeSound ist billig: bei laufendem
+  // Kanal ist es ein Zustandsvergleich.
+  for (const art of ['pointerdown', 'keydown']) {
+    window.addEventListener(art, primeSound, { passive: true });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') primeSound();
+  });
   setLanguage(detectLanguage(app.prefs.lang));
   applyTheme(app.prefs.theme);
   applyTranslations();
@@ -347,7 +369,8 @@ function teardownChat() {
   urlCache.clear();
   typingNode = null;
   clearTimeout(app.typingTimer);
-  clearTimeout(app.peerTypingTimer);
+  for (const member of app.members.values()) clearTimeout(member.typingTimer);
+  forgetPresenceSound();
   app.recorder?.cancel();
   app.recorder = null;
   // Sonst bliebe nach einem Abbruch mitten in der Aufnahme das Eingabefeld verdeckt.
@@ -367,7 +390,7 @@ function resetConversation() {
   app.attachments = [];
   app.replyTo = null;
   app.me = null;
-  app.peer = null;
+  app.members.clear();
   app.unread = 0;
   app.atBottom = true;
   app.oldestSeq = Infinity;
@@ -395,7 +418,7 @@ function showInvite(session, { fromChat = false } = {}) {
     frame.hidden = true;
   }
   el('btn-share').hidden = typeof navigator.share !== 'function';
-  setInviteWaiting(fromChat || Boolean(app.peer));
+  setInviteWaiting(fromChat || app.members.size > 0);
   renderChatList();
   showScreen('invite');
 }
@@ -462,13 +485,23 @@ async function onWelcome(frame) {
   patchSession(app.session.roomId, patch);
   if (app.conn) app.conn.token = frame.you.token;
 
-  const peerRaw = frame.members.find((member) => member.id !== frame.you.id) ?? null;
-  app.peer = peerRaw ? { ...peerRaw, typing: false } : null;
-  if (app.peer?.nickCt) app.peer.nick = await safeDecrypt(app.peer.nickCt).then((value) => value?.n ?? '');
+  app.members.clear();
+  for (const raw of frame.members ?? []) {
+    if (raw.id === frame.you.id) continue;
+    const member = memberOf(raw.id);
+    member.online = raw.online === true;
+    member.lastSeen = raw.lastSeen ?? 0;
+    member.readSeq = raw.readSeq ?? 0;
+    if (raw.nickCt) member.nick = (await safeDecrypt(raw.nickCt))?.n ?? '';
+  }
   // Und gleich merken. Ohne das war der Name nur so lange bekannt, wie der
   // Chat offen stand - in der Übersicht stand danach wieder "Gegenüber",
-  // bei jedem Chat, und keiner liess sich vom anderen unterscheiden.
-  rememberPeerNick(app.peer?.nick);
+  // bei jedem Chat, und keiner liess sich vom anderen unterscheiden. In einer
+  // Gruppe trägt der eigene Name der Gruppe, nicht der eines Mitglieds.
+  if (!isGroup()) rememberPeerNick(peerOf()?.nick);
+  // Wer beim Betreten schon da ist, ist nicht gerade gekommen. Den Zustand
+  // also übernehmen, ohne ihn zu melden.
+  soundPresence(anyOnline(), { silent: true });
 
   if (app.session.nick) sendNick(app.session.nick);
 
@@ -477,11 +510,11 @@ async function onWelcome(frame) {
 
   if (currentScreen() !== 'invite') {
     showChatScreen();
-  } else if (app.peer && !app.inviteFromChat) {
-    // Das Gegenüber war schon da - dann direkt in den Chat.
+  } else if (app.members.size > 0 && !app.inviteFromChat) {
+    // Es war schon jemand da - dann direkt in den Chat.
     showChatScreen();
   } else {
-    setInviteWaiting(Boolean(app.peer));
+    setInviteWaiting(app.members.size > 0);
   }
   updatePeerStatus();
   markRead();
@@ -546,6 +579,54 @@ async function toEntry(message) {
 }
 
 const isMine = (entry) => entry.pending === true || entry.from === app.me?.id;
+
+// ---------------------------------------------------------------------------
+// Wer sonst noch da ist
+// ---------------------------------------------------------------------------
+
+/** Ist das hier eine Gruppe oder ein Zweiergespräch? */
+const isGroup = () => app.session?.kind === 'group';
+/** Alle anderen, in der Reihenfolge, in der sie bekannt wurden. */
+const others = () => [...app.members.values()];
+/** Im Zweiergespräch das Gegenüber; in einer Gruppe niemand Bestimmtes. */
+const peerOf = () => (isGroup() ? null : others()[0] ?? null);
+/** Ist gerade überhaupt jemand da? */
+const anyOnline = () => others().some((member) => member.online);
+const onlineCount = () => others().filter((member) => member.online).length;
+const typingNow = () => others().filter((member) => member.typing);
+
+/** Holt ein Mitglied - und legt es an, wenn es noch keines gab. */
+function memberOf(id) {
+  let member = app.members.get(id);
+  if (!member) {
+    member = { id, nick: '', online: false, lastSeen: 0, typing: false, readSeq: 0, typingTimer: null };
+    app.members.set(id, member);
+  }
+  return member;
+}
+
+/** Wie jemand heisst. Ohne Namen bleibt es beim allgemeinen Wort. */
+const nameOf = (id) => (app.members.get(id)?.nick || '').trim() || t('partner');
+
+/**
+ * Eine Aufzählung von Namen, wie man sie spricht: "Anna", "Anna und Bea",
+ * "Anna, Bea und 2 weitere". Ab drei wird gezählt statt aufgezählt - sonst
+ * schiebt eine tippende Gruppe die Kopfzeile auseinander.
+ */
+function nameList(members) {
+  const namen = members.map((member) => memberName(member));
+  if (namen.length <= 1) return namen[0] ?? '';
+  if (namen.length === 2) return t('nameAnd', { first: namen[0], second: namen[1] });
+  return t('nameMore', { first: namen[0], second: namen[1], count: namen.length - 2 });
+}
+
+const memberName = (member) => (member?.nick || '').trim() || t('partner');
+
+/** Haben alle anderen bis hierher gelesen? */
+function allRead(seq) {
+  const liste = others();
+  return liste.length > 0 && liste.every((member) => (member.readSeq ?? 0) >= seq);
+}
 
 function insertEntry(entry) {
   app.messages.set(entry.id, entry);
@@ -665,18 +746,24 @@ async function onReaction(frame) {
 
 function onRead(frame) {
   if (frame.from === app.me?.id) return;
-  if (app.peer) app.peer.readSeq = Math.max(app.peer.readSeq ?? 0, frame.seq);
+  const member = app.members.get(frame.from);
+  if (member) member.readSeq = Math.max(member.readSeq ?? 0, frame.seq);
   redrawAll();
 }
 
 function onTyping(frame) {
-  if (!app.peer || frame.from !== app.peer.id) return;
-  app.peer.typing = frame.on === true;
-  clearTimeout(app.peerTypingTimer);
-  if (app.peer.typing) {
-    app.peerTypingTimer = setTimeout(() => {
-      if (app.peer) app.peer.typing = false;
+  if (frame.from === app.me?.id) return;
+  const member = app.members.get(frame.from);
+  if (!member) return;
+  member.typing = frame.on === true;
+  // Je Person eine eigene Frist: mit einer gemeinsamen würde in einer Gruppe
+  // der eine das Tippen des anderen abräumen.
+  clearTimeout(member.typingTimer);
+  if (member.typing) {
+    member.typingTimer = setTimeout(() => {
+      member.typing = false;
       updatePeerStatus();
+      syncTypingBubble();
     }, TYPING_TIMEOUT);
   }
   updatePeerStatus();
@@ -686,11 +773,12 @@ function onTyping(frame) {
 async function onNick(frame) {
   if (frame.from === app.me?.id) return;
   const value = await safeDecrypt(frame.ct);
-  const nick = value?.n ?? '';
-  if (!app.peer) app.peer = { id: frame.from, online: true };
-  app.peer.nick = nick;
-  rememberPeerNick(nick);
+  const member = memberOf(frame.from);
+  member.nick = value?.n ?? '';
+  if (!isGroup()) rememberPeerNick(member.nick);
   updatePeerStatus();
+  // In der Gruppe steht der Name über jeder fremden Blase - die müssen mit.
+  if (isGroup()) redrawAll();
 }
 
 /**
@@ -708,15 +796,22 @@ function rememberPeerNick(nick) {
 
 function onPresence(frame) {
   if (frame.from === app.me?.id) return;
-  if (!app.peer) app.peer = { id: frame.from, readSeq: 0 };
-  app.peer.online = frame.online;
-  app.peer.lastSeen = frame.lastSeen;
+  const member = memberOf(frame.from);
+  member.online = frame.online;
+  member.lastSeen = frame.lastSeen;
   if (!frame.online) {
-    app.peer.typing = false;
+    member.typing = false;
+    clearTimeout(member.typingTimer);
     // Wer weg ist, kann nicht mehr reden. Lieber ehrlich beenden, als eine
     // tote Leitung offen stehen lassen.
-    if (app.call?.busy) app.call.finish('remote_hangup');
+    // In einer Gruppe gibt es (noch) keine Anrufe - und ohne sie auch
+    // niemanden, dessen Weggehen eine Leitung beendet.
+    if (!isGroup() && app.call?.busy) app.call.finish('remote_hangup');
   }
+  // Gemeldet wird nicht jeder Einzelne, sondern ob überhaupt jemand da ist:
+  // im Zweiergespräch ist das dasselbe, in einer Gruppe erspart es ein
+  // Glockenspiel, sobald sich mehrere gleichzeitig bewegen.
+  soundPresence(anyOnline());
   if (currentScreen() === 'invite' && frame.online) {
     setInviteWaiting(true);
     if (!app.inviteFromChat) {
@@ -727,6 +822,55 @@ function onPresence(frame) {
   updatePeerStatus();
   syncTypingBubble();
   redrawAll();
+}
+
+/**
+ * Kommen und Gehen hörbar machen - aber erst, wenn es wirklich eines ist.
+ *
+ * Anwesenheit zappelt. Beim WebSocket meldet der Server "weg", sobald der
+ * letzte Socket zugeht: jede Bildschirmsperre, jeder Wechsel von WLAN auf
+ * Mobilfunk, jedes Einfrieren eines Hintergrund-Tabs. Beim Abholen per HTTP
+ * liegen zwischen Zeitablauf und nächstem Poll nur wenige Sekunden Reserve.
+ * Wer im Zug sitzt, löst so alle paar Minuten ein Kommen und ein Gehen aus.
+ *
+ * Deshalb klingt es erst, wenn der neue Zustand ein paar Sekunden gehalten
+ * hat - und gar nicht, wenn er vorher zurückkippt. Ein Zappler bleibt still,
+ * wer wirklich kommt, wird ein paar Sekunden später gemeldet. Das ist bei
+ * einer Nebeninformation der bessere Tausch.
+ */
+const PRESENCE_SETTLE = 4000;
+let presenceTimer = null;
+/** Der zuletzt gemeldete Zustand. `null` heisst: noch nie etwas gemeldet. */
+let presenceSounded = null;
+
+/**
+ * @param {boolean} online
+ * @param {{silent?: boolean}} [options] `silent` übernimmt den Zustand, ohne
+ *   ihn zu melden - für den Augenblick, in dem man den Chat betritt.
+ */
+function soundPresence(online, { silent = false } = {}) {
+  clearTimeout(presenceTimer);
+  presenceTimer = null;
+  // Beim ersten Mal gibt es nichts zu melden: dass jemand da ist, wenn man
+  // hereinkommt, ist kein Kommen.
+  if (silent || presenceSounded === null) {
+    presenceSounded = online;
+    return;
+  }
+  // Zurückgekippt, bevor der Ton fällig war: dann ist nichts geschehen.
+  if (online === presenceSounded) return;
+  presenceTimer = setTimeout(() => {
+    presenceTimer = null;
+    presenceSounded = online;
+    playSound(online ? 'join' : 'leave');
+  }, PRESENCE_SETTLE);
+}
+
+/** Beim Verlassen eines Chats darf kein Ton mehr aus dem alten nachkommen. */
+function forgetPresenceSound() {
+  clearTimeout(presenceTimer);
+  presenceTimer = null;
+  presenceSounded = null;
 }
 
 // ===========================================================================
@@ -790,7 +934,7 @@ let typingNode = null;
 function syncTypingBubble() {
   const list = el('messages');
   if (!list) return;
-  const shouldShow = app.peer?.typing === true && currentScreen() === 'chat';
+  const shouldShow = typingNow().length > 0 && currentScreen() === 'chat';
   if (!shouldShow) {
     typingNode?.remove();
     return;
@@ -811,6 +955,12 @@ function buildMessageNode(entry, sameSender) {
   wrapper.dataset.id = entry.id;
 
   const bubble = make('div', 'bubble');
+  // In einer Gruppe steht über fremden Blasen, von wem sie kommt - sonst
+  // wüsste niemand, wer gerade spricht. Nur beim ersten Beitrag einer Folge:
+  // bei jeder einzelnen Zeile wäre es eine Wand aus Namen.
+  if (isGroup() && !mine && !sameSender) {
+    bubble.appendChild(make('span', 'bubble__from', nameOf(entry.from)));
+  }
   const payload = entry.payload;
 
   if (entry.deleted) {
@@ -870,7 +1020,10 @@ function buildMessageNode(entry, sameSender) {
 
 function buildQuote(reply) {
   const quote = make('div', 'quote');
-  quote.appendChild(make('strong', null, reply.from === app.me?.id ? t('you') : peerName()));
+  // Wer zitiert wird, steht mit Namen da - in einer Gruppe ist "das
+  // Gegenüber" schlicht falsch, es gibt mehrere.
+  const wer = reply.from === app.me?.id ? t('you') : (isGroup() ? nameOf(reply.from) : peerName());
+  quote.appendChild(make('strong', null, wer));
   quote.appendChild(document.createTextNode(reply.text ?? ''));
   quote.addEventListener('click', () => jumpTo(reply.id));
   return quote;
@@ -888,11 +1041,13 @@ function buildMeta(entry, mine) {
     retry.type = 'button';
     retry.addEventListener('click', () => resend(entry));
     meta.appendChild(retry);
-  } else if ((app.peer?.readSeq ?? 0) >= entry.seq) {
+  } else if (allRead(entry.seq)) {
+    // In einer Gruppe erst, wenn WIRKLICH alle gelesen haben. Alles andere
+    // wäre eine Bestätigung, die man nicht bekommen hat.
     const mark = icon('i-check-double');
     mark.classList.add('is-read');
     meta.appendChild(mark);
-  } else if (app.peer?.online) {
+  } else if (anyOnline()) {
     meta.appendChild(icon('i-check-double'));
   } else {
     meta.appendChild(icon('i-check'));
@@ -1129,7 +1284,8 @@ function chatTitle(session) {
 function peerName() {
   const eigene = (app.session?.label || '').trim();
   if (eigene) return eigene;
-  return app.peer?.nick || app.session?.peerNick || t('partner');
+  if (isGroup()) return t('group');
+  return peerOf()?.nick || app.session?.peerNick || t('partner');
 }
 
 function updatePeerStatus() {
@@ -1143,21 +1299,33 @@ function updatePeerStatus() {
     status.textContent = t('connecting');
     return;
   }
-  if (!app.peer) {
-    status.textContent = t('neverSeen');
-    return;
-  }
-  if (app.peer.typing) {
-    status.textContent = t('typing');
+  const tippen = typingNow();
+  if (tippen.length > 0) {
+    status.textContent = isGroup() ? t('typingSome', { names: nameList(tippen) }) : t('typing');
     status.classList.add('is-typing');
     return;
   }
-  if (app.peer.online) {
+  if (isGroup()) {
+    // In einer Gruppe hilft "zuletzt gesehen" niemandem - gefragt ist, wie
+    // viele gerade da sind. Man selbst zählt mit: sonst stünde "0 von 5",
+    // während man selbst im Chat sitzt.
+    const da = onlineCount() + 1;
+    const alle = app.session?.capacity || app.members.size + 1;
+    status.textContent = t('groupPresence', { online: da, total: alle });
+    if (da > 1) status.classList.add('is-online');
+    return;
+  }
+  const gegenueber = peerOf();
+  if (!gegenueber) {
+    status.textContent = t('neverSeen');
+    return;
+  }
+  if (gegenueber.online) {
     status.textContent = t('online');
     status.classList.add('is-online');
     return;
   }
-  status.textContent = app.peer.lastSeen ? t('lastSeen', { time: relativeTime(app.peer.lastSeen) }) : t('offline');
+  status.textContent = gegenueber.lastSeen ? t('lastSeen', { time: relativeTime(gegenueber.lastSeen) }) : t('offline');
 }
 
 function showBanner(text, warn = false) {
@@ -1205,6 +1373,9 @@ async function sendMessage() {
   input.value = '';
   autoGrow(input);
   updateSendButton();
+  // Kaum mehr als ein Antippen - die Quittung fürs Abschicken. Dass sie auch
+  // angekommen ist, sagt er nicht; dafür meldet sich markFailed().
+  playSound('send');
   stopTyping();
 
   const reply = app.replyTo
@@ -1269,6 +1440,10 @@ async function deliver(payload, blobIds) {
 
 function markFailed(entry) {
   entry.status = 'failed';
+  // Der Ton beim Abschicken ist eine Quittung fürs Abschicken, nicht fürs
+  // Ankommen - im Funkloch behauptet er also das Gegenteil dessen, was
+  // passiert. Deshalb muss der Fehlschlag hörbar sein.
+  playSound('error');
   redrawAll();
 }
 
@@ -1318,6 +1493,8 @@ let signalOut = Promise.resolve();
 let signalIn = Promise.resolve();
 let callTicker = null;
 let ringTone = null;
+/** Der gerade laufende Klingelklang - damit er sich beim Annehmen abbrechen lässt. */
+let ringHandle = null;
 let lastRemoteStream = null;
 let lastLocalStream = null;
 /** Klingelt es gerade? Nur der Wechsel löst eine Benachrichtigung aus. */
@@ -1384,7 +1561,7 @@ async function startCall(kind) {
     toast(t('callBusyHere'));
     return;
   }
-  if (!app.peer?.online) {
+  if (!anyOnline()) {
     toast(t('callNeedsPeer'));
     return;
   }
@@ -1438,6 +1615,7 @@ function renderCall(state) {
     if (state.state === 'ended' && state.endReason) {
       const label = callEndLabel(state.endReason);
       if (label) toast(label);
+      playSound(state.endReason === 'failed' || state.endReason.startsWith('no_') ? 'error' : 'callEnd');
     }
     closeCallScreen();
     return;
@@ -1486,6 +1664,9 @@ function renderCall(state) {
   safety.hidden = !state.safety;
   safety.classList.toggle('is-double', state.doubleEncrypted === true);
   el('call-safety-code').textContent = state.safety;
+
+  // Genau einmal, wenn die Leitung zustande kommt.
+  if (state.state === 'active' && !callTicker) playSound('callStart');
 
   el('call-timer').hidden = state.state !== 'active';
   updateCallTimer(state.startedAt);
@@ -1597,7 +1778,11 @@ function closeCallScreen() {
 function startRingTone() {
   if (ringTone) return;
   const beat = () => {
-    if (app.prefs.sound) playPing();
+    // Den Griff aufheben: der Klang dauert 0,7 s, das Klingeln wiederholt
+    // sich alle 2 s. Wer im falschen Drittel annimmt, hörte ihn sonst noch
+    // weiterlaufen, während schon der Ton für den stehenden Anruf darüber
+    // liegt - zwei Klänge gleichzeitig, wo einer den anderen ablösen soll.
+    ringHandle = playSound('ring') || null;
     if (navigator.vibrate) navigator.vibrate([120, 100, 120]);
   };
   beat();
@@ -1605,6 +1790,8 @@ function startRingTone() {
 }
 
 function stopRingTone() {
+  ringHandle?.stop();
+  ringHandle = null;
   if (!ringTone) return;
   clearInterval(ringTone);
   ringTone = null;
@@ -2316,9 +2503,15 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
   document.documentElement.dataset.system = dark ? 'dark' : 'light';
-  const meta = document.querySelector('meta[name="theme-color"]');
   const effectiveDark = theme === 'dark' || (theme === 'auto' && dark);
-  if (meta) meta.setAttribute('content', effectiveDark ? '#0f1319' : '#f6f7f9');
+  // Beide Angaben setzen, nicht nur die erste: im Grundgerüst steht je eine
+  // für hell und für dunkel, damit der Balken schon vor dem ersten Skript
+  // stimmt. Der Browser nimmt die, deren media-Bedingung passt - wer hier nur
+  // eine ändert, ändert auf dem jeweils anderen Gerät gar nichts.
+  const farbe = effectiveDark ? '#0f1319' : '#f6f7f9';
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute('content', farbe);
+  }
   const label = el('theme-label');
   if (label) label.textContent = themeLabel();
 }
@@ -2347,11 +2540,14 @@ function refreshDynamicLabels() {
   }
   // Am Rechner steht die Liste immer da - also auch immer nachziehen.
   if (currentScreen() === 'start' || isDesktop()) renderChatList();
-  if (currentScreen() === 'invite') setInviteWaiting(Boolean(app.peer));
+  if (currentScreen() === 'invite') setInviteWaiting(app.members.size > 0);
 }
 
 function toggleSound() {
   app.prefs = setPrefs({ sound: !app.prefs.sound });
+  configureSound({ enabled: app.prefs.sound });
+  // Wer den Ton anschaltet, soll gleich hören, worauf er sich einlässt.
+  if (app.prefs.sound) playSound('notify');
   toast(app.prefs.sound ? t('soundOn') : t('soundOff'));
 }
 
@@ -2387,9 +2583,25 @@ function announce(text) {
 
 function notifyIncoming(entry) {
   announce(`${peerName()}: ${previewOf(entry)}`);
-  if (app.prefs.sound && document.visibilityState !== 'visible') playPing();
-  if (!app.prefs.notifications || typeof Notification === 'undefined') return;
-  if (Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
+  const sichtbar = document.visibilityState === 'visible';
+  const vomSystem = !sichtbar && systemMeldung(entry);
+  // Wer hinsieht, braucht kein Signal - nur eine Bestätigung. Wer woanders
+  // ist, bekommt den eigentlichen Benachrichtigungston.
+  //
+  // Ausser das Betriebssystem meldet sich schon selbst: dessen Meldung bringt
+  // ihren eigenen Ton mit, und zwei Töne übereinander sind einer zu viel.
+  // Dann hat der vom System Vorrang - er kommt auch dann noch durch, wenn der
+  // Browser die Seite im Hintergrund längst gedrosselt hat.
+  if (!vomSystem) playSound(sichtbar ? 'receive' : 'notify');
+}
+
+/**
+ * Die Meldung des Betriebssystems. Gibt zurück, ob sie wirklich herausging -
+ * daran hängt, ob die App zusätzlich einen eigenen Ton spielt.
+ */
+function systemMeldung(entry) {
+  if (!app.prefs.notifications || typeof Notification === 'undefined') return false;
+  if (Notification.permission !== 'granted') return false;
   try {
     const notification = new Notification(peerName(), {
       body: previewOf(entry).slice(0, 140),
@@ -2402,7 +2614,11 @@ function notifyIncoming(entry) {
       window.focus();
       notification.close();
     };
-  } catch { /* Benachrichtigungen sind Beiwerk */ }
+    return true;
+  } catch {
+    // Benachrichtigungen sind Beiwerk - dann eben der eigene Ton.
+    return false;
+  }
 }
 
 // ===========================================================================
@@ -2482,6 +2698,7 @@ async function renameChat(roomId) {
 
 function showError(message, { retry = true } = {}) {
   busy(false);
+  playSound('error');
   el('error-text').textContent = message;
   el('error-retry').hidden = !retry;
   showScreen('error');
@@ -2767,6 +2984,9 @@ function showUpdateScreen() {
   const screen = el('update');
   if (!screen || !screen.hidden) return;
   screen.hidden = false;
+  // Das Fenster nimmt den ganzen Bildschirm ein - wer gerade woanders
+  // hinsieht, soll wenigstens hören, dass etwas passiert ist.
+  playSound('notify');
   // Was gerade läuft, wird beendet: mit einer veralteten Kopie
   // weiterzutelefonieren hilft niemandem.
   app.call?.dispose();

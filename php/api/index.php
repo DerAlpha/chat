@@ -132,6 +132,8 @@ final class App
             'pollWaitSeconds' => $this->config->pollWaitSeconds,
             'presenceTimeout' => $this->config->presenceTimeout,
             'capacity' => $this->config->maxMembersPerRoom,
+            // Wie gross eine Gruppe hoechstens werden darf.
+            'maxGroup' => $this->config->maxRoomCapacity,
             'limits' => [
                 'maxBlobBytes' => $this->config->maxBlobBytes,
                 'maxCiphertextBytes' => $this->config->maxCiphertextBytes,

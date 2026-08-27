@@ -138,6 +138,18 @@ export async function deriveSlot(code) {
 }
 
 /**
+ * Eine gewuerfelte Raum-ID.
+ *
+ * Bei einem Zweierchat faellt die Raum-ID aus dem Code heraus - beide Seiten
+ * rechnen dieselbe aus. In einer Gruppe gibt es keinen gemeinsamen Code, aus
+ * dem sich das ableiten liesse: jede Person hat einen eigenen. Also wuerfelt
+ * der Anleger den Raum und legt ihn allen anderen ins Platzpaket.
+ */
+export function randomRoomId() {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(ROOM_ID_BYTES)));
+}
+
+/**
  * Ein frischer Gruppenschluessel.
  *
  * Bewusst gewuerfelt und nicht aus irgendeinem Code abgeleitet: kein

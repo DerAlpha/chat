@@ -1,12 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Flüsterchat">
+  <!--
+    Die Bildmarke: eine Sprechblase, in der "psst..." steht.
+
+    Sie sagt in einem Bild, worum es hier geht - leise miteinander reden. Das
+    frühere Schloss sagte zwar dasselbe über die Technik, sah aber aus wie eine
+    Bank und nicht wie ein Gespräch.
+
+    Die Blase ist bewusst breit und flach: so bleibt Platz für die Schrift, und
+    das Wort ist bis hinunter zu 32 px zu lesen. Darunter trägt die Silhouette
+    allein - eine Sprechblase erkennt man auch als Umriss.
+
+    Die Schrift ist mit textLength festgenagelt. Dieselbe Datei dient als
+    Favicon, als App-Symbol und als Marke in der Anwendung; überall stehen
+    andere Schriften zur Verfügung. So bleibt die Breite gleich, egal was der
+    Browser gerade findet.
+  -->
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="fc-grad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2f6df6"/>
       <stop offset="1" stop-color="#8b5cf6"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#g)"/>
-  <path d="M126 150h260a34 34 0 0 1 34 34v134a34 34 0 0 1-34 34H236l-74 56v-56h-36a34 34 0 0 1-34-34V184a34 34 0 0 1 34-34z" fill="#fff" opacity=".97"/>
-  <rect x="222" y="228" width="68" height="52" rx="12" fill="#2f6df6"/>
-  <path d="M239 228v-16a17 17 0 0 1 34 0v16" fill="none" stroke="#2f6df6" stroke-width="13" stroke-linecap="round"/>
+  <rect width="512" height="512" rx="112" fill="url(#fc-grad)"/>
+  <path d="M96 138h320a38 38 0 0 1 38 38v148a38 38 0 0 1-38 38H222l-80 60v-60h-46a38 38 0 0 1-38-38V176a38 38 0 0 1 38-38z" fill="#fff" opacity=".97"/>
+  <text x="256" y="286" fill="#2f6df6"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        font-size="118" font-weight="700" letter-spacing="-2"
+        text-anchor="middle" textLength="276" lengthAdjust="spacingAndGlyphs">psst...</text>
 </svg>

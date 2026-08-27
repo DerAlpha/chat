@@ -27,12 +27,28 @@ async function request(path, options = {}) {
   return body;
 }
 
-export const createRoom = (roomId) =>
+/**
+ * Einen Raum anlegen. Fuer eine Gruppe kommen die Einmal-Plaetze gleich mit:
+ * je Teilnehmer eine Kennung und der Gruppenschluessel, verpackt fuer genau
+ * dessen Code. Der Server kann keines dieser Pakete oeffnen.
+ *
+ * @param {string} roomId
+ * @param {Array<{id: string, wrapped: string}>} [slots]
+ */
+export const createRoom = (roomId, slots) =>
   request(appPath('api/rooms'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ roomId }),
+    body: JSON.stringify(slots?.length ? { roomId, slots } : { roomId }),
   });
+
+/**
+ * Einen Einmal-Platz einloesen. Der Beitretende kennt nur seinen Code; aus
+ * dem rechnet sein Browser die Platzkennung, legt sie hier vor und bekommt
+ * dafuer das verpackte Paket und einen Platz im Raum.
+ */
+export const claimSlot = (slotId) =>
+  request(appPath(`api/slots/${encodeURIComponent(slotId)}/claim`), { method: 'POST' });
 
 export const roomStatus = (roomId) => request(appPath(`api/rooms/${encodeURIComponent(roomId)}`));
 
