@@ -464,8 +464,10 @@ test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browse
   await expect(auge).toBeVisible({ timeout: 20_000 });
   await expect(auge.locator('.seen__count')).toHaveText('1', { timeout: 30_000 });
 
-  // Ohne Maus darüber: keine Blase.
-  const blase = auge.locator('.seen__bubble');
+  // Ohne Maus darüber: keine Blase. Sie steht oben im Dokument, nicht in der
+  // Nachricht - in der Nachricht sass sie in einer Zeile mit opacity < 1,
+  // und aus deren Stapel reicht kein z-index heraus.
+  const blase = pageA.locator('#seen-pop');
   await expect(blase).toBeHidden();
 
   // Mit Maus darüber: da ist sie, mit den Namen und beiden Gruppen.
@@ -478,12 +480,67 @@ test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browse
   // Und sie steht über dem Auge, nicht irgendwo.
   const lage = await pageA.evaluate(() => {
     const knopf = [...document.querySelectorAll('#messages .msg--out:not(.msg--typing) .seen')].pop();
-    const b = knopf.querySelector('.seen__bubble').getBoundingClientRect();
+    const b = document.getElementById('seen-pop').getBoundingClientRect();
     const a = knopf.getBoundingClientRect();
     return { blaseUnten: Math.round(b.bottom), augeOben: Math.round(a.top), breit: Math.round(b.width) };
   });
   expect(lage.blaseUnten, 'die Blase steht nicht über dem Auge').toBeLessThanOrEqual(lage.augeOben);
   expect(lage.breit).toBeGreaterThan(60);
+
+  /*
+   * Und jetzt der Fall, in dem sie vorher halb verschwand: eine Nachricht
+   * ganz oben am Rand des Verlaufs. Der Verlauf ist ein Rollbereich und
+   * schneidet alles ab, was über seinen Rand hinausragt - die Blase wuchs
+   * genau dorthin. Geprüft wird deshalb nicht, ob sie im DOM steht, sondern
+   * ob man sie sieht: liegt sie vollständig im Fenster, und wer sitzt an
+   * ihren vier Ecken obenauf?
+   */
+  for (let i = 0; i < 22; i += 1) await sendText(pageA, `Zeile ${i}`);
+  await expect(pageA.locator('#messages .msg--out:not(.msg--typing)')).toHaveCount(23, { timeout: 40_000 });
+  await pageA.waitForTimeout(1500);
+
+  // Ein Auge dicht unter den oberen Rand des Verlaufs schieben.
+  const gefunden = await pageA.evaluate(() => {
+    const liste = document.getElementById('messages');
+    liste.scrollTop = liste.scrollHeight;
+    const rand = liste.getBoundingClientRect().top;
+    const augen = [...liste.querySelectorAll('.msg--out:not(.msg--typing) .seen')];
+    const ziel = augen.find((e) => e.getBoundingClientRect().top - rand > 80);
+    if (!ziel) return -1;
+    liste.scrollTop += (ziel.getBoundingClientRect().top - rand) - 10;
+    return augen.indexOf(ziel);
+  });
+  expect(gefunden, 'kein Auge zum Verschieben gefunden').toBeGreaterThanOrEqual(0);
+  await pageA.waitForTimeout(400);
+  await pageA.locator('#messages .msg--out:not(.msg--typing) .seen').nth(gefunden).hover();
+  await pageA.waitForTimeout(400);
+
+  const oben = await pageA.evaluate(() => {
+    const blase = document.getElementById('seen-pop');
+    if (blase.hidden) return { fehlt: true };
+    const r = blase.getBoundingClientRect();
+    const ecken = [
+      [r.left + 4, r.top + 4], [r.right - 4, r.top + 4],
+      [r.left + 4, r.bottom - 4], [r.right - 4, r.bottom - 4],
+    ];
+    // Die Blase laesst Zeiger durch - sie soll die Maus nicht vom Auge
+    // wegnehmen. Fuer die Frage "wer liegt hier oben?" muss sie kurz
+    // greifbar sein, sonst antwortet der Browser mit dem, was DARUNTER liegt.
+    blase.style.pointerEvents = 'auto';
+    const fremd = ecken
+      .map(([x, y]) => document.elementFromPoint(Math.round(x), Math.round(y)))
+      .filter((n) => !n || n.closest('#seen-pop') === null)
+      .map((n) => (n ? `${n.tagName}.${String(n.className).slice(0, 30)}` : 'nichts'));
+    blase.style.pointerEvents = '';
+    return {
+      imFenster: r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth,
+      rand: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
+      fremd,
+    };
+  });
+  expect(oben.fehlt, 'die Blase ist gar nicht sichtbar').toBeUndefined();
+  expect(oben.imFenster, `die Blase ragt aus dem Fenster: ${JSON.stringify(oben.rand)}`).toBe(true);
+  expect(oben.fremd, `über der Blase liegt etwas anderes: ${oben.fremd.join(', ')}`).toEqual([]);
 
   await contextA.close();
   await contextB.close();

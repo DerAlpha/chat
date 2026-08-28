@@ -86,7 +86,11 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   viele haben sie gelesen. Ein Haken sagt dort zu wenig – bei acht Leuten ist
   „alle haben gelesen" selten und „jemand hat gelesen" nichtssagend
 - Antippen öffnet die Liste mit den Namen; am Rechner wächst sie schon beim
-  Darüberfahren als Blase aus dem Auge heraus
+  Darüberfahren als Blase aus dem Auge heraus – und zwar immer obenauf. Sie
+  hängt am Fenster, nicht an der Nachricht: im Verlauf schnitt der
+  Rollbereich sie am oberen Rand ab, und in der Fußzeile der Blase saß sie
+  hinter einer Zeile mit `opacity` < 1 – die macht einen eigenen Stapel auf,
+  aus dem kein `z-index` mehr herausreicht
 - Getrennt und blasser stehen die, für die es nur bereitliegt. „Gelesen" heißt:
   das andere Gerät hat es gemeldet. Alles andere wäre eine Bestätigung, die
   niemand gegeben hat – und genau so steht es auch da
@@ -534,7 +538,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 141 Tests am Smartphone + 16 am Rechner
+npm run test:e2e          # 143 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -569,7 +573,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 157 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 159 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -607,6 +611,11 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   ihre Felder behielt. Ein zweiter Test schneidet deshalb mit, dass nach dem
   Verbergen kein einziges PUT mehr auf diese Adresse geht, auch nicht nach
   Neuladen und erneutem Betreten.
+- Wo etwas übereinander liegt, wird nicht die Regel im Stilblatt geprüft,
+  sondern das Ergebnis: `elementFromPoint` sagt, wer an dieser Stelle wirklich
+  obenauf liegt. Eine Regel kann stimmen und trotzdem wirkungslos sein, weil
+  ein Vorfahr einen eigenen Stapel aufmacht – genau so lag die Blase am Auge
+  unter dem Knopf der Nachricht daneben.
 - Bei den Animationen wird gezählt, was sich bewegt: nach dem Öffnen eines
   Chats keine einzige Blase, bei einer eingehenden Nachricht genau eine – und
   nach der nächsten Lesebestätigung immer noch nicht der ganze Verlauf.

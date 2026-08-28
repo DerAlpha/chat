@@ -773,58 +773,56 @@ button, input, textarea { font: inherit; color: inherit; }
 .seen:active { transform: scale(.92); }
 .seen.is-read { color: #7fd1ff; }
 
-/* Die Blase waechst aus dem Auge heraus - mit Spitze nach unten. Es gibt sie
-   nur dort, wo es auch einen Mauszeiger gibt: auf einem Telefon bliebe ein
-   :hover nach dem Antippen kleben. */
-.seen__bubble { display: none; }
+/* Die Blase waechst aus dem Auge heraus - mit Spitze zum Auge hin. Es gibt
+   sie nur dort, wo es auch einen Mauszeiger gibt: auf einem Telefon bliebe
+   ein :hover nach dem Antippen kleben, dort oeffnet ein Tippen die Liste.
 
-@media (hover: hover) and (pointer: fine) {
-  /* Am Rechner ist die Blase immer da, nur unsichtbar - so kann sie
-     einblenden statt hart umzuspringen. `visibility` sorgt dafuer, dass sie
-     unsichtbar auch wirklich nicht im Weg ist. */
-  .seen .seen__bubble {
-    display: flex;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(4px);
-    transition: opacity var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve),
-                visibility 0s linear var(--dauer-kurz);
-  }
-  .seen:hover .seen__bubble,
-  .seen:focus-visible .seen__bubble {
-    opacity: 1;
-    visibility: visible;
-    transform: none;
-    transition-delay: 0s;
-  }
-  .seen .seen__bubble {
-    flex-direction: column;
-    gap: 3px;
-    position: absolute;
-    right: -4px;
-    bottom: calc(100% + 9px);
-    z-index: 20;
-    width: max-content;
-    max-width: min(260px, 60vw);
-    padding: 8px 11px;
-    border-radius: 12px;
-    background: var(--bg-elevated);
-    color: var(--text);
-    box-shadow: var(--shadow-lg);
-    font-size: .78rem;
-    line-height: 1.35;
-    text-align: left;
-    white-space: normal;
-    cursor: default;
-  }
-  .seen .seen__bubble::after {
-    content: "";
-    position: absolute;
-    right: 10px;
-    top: 100%;
-    border: 6px solid transparent;
-    border-top-color: var(--bg-elevated);
-  }
+   Sie haengt am Fenster, nicht an der Nachricht, und die App rechnet ihre
+   Stelle aus. Zwei Gruende, beide bitter erfahren: der Verlauf ist ein
+   Rollbereich und schnitt sie am oberen Rand ab, und die Fusszeile der
+   Blase steht auf opacity < 1 - das macht einen eigenen Stapel auf, aus dem
+   kein z-index mehr herausreicht. */
+.seen__bubble {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  flex-direction: column;
+  gap: 3px;
+  width: max-content;
+  max-width: min(260px, 60vw);
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: .78rem;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+  pointer-events: none;
+  display: flex;
+  opacity: 0;
+  transition: opacity var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve);
+  transform: translateY(4px);
+}
+.seen__bubble[hidden] { display: none; }
+.seen__bubble.is-offen { opacity: 1; transform: none; }
+.seen__bubble::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 100%;
+  border: 6px solid transparent;
+  border-top-color: var(--bg-elevated);
+}
+/* Musste sie nach unten ausweichen, zeigt die Spitze nach oben. */
+.seen__bubble.is-unten::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--bg-elevated);
 }
 
 /* Wer nur zugestellt bekommen hat, steht blasser da - getrennt von denen,
@@ -880,7 +878,18 @@ button, input, textarea { font: inherit; color: inherit; }
 .voice__wave i.is-played { opacity: .95; }
 .voice__time { font-size: .74rem; opacity: .8; font-variant-numeric: tabular-nums; }
 
-.reactions { display: flex; gap: 4px; margin-top: -4px; padding: 0 6px; }
+/* Die Marken haengen bewusst ein Stueck in die Blase hinein - so gehoeren sie
+   sichtbar zu ihr. Dann muessen sie aber auch DAVOR liegen: die Blase ist
+   positioniert und deckte den oberen Rand jeder Marke sonst zu, samt der
+   Flaeche, auf die man tippt. */
+.reactions {
+  display: flex;
+  gap: 4px;
+  margin-top: -4px;
+  padding: 0 6px;
+  position: relative;
+  z-index: 1;
+}
 .reaction {
   font-size: .82rem;
   line-height: 1;
@@ -1189,8 +1198,19 @@ button, input, textarea { font: inherit; color: inherit; }
 .sheet-field--row input { width: 6.5rem; text-align: center; }
 .sheet-field__label { color: var(--text-muted); }
 
-.emoji-row { display: flex; justify-content: space-between; gap: 4px; padding: 6px 4px 10px; }
-.emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; }
+/* Sieben Knoepfe zu je 48 Bildpunkten sind auf einem 320er Bildschirm
+   siebzig Bildpunkte zu breit. Ohne Umbruch stehen sie dann ueber dem Rand
+   des Blattes, und der letzte - der Weg zu allen uebrigen Emoji - ist gar
+   nicht mehr zu treffen. Also umbrechen statt schrumpfen: die Flaeche zum
+   Antippen bleibt so gross, wie sie sein muss. */
+.emoji-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px 10px;
+}
+.emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; flex: none; }
 .emoji-row button:hover { background: var(--bg-sunken); }
 .emoji-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

@@ -452,6 +452,14 @@
 </div>
 
 <p class="visually-hidden" id="live-region" aria-live="polite" aria-atomic="true"></p>
+<!-- Die Blase am Auge: EINE fuer den ganzen Chat, und hier oben statt in der
+     Nachricht. In der Blase drin sass sie in einer Zeile mit opacity < 1 -
+     und die macht einen eigenen Stapel auf, aus dem kein z-index mehr
+     herauskommt: der Knopf der Nachricht daneben lag darueber. Ausserdem
+     schneidet der Verlauf als Rollbereich alles ab, was ueber seinen Rand
+     hinausragt. Hier oben kann beides nicht mehr passieren. -->
+<span class="seen__bubble" id="seen-pop" role="tooltip" hidden></span>
+
 <output class="toast" id="toast" hidden aria-live="polite"></output>
 <div class="busy" id="busy" hidden role="status"><span class="spinner" aria-hidden="true"></span><span id="busy-text"></span></div>
 </html>

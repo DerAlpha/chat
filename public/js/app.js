@@ -646,6 +646,7 @@ function teardownChat() {
   typingNode = null;
   schonGezeigt.clear();
   aufgedeckt.clear();
+  versteckeSeenBlase();
   app.sendHidden = false;
   renderSpoilerBar();
   stopKeepAtBottom();
@@ -2100,7 +2101,13 @@ function buildSeen(entry) {
   auge.classList.add('seen__eye');
   knopf.appendChild(auge);
   knopf.appendChild(make('span', 'seen__count', String(gelesen.length)));
-  knopf.appendChild(seenBubble(gelesen, offen));
+  // Die Blase gehoert nicht in die Nachricht - sie steht oben im Dokument,
+  // eine einzige fuer den ganzen Chat, und wird hier nur gerufen.
+  const zeigen = () => zeigeSeenBlase(knopf, gelesen, offen);
+  knopf.addEventListener('mouseenter', zeigen);
+  knopf.addEventListener('focus', zeigen);
+  knopf.addEventListener('mouseleave', versteckeSeenBlase);
+  knopf.addEventListener('blur', versteckeSeenBlase);
 
   knopf.addEventListener('click', (event) => {
     // Nicht das Nachrichtenmenue mitoeffnen.
@@ -2110,6 +2117,55 @@ function buildSeen(entry) {
   return knopf;
 }
 
+/** Wie weit die Blase vom Auge und vom Fensterrand wegbleibt. */
+const BLASE_LUFT = 9;
+const BLASE_RAND = 8;
+
+/** Gibt es hier ueberhaupt einen Mauszeiger? */
+const hatZeiger = () => window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true;
+
+/**
+ * Zeigt die Blase ueber dem Auge - und darunter, wenn oben kein Platz ist.
+ *
+ * Gerechnet wird in Fensterkoordinaten, denn die Blase haengt am Fenster.
+ * Nur so kommt sie aus dem Rollbereich des Verlaufs heraus, der sonst alles
+ * abschneidet, was ueber seinen Rand hinausragt - und aus dem Stapel der
+ * Fusszeile, die auf opacity < 1 steht und darum keinen z-index durchlaesst.
+ */
+function zeigeSeenBlase(knopf, gelesen, offen) {
+  const blase = el('seen-pop');
+  if (!blase || !hatZeiger()) return;
+  blase.replaceChildren(...seenLines(gelesen, offen));
+  blase.hidden = false;
+  blase.classList.remove('is-unten');
+  blase.style.left = '0px';
+  blase.style.top = '0px';
+
+  const auge = knopf.getBoundingClientRect();
+  const mass = blase.getBoundingClientRect();
+  const platzOben = auge.top - BLASE_LUFT - BLASE_RAND;
+  const unten = mass.height > platzOben;
+  blase.classList.toggle('is-unten', unten);
+  const top = unten ? auge.bottom + BLASE_LUFT : auge.top - BLASE_LUFT - mass.height;
+
+  // Die Spitze sitzt rechts - also die rechte Kante am Auge ausrichten und
+  // erst dann ins Fenster schieben, falls sie sonst herausragte.
+  const rechts = Math.min(window.innerWidth - BLASE_RAND, auge.right + 4);
+  const left = Math.max(BLASE_RAND, rechts - mass.width);
+  blase.style.left = `${Math.round(left)}px`;
+  blase.style.top = `${Math.round(top)}px`;
+  // Erst jetzt einblenden: sonst saehe man sie fuer einen Bildaufbau oben
+  // links in der Ecke stehen.
+  requestAnimationFrame(() => blase.classList.add('is-offen'));
+}
+
+function versteckeSeenBlase() {
+  const blase = el('seen-pop');
+  if (!blase) return;
+  blase.classList.remove('is-offen');
+  blase.hidden = true;
+}
+
 /** Namen, aber nicht endlos: ab einer Handvoll wird gezaehlt. */
 function seenNames(liste, hoechstens = 5) {
   const namen = liste.slice(0, hoechstens).map((member) => memberName(member));
@@ -2117,19 +2173,17 @@ function seenNames(liste, hoechstens = 5) {
   return namen.join(', ');
 }
 
-/** Die Blase am Rechner - dieselbe Auskunft, nur ohne Antippen. */
-function seenBubble(gelesen, offen) {
-  const blase = make('span', 'seen__bubble');
-  blase.setAttribute('role', 'tooltip');
+/** Der Inhalt der Blase am Rechner - dieselbe Auskunft, nur ohne Antippen. */
+function seenLines(gelesen, offen) {
   const zeile = (klasse, titel, liste) => {
     const teil = make('span', `seen__line ${klasse}`);
     teil.appendChild(make('strong', null, `${titel}: `));
     teil.appendChild(document.createTextNode(liste.length > 0 ? seenNames(liste) : t('seenNobody')));
     return teil;
   };
-  blase.appendChild(zeile('is-read', t('seenRead'), gelesen));
-  if (offen.length > 0) blase.appendChild(zeile('is-pending', t('seenPending'), offen));
-  return blase;
+  const zeilen = [zeile('is-read', t('seenRead'), gelesen)];
+  if (offen.length > 0) zeilen.push(zeile('is-pending', t('seenPending'), offen));
+  return zeilen;
 }
 
 /** Die ausfuehrliche Liste - am Handy der Weg dorthin. */
