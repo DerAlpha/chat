@@ -334,14 +334,27 @@ final class Store
         return is_array($messages) ? array_values($messages) : [];
     }
 
-    /** @param list<array<string,mixed>> $messages */
-    public function saveMessages(string $roomId, array $messages): void
+    /**
+     * Schreibt die Nachrichten und haelt dabei die Obergrenze ein.
+     *
+     * Zurueck kommt, was die Obergrenze verdraengt hat. Der Aufrufer braucht
+     * das: an einer verdraengten Nachricht koennen Anhaenge haengen, und die
+     * liegen weiter auf der Platte und weiter auf dem Kontingent des Raums,
+     * wenn sie niemand freigibt.
+     *
+     * @param list<array<string,mixed>> $messages
+     * @return list<array<string,mixed>> Die verdraengten Nachrichten.
+     */
+    public function saveMessages(string $roomId, array $messages): array
     {
+        $verdraengt = [];
         if (count($messages) > $this->config->maxMessagesPerRoom) {
+            $verdraengt = array_slice($messages, 0, count($messages) - $this->config->maxMessagesPerRoom);
             $messages = array_slice($messages, -$this->config->maxMessagesPerRoom);
         }
         $this->writeJson($this->roomDir($roomId) . '/messages.json', array_values($messages));
         $this->saveRecent($roomId, $messages);
+        return array_values($verdraengt);
     }
 
     /**
@@ -448,6 +461,35 @@ final class Store
     public function removeBlob(string $roomId, string $blobId): void
     {
         @unlink($this->blobPath($roomId, $blobId));
+    }
+
+    /**
+     * Loescht hochgeladene Anhaenge, die nie an eine Nachricht gebunden wurden.
+     *
+     * Ein Upload wird zuerst abgelegt und erst mit der naechsten Nachricht
+     * beansprucht. Bricht jemand dazwischen ab - Fenster zu, Verbindung weg,
+     * Nachricht doch nicht gesendet -, bleibt der Anhang liegen und belegt
+     * das Kontingent des Raums fuer immer. Nach einer halben Stunde kommt
+     * keine Nachricht mehr, die ihn noch beansprucht.
+     *
+     * @param array<string,mixed> $room
+     * @return array<string,mixed> Der Raum ohne die verwaisten Anhaenge.
+     */
+    public function sweepOrphanBlobs(string $roomId, array $room, int $maxAgeSeconds = 1800): array
+    {
+        $jetzt = time();
+        foreach ((array) ($room['blobs'] ?? []) as $blobId => $blob) {
+            if (($blob['messageId'] ?? null) !== null) {
+                continue;
+            }
+            if ($jetzt - (int) ($blob['createdAt'] ?? 0) < $maxAgeSeconds) {
+                continue;
+            }
+            $room['blobBytes'] = max(0, (int) ($room['blobBytes'] ?? 0) - (int) ($blob['size'] ?? 0));
+            unset($room['blobs'][$blobId]);
+            $this->removeBlob($roomId, (string) $blobId);
+        }
+        return $room;
     }
 
     // --------------------------------------------------------- Profilbilder

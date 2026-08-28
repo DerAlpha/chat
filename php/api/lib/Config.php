@@ -49,6 +49,16 @@ final class Config
     /** Nach dieser Stille gilt jemand als offline. */
     public int $presenceTimeout = 25;
 
+    /**
+     * Steht ein Reverse Proxy davor?
+     *
+     * Nur dann darf X-Forwarded-For gelten. Sonst setzt jeder den Header
+     * selbst, bekommt bei jeder Anfrage einen frischen Eimer und haengt damit
+     * jede Begrenzung nach IP aus. Der Node-Server macht es genauso
+     * (TRUST_PROXY, ebenfalls standardmaessig aus).
+     */
+    public bool $trustProxy = false;
+
     // Rate-Limits pro IP
     public int $createRoomPerHour = 60;
     public int $joinAttemptsPerHour = 300;

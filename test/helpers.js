@@ -24,12 +24,14 @@ export async function withServer(fn) {
 
 /** Eine WebSocket-Verbindung, die alle empfangenen Frames mitschreibt. */
 export class TestClient {
-  constructor(ctx, roomId, token) {
+  /** @param {Record<string, string>} [headers] Zusaetzliche Kopfzeilen - fuer Tests, die einen Proxy nachstellen. */
+  constructor(ctx, roomId, token, headers) {
     this.frames = [];
     this.consumed = 0;
     // Das Token reist wie im Browser im Subprotokoll, nicht im Query-String.
     const protocols = token ? [SUBPROTOCOL, `t.${token}`] : [SUBPROTOCOL];
-    this.ws = new WebSocket(`${ctx.wsBase}/ws?r=${encodeURIComponent(roomId)}`, protocols);
+    this.ws = new WebSocket(`${ctx.wsBase}/ws?r=${encodeURIComponent(roomId)}`, protocols,
+      headers ? { headers } : undefined);
     this.closed = null;
     this.ws.on('message', (data) => this.frames.push(JSON.parse(data.toString('utf8'))));
     this.ws.on('close', (code, reason) => { this.closed = { code, reason: reason.toString() }; });

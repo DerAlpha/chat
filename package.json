@@ -21,6 +21,7 @@
     "stamp": "node scripts/version.mjs"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "express": "^5.1.0",
     "ws": "^8.18.3"
   },

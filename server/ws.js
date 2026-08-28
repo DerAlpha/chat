@@ -2,19 +2,22 @@ import { WebSocketServer } from 'ws';
 import { config } from './config.js';
 import { log } from './logger.js';
 import { BadRequest, ROOM_ID_RE } from './store.js';
-import { perMinute } from './ratelimit.js';
+import { perHour, perMinute } from './ratelimit.js';
 
 const WELCOME_HISTORY = config.welcomeHistory;
 export const SUBPROTOCOL = 'fluesterchat';
 const TOKEN_PREFIX = 't.';
-/** Leichte Frames sollen echte Nachrichten nicht aus dem Budget draengen. */
-// Beim Aushandeln eines Anrufs kommen die Kandidaten in Schwällen - zwei
-// Dutzend kleine Pakete in wenigen Sekunden. Die dürfen das Kontingent für
-// echte Nachrichten nicht auffressen; gross werden können sie ohnehin nicht.
 /** So lange gilt ein "tippt" als aktuell. Wer aufhoert, meldet es selbst;
     wer die Verbindung verliert, soll nicht ewig als tippend gelten. */
 const TYPING_TTL_MS = 5000;
 
+/**
+ * Leichte Frames sollen echte Nachrichten nicht aus dem Budget draengen.
+ *
+ * Beim Aushandeln eines Anrufs kommen die Kandidaten in Schwaellen - zwei
+ * Dutzend kleine Pakete in wenigen Sekunden. Die duerfen das Kontingent fuer
+ * echte Nachrichten nicht auffressen; gross werden koennen sie ohnehin nicht.
+ */
 const FRAME_COST = { ping: 0, typing: 0.1, read: 0.1, sig: 0.2, history: 0.5 };
 const MAX_HISTORY_PAGE = 300;
 
@@ -34,6 +37,15 @@ export class Hub {
     /** @type {Map<string, Map<string, Set<import('ws').WebSocket>>>} roomId -> memberId -> sockets */
     this.presence = new Map();
     this.messageLimiter = perMinute(config.messagesPerMinute);
+    /**
+     * Beitrittsversuche je Adresse.
+     *
+     * Ueber HTTP war der Beitritt begrenzt, ueber die WebSocket nicht - und
+     * genau dort kommt er zustande: wer eine Raum-ID kennt, konnte beliebig
+     * oft anklopfen, bis ein Platz frei war. Denselben Eimer teilt sich die
+     * HTTP-Seite (siehe createApp): es ist dieselbe Handlung.
+     */
+    this.joinLimiter = perHour(config.joinAttemptsPerHour);
     // Etwas Luft ueber dem fachlichen Limit: leichte Ueberschreitungen sollen eine
     // saubere Fehlermeldung bekommen, wirklich absurde Frames trennt die Transportebene.
     this.wss = new WebSocketServer({
@@ -73,6 +85,9 @@ export class Hub {
     // stehen in fast jedem Reverse-Proxy-Log, Header-Werte nicht.
     const token = readToken(request.headers['sec-websocket-protocol']);
     if (!ROOM_ID_RE.test(roomId)) return destroy(socket, 400);
+    // Wer schon ein Token hat, gehoert zum Raum und kommt so oft wieder, wie
+    // seine Leitung es verlangt. Gezaehlt wird das Anklopfen ohne Token.
+    if (!token && !this.joinLimiter.take(clientAddress(request))) return destroy(socket, 429);
 
     this.wss.handleUpgrade(request, socket, head, (ws) => {
       this.wss.emit('connection', ws, request);
@@ -411,8 +426,25 @@ function readToken(header) {
   return '';
 }
 
+/**
+ * Die Adresse des Anklopfenden.
+ *
+ * Nur wenn eine Zwischenstation davor steht, steht die echte Adresse im
+ * Header - und dann genau ein Sprung weit, wie `trust proxy: 1` auf der
+ * HTTP-Seite: der LETZTE Eintrag der Kette ist der, den dieser Proxy selbst
+ * angehaengt hat, alles davor darf sich der Anrufer ausdenken. Ohne Proxy
+ * ist der Header nichts als ein Vorschlag des Anrufers.
+ */
+function clientAddress(request) {
+  const direkt = request.socket?.remoteAddress || 'unbekannt';
+  if (!config.trustProxy) return direkt;
+  const kette = String(request.headers['x-forwarded-for'] ?? '').split(',');
+  return kette[kette.length - 1].trim() || direkt;
+}
+
+const GRUND = { 400: 'Bad Request', 404: 'Not Found', 429: 'Too Many Requests' };
+
 function destroy(socket, status) {
-  const reason = status === 404 ? 'Not Found' : 'Bad Request';
-  socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
+  socket.write(`HTTP/1.1 ${status} ${GRUND[status] ?? 'Bad Request'}\r\nConnection: close\r\n\r\n`);
   socket.destroy();
 }

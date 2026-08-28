@@ -32,8 +32,3 @@ export function serverSecret(dataDir) {
   cached = fresh;
   return cached;
 }
-
-/** Nur für Tests. */
-export function resetSecretCache() {
-  cached = null;
-}

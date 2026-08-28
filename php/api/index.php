@@ -26,6 +26,7 @@ if (PHP_VERSION_ID < 80100) {
 }
 
 $config = Config::get();
+Http::trustProxy($config->trustProxy);
 
 try {
     $store = new Store($config);
@@ -75,6 +76,10 @@ final class App
         }
 
         $this->store->cleanupSometimes();
+        // Dieselbe Gelegenheit fuer die Eimer der Ratenbegrenzung: je Absender
+        // und Aktion liegt dort eine Datei, und ohne Aufraeumen waechst der
+        // Ordner unbegrenzt. Cronjobs gibt es auf Webspace nicht.
+        $this->limits->sweepSometimes($this->config->cleanupChance);
 
         // /config
         if ($route === '/config' && $method === 'GET') {
@@ -712,7 +717,10 @@ final class App
         $size = strlen($bytes);
         $blobId = Http::randomId(16);
 
-        $this->store->mutate($roomId, function (array $room) use ($size, $blobId): array {
+        $this->store->mutate($roomId, function (array $room) use ($roomId, $size, $blobId): array {
+            // Erst die Leichen wegraeumen, dann messen: ein abgebrochener
+            // Upload darf das Kontingent nicht dauerhaft blockieren.
+            $room = $this->store->sweepOrphanBlobs($roomId, $room);
             if ((int) ($room['blobBytes'] ?? 0) + $size > $this->config->maxRoomBlobBytes) {
                 Http::fail(400, 'room_quota', 'Speicherplatz des Chats erschoepft.');
             }
@@ -1016,7 +1024,12 @@ final class App
 
     private function limit(string $bucket, int $count, int $perSeconds, float $cost = 1.0): void
     {
-        $key = $bucket . ':' . ($bucket === 'create' || $bucket === 'join' || $bucket === 'upload' ? $this->ip : '');
+        // Jeder Eimer haengt am Absender. Vorher taten das nur drei von ihnen:
+        // 'gifs' und 'overview' teilten sich EINEN Eimer fuer alle Besucher -
+        // wer ihn leerte, sperrte damit jeden anderen aus. Der Node-Server
+        // haelt es seit jeher richtig (clientKey je Anfrage).
+        // 'frames:<mitglied>' bringt seinen Schluessel schon mit.
+        $key = str_contains($bucket, ':') ? $bucket : $bucket . ':' . $this->ip;
         if (!$this->limits->take($key, $count, $count / $perSeconds, $cost)) {
             header('Retry-After: 30');
             Http::fail(429, 'rate_limited', 'Zu viele Anfragen.');

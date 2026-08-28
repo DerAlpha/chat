@@ -45,6 +45,7 @@ export async function startServer(overrides = {}) {
     if (closing) return closing;
     closing = (async () => {
       clearInterval(cleanup);
+      app.locals.stop?.();
       hub.close();
       await new Promise((resolve) => server.close(resolve));
       await store.close();

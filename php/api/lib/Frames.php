@@ -77,10 +77,34 @@ final class Frames
         $this->direct[] = ['t' => 'err', 'code' => $code, 'msg' => $message, 'cid' => $cid];
     }
 
+    /**
+     * Gibt Anhänge frei: Datei weg, Buchhaltung nachgezogen.
+     *
+     * @param array<string,mixed> $room
+     * @param array<mixed> $blobIds
+     * @return array<string,mixed>
+     */
+    private function freeAttachments(array $room, array $blobIds): array
+    {
+        foreach ($blobIds as $blobId) {
+            if (isset($room['blobs'][$blobId])) {
+                $room['blobBytes'] = max(0, (int) ($room['blobBytes'] ?? 0) - (int) ($room['blobs'][$blobId]['size'] ?? 0));
+                unset($room['blobs'][$blobId]);
+            }
+            $this->store->removeBlob($this->roomId, (string) $blobId);
+        }
+        return $room;
+    }
+
     /** @param array<string,mixed> $frame */
     private function message(array $frame): void
     {
-        $ct = (string) ($frame['ct'] ?? '');
+        // Ausdruecklich Text, nicht "irgendetwas, das sich zu Text machen
+        // laesst": aus einer Zahl wurde hier "123", aus einem Feld "Array"
+        // (samt Warnung im Protokoll). Entschluesseln kann das niemand mehr -
+        // die Nachricht stuende fuer immer unlesbar im Verlauf. Node lehnt
+        // sie ab, dieser Server tat es nicht.
+        $ct = is_string($frame['ct'] ?? null) ? $frame['ct'] : '';
         if ($ct === '') {
             Http::fail(400, 'empty_message', 'Leere Nachricht.');
         }
@@ -122,7 +146,12 @@ final class Frames
             }
             $messages = $this->store->loadMessages($this->roomId);
             $messages[] = $message;
-            $this->store->saveMessages($this->roomId, $messages);
+            // Was die Obergrenze verdraengt, nimmt seine Anhaenge mit: sonst
+            // liegen sie ewig auf der Platte und auf dem Kontingent des Raums,
+            // ohne dass noch eine Nachricht auf sie zeigt.
+            foreach ($this->store->saveMessages($this->roomId, $messages) as $verdraengt) {
+                $room = $this->freeAttachments($room, (array) ($verdraengt['att'] ?? []));
+            }
 
             [$room] = $this->store->appendEvent($this->roomId, $room, ['t' => 'msg', 'message' => $message]);
             return [$room, $message];
@@ -181,13 +210,7 @@ final class Frames
                 Http::fail(403, 'not_owner', 'Fremde Nachricht.');
             }
             // Löschen heisst löschen: Chiffrat und Anhänge verschwinden auch hier.
-            foreach ((array) ($messages[$index]['att'] ?? []) as $blobId) {
-                if (isset($room['blobs'][$blobId])) {
-                    $room['blobBytes'] = max(0, (int) $room['blobBytes'] - (int) $room['blobs'][$blobId]['size']);
-                    unset($room['blobs'][$blobId]);
-                }
-                $this->store->removeBlob($this->roomId, (string) $blobId);
-            }
+            $room = $this->freeAttachments($room, (array) ($messages[$index]['att'] ?? []));
             $messages[$index]['deleted'] = true;
             $messages[$index]['ct'] = '';
             $messages[$index]['att'] = [];

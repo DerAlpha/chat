@@ -4,6 +4,20 @@ declare(strict_types=1);
 /** Kleine Helfer rund um Anfrage und Antwort. */
 final class Http
 {
+    /**
+     * Darf X-Forwarded-For gelten?
+     *
+     * Nur hinter einem Reverse Proxy. Ohne ihn setzt jeder den Header selbst,
+     * bekommt bei jeder Anfrage einen frischen Eimer - und haengt damit jede
+     * Begrenzung nach IP aus. Wird beim Start aus der Konfiguration gesetzt.
+     */
+    private static bool $trustProxy = false;
+
+    public static function trustProxy(bool $wert): void
+    {
+        self::$trustProxy = $wert;
+    }
+
     /** Fachlicher Fehler, der als sauberes JSON zurückgeht. */
     public static function fail(int $status, string $code, string $message): never
     {
@@ -76,7 +90,12 @@ final class Http
 
     public static function clientIp(): string
     {
-        // Hinter dem Reverse Proxy des Hosters steht die echte Adresse im Header.
+        // Hinter dem Reverse Proxy des Hosters steht die echte Adresse im
+        // Header - aber eben nur dann. Ungeprueft geglaubt ist er eine
+        // Einladung, sich fuer jede Anfrage eine neue Adresse auszudenken.
+        if (!self::$trustProxy) {
+            return (string) ($_SERVER['REMOTE_ADDR'] ?? 'unbekannt');
+        }
         foreach (['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP'] as $key) {
             $value = $_SERVER[$key] ?? '';
             if ($value !== '') {

@@ -10,59 +10,15 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
 import { withServer, TestClient } from '../helpers.js';
-
-const WURZEL = path.resolve(import.meta.dirname, '../..');
-
-const phpVorhanden = (() => {
-  try {
-    execFileSync('php', ['-v'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+import { phpVorhanden, withPhp as mitPhpServer } from '../php-server.js';
 
 let zaehler = 0;
 const kennung = (name) => (`${name}${'x'.repeat(22)}`).slice(0, 22).replace(/[^A-Za-z0-9_-]/g, '_');
 const frisch = (was) => kennung(`${was}${(zaehler += 1)}`);
 
-/** Startet den PHP-Server auf einem freien Port und raeumt danach auf. */
-async function withPhp(fn) {
-  const docRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-php-gruppen-'));
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fluesterchat-php-daten-'));
-  fs.cpSync(path.join(WURZEL, 'public'), docRoot, { recursive: true });
-  fs.cpSync(path.join(WURZEL, 'php/api'), path.join(docRoot, 'api'), { recursive: true });
-  fs.writeFileSync(
-    path.join(docRoot, 'api', 'lib', 'config.local.php'),
-    `<?php return ['dataDir' => '${dataDir}'];\n`,
-  );
-  const port = 3900 + (zaehler % 90);
-  const kind = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', docRoot, path.join(WURZEL, 'php/router.php')], {
-    stdio: 'ignore',
-    env: { ...process.env, PHP_CLI_SERVER_WORKERS: '4' },
-  });
-  const base = `http://127.0.0.1:${port}`;
-  try {
-    // Warten, bis er wirklich antwortet.
-    for (let versuch = 0; versuch < 100; versuch += 1) {
-      try {
-        const antwort = await fetch(`${base}/api/healthz`);
-        if (antwort.ok) break;
-      } catch { /* noch nicht da */ }
-      await new Promise((weiter) => setTimeout(weiter, 100));
-    }
-    return await fn(base);
-  } finally {
-    kind.kill('SIGKILL');
-    fs.rmSync(docRoot, { recursive: true, force: true });
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-}
+/** Der PHP-Server - mit der Oberflaeche daneben, wie im Ernstfall. */
+const withPhp = (fn) => mitPhpServer({ mitPublic: true }, ({ base }) => fn(base));
 
 const postJson = async (base, pfad, rumpf) => {
   const antwort = await fetch(`${base}/api${pfad}`, {

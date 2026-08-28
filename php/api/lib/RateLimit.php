@@ -63,6 +63,18 @@ final class RateLimit
         return [(float) $parts[0], (float) $parts[1]];
     }
 
+    /**
+     * Laeuft nur ab und zu mit - wie das Aufraeumen der Raeume, und aus
+     * demselben Grund: Shared Hosting hat keine Cronjobs fuer uns.
+     */
+    public function sweepSometimes(int $chance, int $maxAgeSeconds = 7200): void
+    {
+        if (random_int(1, max(1, $chance)) !== 1) {
+            return;
+        }
+        $this->sweep($maxAgeSeconds);
+    }
+
     /** Alte Eimer wegräumen, damit das Verzeichnis nicht wächst. */
     public function sweep(int $maxAgeSeconds = 7200): void
     {

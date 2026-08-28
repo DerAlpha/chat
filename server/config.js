@@ -118,5 +118,3 @@ export const config = {
 
   logLevel: process.env.LOG_LEVEL || 'info',
 };
-
-export const durations = { MINUTE, HOUR, DAY };

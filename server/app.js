@@ -1,8 +1,10 @@
+import path from 'node:path';
 import express from 'express';
+import compression from 'compression';
 import { config } from './config.js';
 import { callSupport, iceServers } from './ice.js';
 import { appVersion } from './version.js';
-import { PAGE_SIZE, fetchMedia, searchGifs, verifyRef } from './gifs.js';
+import { fetchMedia, searchGifs, verifyRef } from './gifs.js';
 import { serverSecret } from './secrets.js';
 import { log } from './logger.js';
 import { BadRequest, BLOB_ID_RE, ROOM_ID_RE, safeEqual } from './store.js';
@@ -34,12 +36,18 @@ const MAX_OVERVIEW_ROOMS = 50;
 export function createApp(store, hub) {
   const app = express();
   app.disable('x-powered-by');
-  if (config.trustProxy) app.set('trust proxy', true);
+  // Genau eine Zwischenstation, nicht "alle". Mit `true` nimmt Express den
+  // LINKEN Eintrag aus X-Forwarded-For - und den schreibt der Absender selbst.
+  // Mit 1 nimmt es den, den der eigene Proxy angehaengt hat: die echte
+  // Adresse. Ohne das war jede Begrenzung nach IP mit einem Header umgangen.
+  if (config.trustProxy) app.set('trust proxy', 1);
   const base = config.basePath;
 
   const limits = {
     create: perHour(config.createRoomPerHour),
-    join: perHour(config.joinAttemptsPerHour),
+    // Derselbe Eimer wie beim Beitritt ueber die WebSocket: einen Platz zu
+    // ergattern ist dieselbe Handlung, gleich ueber welchen Weg.
+    join: hub.joinLimiter,
     upload: perHour(config.uploadsPerHour),
     gifs: perHour(config.gifSearchesPerHour),
     overview: perHour(config.overviewPerHour),
@@ -47,8 +55,26 @@ export function createApp(store, hub) {
   const sweeper = setInterval(() => {
     for (const limiter of Object.values(limits)) limiter.sweep();
   }, 10 * 60 * 1000);
+  // Haelt den Prozess nicht am Leben ...
   if (typeof sweeper.unref === 'function') sweeper.unref();
   app.locals.limits = limits;
+  // ... aber wer die App wegwirft, muss ihn trotzdem abstellen koennen. Eine
+  // Suite legt Dutzende Server an; jeder liesse sonst seinen Wecker und die
+  // ganzen Eimer daran haengen, bis der Prozess endet.
+  app.locals.stop = () => clearInterval(sweeper);
+
+  // Textdateien gehen gepackt hinaus. Ohne das waren es 337 KB fuer den
+  // ersten Aufruf, fast alles Quelltext und Kommentare - und die lassen sich
+  // auf ein knappes Viertel bringen. Bilder und Anhaenge sind schon gepackt;
+  // der Filter davor laesst sie in Ruhe.
+  app.use(compression({
+    filter: (req, res) => {
+      const typ = String(res.getHeader('Content-Type') ?? '');
+      if (/^(image|video|audio)\//.test(typ) && !typ.startsWith('image/svg')) return false;
+      if (typ.startsWith('application/octet-stream')) return false;
+      return compression.filter(req, res);
+    },
+  }));
 
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', CSP);
@@ -60,6 +86,10 @@ export function createApp(store, hub) {
     res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), display-capture=(), geolocation=(), payment=(), interest-cohort=()');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    // Nur ueber HTTPS, und nur fuer diesen Namen. Sonst naegelt der eigene
+    // Entwicklungsrechner sein http://127.0.0.1 auf HTTPS fest - das haelt
+    // ein Browser hartnaeckig, und niemand sucht den Fehler dort.
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     next();
   });
 
@@ -480,6 +510,14 @@ export function createApp(store, hub) {
       },
     }),
   );
+
+  // Browser fragen /favicon.ico im Wurzelverzeichnis, ohne die Seite gelesen
+  // zu haben. Ohne diese Zeile lief die Anfrage in die Auffangregel und
+  // bekam eine Umleitung auf HTML - eine 302 auf eine Bilddatei.
+  site.get('/favicon.ico', (req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    res.type('image/svg+xml').sendFile(path.join(config.publicDir, 'img', 'icon.svg'));
+  });
 
   // Unbekannte Unterpfade landen auf der Startseite. Wichtig: umleiten statt
   // index.html auszuliefern - die Seite laedt ihre Dateien relativ, und von
