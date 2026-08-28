@@ -400,3 +400,92 @@ test('Abbruch nach einem Fehlschlag lässt auch den offenen Chat stehen', async 
   await contextA.close();
   await contextB.close();
 });
+
+/**
+ * Am Rechner gibt es keine Finger: die Auskunft, wer eine Nachricht gelesen
+ * hat, waechst als Blase aus dem Auge heraus, sobald man darueberfaehrt.
+ */
+test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browser }) => {
+  const contextA = await browser.newContext({
+    viewport: { width: 1280, height: 860 },
+    locale: 'de-DE',
+    timezoneId: 'Europe/Berlin',
+  });
+  const contextB = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  // Eine Gruppe - nur dort gibt es das Auge.
+  await pageA.addInitScript((wert) => {
+    try {
+      const key = 'fc:prefs:v1';
+      const prefs = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...prefs, nick: wert }));
+    } catch { /* ohne Speicher fragt die App eben */ }
+  }, 'Anton');
+  await pageA.goto('./');
+  await pageA.getByRole('button', { name: /Gruppe erstellen/i }).click();
+  await pageA.locator('#sheet input[type="text"]').fill('Verein');
+  await pageA.locator('#group-size').fill('2');
+  await pageA.locator('#sheet').getByRole('button', { name: /^Anlegen$/ }).click();
+  await expect(pageA.locator('#screen-group')).toBeVisible({ timeout: 20_000 });
+  const codes = await pageA.locator('#group-codes .invite-row__code').allInnerTexts();
+  const basis = new URL(pageA.url());
+  await pageB.addInitScript((wert) => {
+    try {
+      const key = 'fc:prefs:v1';
+      const prefs = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...prefs, nick: wert }));
+    } catch { /* egal */ }
+  }, 'Mira');
+  await pageB.goto(`${basis.origin}${basis.pathname}#g:${encodeURIComponent(codes[0].trim())}`);
+  await expect(pageB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+
+  // Cem kommt dazu, sieht aber nicht hin - damit es auch etwas Zugestelltes gibt.
+  const contextC = await browser.newContext({ ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const pageC = await contextC.newPage();
+  await pageC.addInitScript((wert) => {
+    try {
+      const key = 'fc:prefs:v1';
+      const prefs = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...prefs, nick: wert }));
+    } catch { /* egal */ }
+  }, 'Cem');
+  await pageC.goto(`${basis.origin}${basis.pathname}#g:${encodeURIComponent(codes[1].trim())}`);
+  await expect(pageC.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+  await pageC.locator('#chat-back').click();
+  await expect(pageC.locator('#screen-start')).toBeVisible();
+
+  await pageA.locator('#btn-group-to-chat').click();
+  await sendText(pageA, 'Gelesen?');
+  await expect(pageB.locator('#messages .msg--in')).toContainText('Gelesen?', { timeout: 30_000 });
+
+  const auge = pageA.locator('#messages .msg--out .seen').last();
+  await expect(auge).toBeVisible({ timeout: 20_000 });
+  await expect(auge.locator('.seen__count')).toHaveText('1', { timeout: 30_000 });
+
+  // Ohne Maus darüber: keine Blase.
+  const blase = auge.locator('.seen__bubble');
+  await expect(blase).toBeHidden();
+
+  // Mit Maus darüber: da ist sie, mit den Namen und beiden Gruppen.
+  await auge.hover();
+  await expect(blase).toBeVisible({ timeout: 5000 });
+  await expect(blase).toContainText('Mira');
+  await expect(blase).toContainText(/Gelesen/);
+  await expect(blase).toContainText(/Zugestellt/);
+
+  // Und sie steht über dem Auge, nicht irgendwo.
+  const lage = await pageA.evaluate(() => {
+    const knopf = [...document.querySelectorAll('#messages .msg--out .seen')].pop();
+    const b = knopf.querySelector('.seen__bubble').getBoundingClientRect();
+    const a = knopf.getBoundingClientRect();
+    return { blaseUnten: Math.round(b.bottom), augeOben: Math.round(a.top), breit: Math.round(b.width) };
+  });
+  expect(lage.blaseUnten, 'die Blase steht nicht über dem Auge').toBeLessThanOrEqual(lage.augeOben);
+  expect(lage.breit).toBeGreaterThan(60);
+
+  await contextA.close();
+  await contextB.close();
+  await contextC.close();
+});

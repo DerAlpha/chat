@@ -1027,6 +1027,23 @@ function allRead(seq) {
   return liste.length > 0 && liste.every((member) => (member.readSeq ?? 0) >= seq);
 }
 
+/**
+ * Wer hat eine Nachricht schon gelesen - und wer noch nicht?
+ *
+ * Gelesen heisst: das Geraet hat gemeldet, bis hierher gelesen zu haben.
+ * Alles andere liegt bereit; ob es dort schon angekommen ist, weiss nur das
+ * andere Geraet. Genau so steht es auch in der Anzeige - eine Behauptung,
+ * die man nicht belegen kann, gehoert nicht in eine Lesebestaetigung.
+ */
+function seenSplit(seq) {
+  const gelesen = [];
+  const offen = [];
+  for (const member of others()) {
+    ((member.readSeq ?? 0) >= seq ? gelesen : offen).push(member);
+  }
+  return { gelesen, offen };
+}
+
 function insertEntry(entry) {
   app.messages.set(entry.id, entry);
   app.oldestSeq = Math.min(app.oldestSeq, entry.seq);
@@ -1708,6 +1725,11 @@ function buildMeta(entry, mine) {
     retry.type = 'button';
     retry.addEventListener('click', () => resend(entry));
     meta.appendChild(retry);
+  } else if (isGroup()) {
+    // In einer Gruppe sagt ein Haken zu wenig: bei acht Leuten ist "alle
+    // haben gelesen" selten und "jemand hat gelesen" nichtssagend. Also die
+    // Zahl - und wer dahintersteckt, auf Wunsch.
+    meta.appendChild(buildSeen(entry));
   } else if (allRead(entry.seq)) {
     // In einer Gruppe erst, wenn WIRKLICH alle gelesen haben. Alles andere
     // wäre eine Bestätigung, die man nicht bekommen hat.
@@ -1720,6 +1742,81 @@ function buildMeta(entry, mine) {
     meta.appendChild(icon('i-check'));
   }
   return meta;
+}
+
+/**
+ * Das Auge unter der eigenen Nachricht: wie viele haben sie gelesen.
+ *
+ * Antippen oeffnet die Liste; wer eine Maus hat, sieht sie schon beim
+ * Darueberfahren in einer Blase, die aus dem Auge herauswaechst.
+ */
+function buildSeen(entry) {
+  const { gelesen, offen } = seenSplit(entry.seq);
+  const knopf = make('button', 'seen');
+  knopf.type = 'button';
+  if (gelesen.length > 0) knopf.classList.add('is-read');
+  knopf.setAttribute('aria-label', t('seenCount', { n: gelesen.length, total: gelesen.length + offen.length }));
+
+  const auge = icon('i-eye');
+  auge.classList.add('seen__eye');
+  knopf.appendChild(auge);
+  knopf.appendChild(make('span', 'seen__count', String(gelesen.length)));
+  knopf.appendChild(seenBubble(gelesen, offen));
+
+  knopf.addEventListener('click', (event) => {
+    // Nicht das Nachrichtenmenue mitoeffnen.
+    event.stopPropagation();
+    openSeenSheet(entry);
+  });
+  return knopf;
+}
+
+/** Namen, aber nicht endlos: ab einer Handvoll wird gezaehlt. */
+function seenNames(liste, hoechstens = 5) {
+  const namen = liste.slice(0, hoechstens).map((member) => memberName(member));
+  if (liste.length > hoechstens) namen.push(t('seenMore', { n: liste.length - hoechstens }));
+  return namen.join(', ');
+}
+
+/** Die Blase am Rechner - dieselbe Auskunft, nur ohne Antippen. */
+function seenBubble(gelesen, offen) {
+  const blase = make('span', 'seen__bubble');
+  blase.setAttribute('role', 'tooltip');
+  const zeile = (klasse, titel, liste) => {
+    const teil = make('span', `seen__line ${klasse}`);
+    teil.appendChild(make('strong', null, `${titel}: `));
+    teil.appendChild(document.createTextNode(liste.length > 0 ? seenNames(liste) : t('seenNobody')));
+    return teil;
+  };
+  blase.appendChild(zeile('is-read', t('seenRead'), gelesen));
+  if (offen.length > 0) blase.appendChild(zeile('is-pending', t('seenPending'), offen));
+  return blase;
+}
+
+/** Die ausfuehrliche Liste - am Handy der Weg dorthin. */
+function openSeenSheet(entry) {
+  const { gelesen, offen } = seenSplit(entry.seq);
+  const liste = (mitglieder, klasse) => {
+    const block = make('div', `seen-list ${klasse}`);
+    for (const member of mitglieder) {
+      const zeile = make('div', 'seen-row');
+      zeile.appendChild(avatarNode(member.id, memberName(member), 'avatar--sm'));
+      zeile.appendChild(make('span', 'seen-row__name', memberName(member)));
+      block.appendChild(zeile);
+    }
+    if (mitglieder.length === 0) block.appendChild(make('p', 'sheet-note', t('seenNobody')));
+    return block;
+  };
+
+  openSheet(t('seenTitle'), [
+    make('p', 'sheet-note sheet-note--strong', `${t('seenRead')} (${gelesen.length})`),
+    liste(gelesen, 'is-read'),
+    ...(offen.length > 0 ? [
+      make('p', 'sheet-note sheet-note--strong', `${t('seenPending')} (${offen.length})`),
+      make('p', 'sheet-note', t('seenPendingHint')),
+      liste(offen, 'is-pending'),
+    ] : []),
+  ], { autofocus: false });
 }
 
 function buildImageNode(entry, media) {

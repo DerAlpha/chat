@@ -15,6 +15,30 @@ async function bildWaehlen(seite, oeffnen, { breite = 400, hoehe = 300 } = {}) {
   const [dialog] = await Promise.all([seite.waitForEvent('filechooser'), oeffnen()]);
   await dialog.setFiles({ name: 'foto.png', mimeType: 'image/png', buffer: makePng(breite, hoehe) });
   await expect(seite.locator('#crop-apply')).toBeVisible({ timeout: 15_000 });
+  await ruhigesFenster(seite);
+}
+
+/**
+ * Wartet, bis das Ausschnittfenster steht.
+ *
+ * Es misst sich selbst über zwei Bildaufbauten hinweg ein; wer vorher
+ * Zahlen abliest, rechnet mit einem Zwischenstand und vergleicht ihn
+ * hinterher mit dem endgültigen. Unter Last passiert genau das.
+ */
+async function ruhigesFenster(seite) {
+  const lesen = () => seite.evaluate(() => {
+    const fenster = document.querySelector('.crop');
+    const bild = document.querySelector('.crop__img');
+    return `${fenster.clientWidth}|${bild.style.width}|${bild.style.transform}`;
+  });
+  let vorher = await lesen();
+  for (let i = 0; i < 40; i += 1) {
+    await seite.waitForTimeout(100);
+    const jetzt = await lesen();
+    if (jetzt === vorher && !jetzt.startsWith('0|') && jetzt.includes('px')) return;
+    vorher = jetzt;
+  }
+  throw new Error(`Das Ausschnittfenster kommt nicht zur Ruhe: ${vorher}`);
 }
 
 /** Setzt das eigene Bild über den Knopf in der Fußzeile. */

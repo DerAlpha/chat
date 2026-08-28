@@ -61,6 +61,16 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Auf Wunsch alles über den eigenen Relaisdienst – dann sieht das Gegenüber
   die eigene IP-Adresse nicht
 
+**Wer hat es gelesen?**
+- Unter der eigenen Nachricht steht in Gruppen ein Auge mit einer Zahl: so
+  viele haben sie gelesen. Ein Haken sagt dort zu wenig – bei acht Leuten ist
+  „alle haben gelesen" selten und „jemand hat gelesen" nichtssagend
+- Antippen öffnet die Liste mit den Namen; am Rechner wächst sie schon beim
+  Darüberfahren als Blase aus dem Auge heraus
+- Getrennt und blasser stehen die, für die es nur bereitliegt. „Gelesen" heißt:
+  das andere Gerät hat es gemeldet. Alles andere wäre eine Bestätigung, die
+  niemand gegeben hat – und genau so steht es auch da
+
 **Gruppen**
 - Ein Code je Person, nicht einer für alle. Wer einen weitergibt, gibt genau
   einen Platz weiter – nicht die Gruppe
@@ -460,7 +470,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 118 Tests am Smartphone + 15 am Rechner
+npm run test:e2e          # 120 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -495,7 +505,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 133 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 136 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.

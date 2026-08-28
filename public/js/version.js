@@ -7,4 +7,4 @@
  * vergessen, ihn hochzuzählen, und niemand bleibt auf einer alten Fassung
  * sitzen, ohne es zu merken.
  */
-export const APP_VERSION = '957b5b909958';
+export const APP_VERSION = '9929220566f3';

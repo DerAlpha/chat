@@ -714,6 +714,77 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .bubble__meta .icon { width: 14px; height: 14px; stroke-width: 2.4; }
 .bubble__meta .is-read { color: #7fd1ff; }
+
+/* ------------------------------------------------- Wer hat es gelesen? ---
+   In einer Gruppe steht unter der eigenen Nachricht ein Auge mit einer Zahl:
+   so viele haben sie gelesen. Antippen oeffnet die Liste; wer eine Maus hat,
+   sieht sie schon beim Darueberfahren. */
+.seen {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 0 0 2px;
+  padding: 1px 3px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.seen:hover, .seen:focus-visible { background: rgba(255, 255, 255, .16); outline: none; }
+.seen__count { font-size: .72rem; font-variant-numeric: tabular-nums; }
+.seen.is-read { color: #7fd1ff; }
+
+/* Die Blase waechst aus dem Auge heraus - mit Spitze nach unten. Es gibt sie
+   nur dort, wo es auch einen Mauszeiger gibt: auf einem Telefon bliebe ein
+   :hover nach dem Antippen kleben. */
+.seen__bubble { display: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .seen:hover .seen__bubble,
+  .seen:focus-visible .seen__bubble {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    position: absolute;
+    right: -4px;
+    bottom: calc(100% + 9px);
+    z-index: 20;
+    width: max-content;
+    max-width: min(260px, 60vw);
+    padding: 8px 11px;
+    border-radius: 12px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    box-shadow: var(--shadow-lg);
+    font-size: .78rem;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    cursor: default;
+  }
+  .seen:hover .seen__bubble::after,
+  .seen:focus-visible .seen__bubble::after {
+    content: "";
+    position: absolute;
+    right: 10px;
+    top: 100%;
+    border: 6px solid transparent;
+    border-top-color: var(--bg-elevated);
+  }
+}
+
+/* Wer nur zugestellt bekommen hat, steht blasser da - getrennt von denen,
+   die wirklich hingesehen haben. */
+.seen__line.is-pending, .seen-list.is-pending { color: var(--text-muted); opacity: .72; }
+.seen__line.is-read strong { color: var(--accent); }
+
+.seen-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 6px; }
+.seen-row { display: flex; align-items: center; gap: 10px; padding: 5px 10px; }
+.seen-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg--in .bubble__meta .is-read { color: var(--accent); }
 
 .quote {
