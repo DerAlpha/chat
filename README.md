@@ -61,6 +61,26 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Auf Wunsch alles über den eigenen Relaisdienst – dann sieht das Gegenüber
   die eigene IP-Adresse nicht
 
+**Verdeckt senden**
+- Vor dem Abschicken lässt sich einstellen, dass eine Nachricht zugedeckt
+  ankommt. Beim Gegenüber steht dann eine Fläche; ein Antippen zeigt sie, das
+  nächste deckt sie wieder zu. Für Text genauso wie für Bilder, Sprach­nach­richten
+  und Dateien
+- Zugedeckt heißt: nicht im Bild. Der Inhalt wird nicht unscharf gezeichnet
+  und nicht dahintergelegt, sondern gar nicht erst gebaut – was nicht dasteht,
+  kann niemand im Vorbeigehen mitlesen und niemand aus einem Bildschirmfoto
+  zurückrechnen
+- Auch die Vorschauen bleiben zu: das Zitat einer Antwort, die Meldung des
+  Betriebssystems und die Ansage für den Screenreader zeigen die Fläche, nicht
+  den Text. Kopieren geht erst, wenn aufgedeckt ist
+- Der Schalter gilt für genau eine Nachricht und fällt danach zurück. Eine
+  Leiste über der Textzeile sagt, dass die nächste verdeckt hinausgeht –
+  andersherum schickte man unbemerkt tagelang Flächen statt Sätzen
+- Die Kennzeichnung reist im verschlüsselten Paket mit. Der Server sieht
+  nicht, welche Nachricht verdeckt ist
+- Aufgedeckt bleibt nur für diesen Besuch: wer den Chat verlässt und
+  wiederkommt, findet alles wieder zugedeckt
+
 **Wer hat es gelesen?**
 - Unter der eigenen Nachricht steht in Gruppen ein Auge mit einer Zahl: so
   viele haben sie gelesen. Ein Haken sagt dort zu wenig – bei acht Leuten ist
@@ -104,7 +124,7 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 
 **Profilbilder**
 - Ein Bild auswählen, quadratisch zuschneiden (schieben und zoomen), fertig –
-  es gilt in allen Chats
+  es gilt in allen Chats, in denen man es nicht ausdrücklich verbirgt
 - Herauszoomen geht bis weit über den Bildrand hinaus. Was dann frei bleibt,
   ist schwarz – im Ausschnittfenster genauso wie im fertigen Bild
 - Der Kreis im Ausschnitt ist das Bild: was außerhalb liegt, wird schwarz –
@@ -122,6 +142,25 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Gruppen haben ein eigenes Bild – setzen dürfen es nur Verwalter
 - Für die Liste auf der Startseite bleibt eine winzige Fassung auf dem Gerät;
   sie braucht keine Verbindung zu zwanzig Räumen
+
+**Wer das Bild sehen darf**
+- Das eigene Bild lässt sich für einen einzelnen Chat verbergen. Verbergen
+  heißt hier nicht „bitte nicht anzeigen": das Bild liegt in diesem Raum dann
+  gar nicht erst. Für die andere Person sieht es aus, als hätte man keins –
+  weil es dort nichts anderes gibt
+- Das gilt pro Chat, nicht pro Person. In einer Gruppe teilen alle denselben
+  Schlüssel; ein Bild, das die eine sieht und die andere nicht, ließe sich
+  dort nicht ablegen. Die Beschriftung sagt das auch so, statt ein Versprechen
+  zu geben, das die Verschlüsselung nicht hergibt
+- Umgekehrt lässt sich das Bild anderer ausblenden. Das bleibt auf dem Gerät:
+  es wird dann nicht mehr geholt, die entschlüsselte Kopie kommt weg, und auch
+  das Bildchen in der Liste auf der Startseite verschwindet. Die andere Seite
+  erfährt nichts davon
+- Beide Schalter überstehen das Schließen und erneute Betreten des Chats. Das
+  war der eigentliche Fehler: die Sitzung wurde beim Öffnen aus einer festen
+  Feldliste neu gebaut, und alles, was nicht darin stand, fiel weg – die
+  Sperre hielt genau eine Sitzung, danach lud die App das Bild von selbst
+  wieder hoch
 
 **Wo die Ansicht steht**
 - Ein Chat öffnet sich bei der neuesten Nachricht – mit einem Sprung, nicht
@@ -434,6 +473,12 @@ gleich mitnehmen.
 - In einer Gruppe kennt jedes Mitglied den Gruppenschlüssel. Wer einmal drin
   ist, kann alles mitlesen, was danach geschrieben wird – auch nachdem er
   gegangen ist. Es gibt keinen Rauswurf und keinen Schlüsselwechsel.
+- Ein Bild zu verbergen wirkt nur nach vorn und nur in diesem einen Chat: was
+  schon beim Gegenüber angekommen ist, holt niemand zurück. Ein zweites
+  eigenes Gerät hat seine eigene Einstellung und legt das Bild ohne eigene
+  Sperre wieder hin. Und Mitglieds-Kennungen gelten je Raum – hat man mit
+  derselben Person zusätzlich eine Gruppe, ist das ein anderer Chat mit
+  eigener Sperre.
 - Anrufe gibt es in Gruppen deshalb (noch) nicht: der Schlüssel für Ton und
   Bild hängt am Raumschlüssel, und der Aushandlungskanal geht an alle. Jedes
   Mitglied könnte damit ein fremdes Zweiergespräch im selben Raum mithören.
@@ -489,7 +534,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 124 Tests am Smartphone + 16 am Rechner
+npm run test:e2e          # 141 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -524,7 +569,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 140 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 157 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -552,6 +597,16 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Bei der Laufschrift wird nicht die Klasse geprüft, sondern die Bewegung:
   dieselbe Stelle, zwei Zeitpunkte, und dazwischen muss sich etwas getan
   haben.
+- Beim Verdeckten wird nicht die Klasse im DOM geprüft, sondern gesucht: der
+  Text darf nirgends im Dokument stehen, solange nicht getippt wurde. Ein Test
+  legt zur Gegenprobe den Inhalt hinter die Fläche – und wird rot.
+- Beim Verbergen wird nicht die Anzeige geprüft, sondern der Server: die
+  Gegenseite fragt mit ihrem eigenen, gültigen Token nach dem Bild und muss
+  404 bekommen. Eine leere Kopfzeile beweist nichts, wenn das Bild eine
+  Sekunde später wieder hochgeht – und genau das tat es, bis die Sitzung
+  ihre Felder behielt. Ein zweiter Test schneidet deshalb mit, dass nach dem
+  Verbergen kein einziges PUT mehr auf diese Adresse geht, auch nicht nach
+  Neuladen und erneutem Betreten.
 - Bei den Animationen wird gezählt, was sich bewegt: nach dem Öffnen eines
   Chats keine einzige Blase, bei einer eingehenden Nachricht genau eine – und
   nach der nächsten Lesebestätigung immer noch nicht der ganze Verlauf.

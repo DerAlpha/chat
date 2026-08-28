@@ -968,6 +968,71 @@ button, input, textarea { font: inherit; color: inherit; }
 .attachments:not([hidden]),
 .recorder:not([hidden]) { animation: auftauchen var(--dauer) var(--kurve); }
 
+/* -------------------------------------------------------- Verdeckt senden
+   Die Leiste ueber der Textzeile: die einzige Stelle, an der steht, dass die
+   naechste Nachricht verdeckt hinausgeht - und der Weg, es zurueckzunehmen.
+   Deshalb in der Farbe der Marke und nicht als graue Nebenbemerkung. */
+.spoiler-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px calc(var(--safe-right) + 10px) 6px calc(var(--safe-left) + 12px);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: .85rem;
+  border-top: 1px solid var(--border);
+}
+.spoiler-bar .icon { flex: none; color: var(--accent); }
+.spoiler-bar__text { flex: 1; min-width: 0; }
+.spoiler-bar:not([hidden]) { animation: auftauchen var(--dauer) var(--kurve); }
+
+/* ------------------------------------------------------- Verdeckte Blasen
+   Was verdeckt ist, steht nicht im Bild: die Flaeche hat keinen Inhalt
+   hinter sich, den man unscharf zeichnen und wieder scharf rechnen koennte.
+   Sie ist deshalb auch nicht dunkel wie ein Balken, sondern eine gestreifte
+   Flaeche - erkennbar als "hier fehlt etwas mit Absicht". */
+.bubble.is-spoiler { padding: 6px; }
+.spoiler {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px dashed color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, currentColor 8%, transparent) 0 8px,
+    transparent 8px 16px
+  );
+  color: inherit;
+  font-size: .9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve);
+}
+.spoiler:active { transform: scale(.99); }
+.spoiler .icon { flex: none; opacity: .8; }
+.spoiler__label { min-width: 0; }
+/* Der Weg zurueck sitzt in der Fusszeile der Blase, wo sonst die Uhrzeit
+   steht - klein, aber immer erreichbar, auch wenn die ganze Blase ein Bild
+   ist und jeder Klick darauf der Lupe gehoert. */
+.spoiler-again {
+  display: inline-grid;
+  place-items: center;
+  width: 22px; height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: .75;
+}
+.spoiler-again:hover { opacity: 1; }
+.spoiler-again .icon { width: 15px; height: 15px; }
+
 .reply-preview, .attachments, .recorder {
   display: flex;
   align-items: center;
@@ -1087,6 +1152,9 @@ button, input, textarea { font: inherit; color: inherit; }
 .sheet-note { padding: 4px 10px 8px; font-size: .87rem; color: var(--text-muted); }
 /* Der Satz, der die Zahlen nennt: keine Nebenbemerkung mehr. */
 .sheet-note--strong { color: var(--text); font-weight: 600; }
+/* Ein Vorbehalt, kein Hinweis: er muss auffallen, ohne zu schreien. */
+.sheet-note--warn { color: var(--text); }
+.sheet-note--warn::before { content: "\26A0\FE0E"; margin-right: 6px; color: var(--danger); }
 
 /* Der Knopf, der wirklich etwas zerstört. Solange er noch nicht darf, sieht
    man ihm das an - grau und ohne Zeigefinger, aber an seinem Platz, damit

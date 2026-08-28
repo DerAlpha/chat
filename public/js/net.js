@@ -11,6 +11,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Eine Frist fuer Anfragen, die in einer Warteschlange stehen.
+ *
+ * Ohne Grenze wartet ein fetch, bis das Betriebssystem aufgibt - das koennen
+ * Minuten sein, und alles dahinter waere so lange eingefroren. Bewusst nur
+ * dort, wo genau das droht: eine allgemeine Frist wuerde auf einem langsamen
+ * Server auch den Beitritt abbrechen, der eben laenger dauert.
+ */
+const FRIST = 20_000;
+
+const frist = () => (typeof AbortSignal?.timeout === 'function' ? { signal: AbortSignal.timeout(FRIST) } : {});
+
 async function request(path, options = {}) {
   let response;
   try {
@@ -164,6 +176,7 @@ export const putAvatar = (roomId, token, owner, bytes) =>
     method: 'PUT',
     headers: { 'content-type': 'application/octet-stream', 'x-room-token': token },
     body: bytes,
+    ...frist(),
   });
 
 /** Ein Profilbild wieder wegnehmen. */
@@ -171,6 +184,7 @@ export const deleteAvatar = (roomId, token, owner) =>
   request(appPath(`api/rooms/${encodeURIComponent(roomId)}/avatar/${encodeURIComponent(owner)}`), {
     method: 'DELETE',
     headers: { 'x-room-token': token },
+    ...frist(),
   });
 
 /**

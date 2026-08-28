@@ -75,6 +75,14 @@ const app = {
   pending: new Map(),
   attachments: [],
   replyTo: null,
+  /**
+   * Geht die naechste Nachricht verdeckt hinaus?
+   *
+   * Gilt fuer genau eine und faellt danach zurueck. Andersherum waere es die
+   * gefaehrlichere Voreinstellung - wer es vergisst, schickt tagelang
+   * Flaechen statt Saetzen.
+   */
+  sendHidden: false,
   recorder: null,
   objectUrls: new Set(),
   atBottom: true,
@@ -430,14 +438,21 @@ async function enterGroup(code, { quiet = false } = {}) {
       return true;
     }
 
+    // Wie beim Zweiergespraech: den gespeicherten Eintrag als Grundlage
+    // nehmen, damit nichts still verlorengeht, was dort schon steht.
     const bekannt = getSession(platz.roomId);
     const session = saveSession({
+      ...(bekannt ?? {}),
       roomId: platz.roomId,
       code: '',
       kind: 'group',
       key: toBase64(inhalt.key),
       token: platz.you?.token ?? bekannt?.token ?? null,
       memberId: platz.you?.id ?? bekannt?.memberId ?? null,
+      // Wer ueber einen neuen Code hereinkommt, ist ein neues Mitglied - unter
+      // der neuen Kennung liegt kein Bild. Die alte Marke wuerde das Hochladen
+      // kurzschliessen, und das Bild kaeme nie wieder in den Raum.
+      avatarSig: (platz.you?.id && platz.you.id !== bekannt?.memberId) ? null : (bekannt?.avatarSig ?? null),
       capacity: platz.capacity ?? bekannt?.capacity ?? 0,
       codes: [],
       nick: bekannt?.nick ?? app.prefs.nick ?? '',
@@ -477,7 +492,9 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       ({ roomId, keyRaw } = await deriveSecrets(code));
     }
     const known = knownSession ?? getSession(roomId);
-    const token = deviceToken ?? known?.token ?? null;
+    // Der Schnappschuss aus der Liste kann aelter sein als der Speicher: das
+    // Token, das seither dazukam, faellt sonst weg und der Raum gilt als voll.
+    const token = deviceToken ?? known?.token ?? getSession(roomId)?.token ?? null;
 
     let status;
     try {
@@ -499,22 +516,33 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       return;
     }
 
+    // Auf dem Gespeicherten aufbauen, nicht neu aufzaehlen. Eine feste Liste
+    // vergisst still jedes Feld, das spaeter dazukommt - und saveSession
+    // ersetzt den Eintrag ganz, es gibt kein Zusammenfuehren. So gingen beim
+    // blossen Oeffnen aus der Liste die Sperren fuer Profilbilder verloren,
+    // und das Bild lag beim naechsten Betreten wieder im Raum.
+    //
+    // `known` ist der Schnappschuss, den die Chatliste in ihren Klick
+    // eingeschlossen hat - er kann alt sein. Fuer alles, was wirklich
+    // aufbewahrt wird, gilt der frische Stand.
+    const stand = getSession(roomId) ?? {};
     const session = saveSession({
+      ...stand,
       roomId,
       code: formatCode(code),
       key: toBase64(keyRaw),
       token,
-      memberId: known?.memberId ?? null,
-      nick: known?.nick ?? app.prefs.nick ?? '',
-      peerNick: known?.peerNick ?? '',
+      memberId: known?.memberId ?? stand.memberId ?? null,
+      nick: known?.nick ?? stand.nick ?? app.prefs.nick ?? '',
+      peerNick: known?.peerNick ?? stand.peerNick ?? '',
       // Muss mitgenommen werden: sonst wäre die eigene Bezeichnung jedes Mal
       // weg, wenn man den Chat wieder betritt.
-      label: known?.label ?? '',
-      createdAt: known?.createdAt ?? Date.now(),
+      label: known?.label ?? stand.label ?? '',
+      createdAt: known?.createdAt ?? stand.createdAt ?? Date.now(),
       lastActivity: Date.now(),
       // Muss mit: sonst gaelte nach jedem Betreten wieder alles als ungelesen.
-      readSeq: known?.readSeq ?? 0,
-      lastMessageAt: known?.lastMessageAt ?? 0,
+      readSeq: known?.readSeq ?? stand.readSeq ?? 0,
+      lastMessageAt: known?.lastMessageAt ?? stand.lastMessageAt ?? 0,
       typing: false,
       unread: 0,
     });
@@ -617,6 +645,9 @@ function teardownChat() {
   app.myRole = 'member';
   typingNode = null;
   schonGezeigt.clear();
+  aufgedeckt.clear();
+  app.sendHidden = false;
+  renderSpoilerBar();
   stopKeepAtBottom();
   clearTimeout(app.typingTimer);
   for (const member of app.members.values()) clearTimeout(member.typingTimer);
@@ -842,6 +873,7 @@ async function onWelcome(frame) {
     }
   }
   app.myRole = findMember(frame.members, frame.you.id).role === 'admin' ? 'admin' : 'member';
+  entrumpleAusgeblendete();
   // Und gleich merken. Ohne das war der Name nur so lange bekannt, wie der
   // Chat offen stand - in der Übersicht stand danach wieder "Gegenüber",
   // bei jedem Chat, und keiner liess sich vom anderen unterscheiden. In einer
@@ -1247,12 +1279,13 @@ const LIST_AVATAR_EDGE = 64;
  */
 async function ensureAvatar(owner, ver) {
   if (!app.session?.token || !app.key) return null;
-  if (!ver) {
-    const alt = app.avatars.get(owner);
-    if (alt) {
-      URL.revokeObjectURL(alt.url);
-      app.avatars.delete(owner);
-    }
+  // Ausgeblendet oder gar nicht da: nicht holen und nichts behalten. Diese
+  // eine Stelle deckt alle Wege ab, auf denen ein Bild hereinkommt - das
+  // Betreten des Raums genauso wie die Meldung "hat sein Bild geaendert".
+  // Sonst holte ein ausgeblendetes Bild sich beim naechsten Wechsel selbst
+  // zurueck.
+  if (!ver || bildVersteckt(owner)) {
+    vergissBild(owner);
     return null;
   }
   const bekannt = app.avatars.get(owner);
@@ -1261,6 +1294,10 @@ async function ensureAvatar(owner, ver) {
     const sealed = await fetchAvatar(app.session.roomId, app.session.token, owner, ver);
     if (!sealed) return null;
     const bytes = await decryptBytes(app.key, sealed);
+    // Noch einmal fragen: zwischen Anfrage und Antwort liegen Sekunden, und
+    // in denen kann der Knopf gedrueckt worden sein. Sonst legt der laufende
+    // Abruf die entschluesselte Kopie danach doch wieder ab.
+    if (bildVersteckt(owner)) return null;
     const url = URL.createObjectURL(new Blob([bytes], { type: 'image/*' }));
     if (bekannt) URL.revokeObjectURL(bekannt.url);
     app.avatars.set(owner, { ver, url, bytes });
@@ -1271,19 +1308,66 @@ async function ensureAvatar(owner, ver) {
   }
 }
 
-/** Alle Bilder dieses Raums holen und danach einmal neu zeichnen. */
+/**
+ * Wirft aus der Ausblendliste, was es hier nicht mehr gibt.
+ *
+ * Mitglieds-Kennungen gelten je Raum und werden bei jedem Beitritt neu
+ * vergeben. Wer eine Gruppe verlaesst und spaeter ueber einen neuen Code
+ * zurueckkommt, ist eine andere Kennung - die alte bliebe sonst fuer immer
+ * in der Liste stehen.
+ */
+function entrumpleAusgeblendete() {
+  const liste = app.session?.hiddenAvatars ?? [];
+  if (liste.length === 0 || app.members.size === 0) return;
+  const bleibt = liste.filter((owner) => owner === 'group' || app.members.has(owner));
+  if (bleibt.length === liste.length) return;
+  const patch = { hiddenAvatars: bleibt };
+  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+}
+
+/**
+ * Alle Bilder dieses Raums holen und danach einmal neu zeichnen.
+ *
+ * Wichtig ist der Fall, in dem es NICHTS zu holen gibt: genau dann hat jemand
+ * sein Bild weggenommen, waehrend man nicht verbunden war. Die Live-Meldung
+ * dazu hat man verpasst, und niemand spielt sie nach. Wer hier vorzeitig
+ * aussteigt, laesst das Bildchen auf der Startseite tagelang stehen.
+ */
 async function loadAvatars() {
-  const wer = [...app.members.values()].filter((member) => member.avatarVer).map((member) => [member.id, member.avatarVer]);
+  const raum = app.session?.roomId;
+  const wer = [...app.members.values()]
+    .filter((member) => member.avatarVer)
+    .map((member) => [member.id, member.avatarVer]);
   if (app.groupAvatarVer) wer.push(['group', app.groupAvatarVer]);
-  if (wer.length === 0) return;
-  await Promise.all(wer.map(([owner, ver]) => ensureAvatar(owner, ver)));
-  rememberChatAvatar();
+  if (wer.length > 0) await Promise.all(wer.map(([owner, ver]) => ensureAvatar(owner, ver)));
+  if (app.session?.roomId !== raum) return;
+  rememberChatAvatar(raum);
   updatePeerStatus();
   redrawAll();
 }
 
-/** Die Adresse des Bildes von jemandem - oder null. */
-const avatarUrl = (owner) => app.avatars.get(owner)?.url ?? null;
+/**
+ * Wessen Bild man in diesem Chat nicht sehen will.
+ *
+ * Eine Entscheidung ueber die eigene Anzeige, kein Schutz vor dem Server: das
+ * Bild liegt weiter in diesem Raum, und die Person merkt nichts davon. Auf
+ * diesem Geraet ist es dagegen wirklich weg - es wird nicht mehr geholt, die
+ * entschluesselte Kopie kommt weg, und das Bildchen der Uebersicht auch. Wer
+ * sein EIGENES Bild vor jemandem verbergen will, braucht den anderen Weg:
+ * dann liegt es dort gar nicht erst.
+ */
+const bildVersteckt = (owner) => Boolean(owner) && (app.session?.hiddenAvatars ?? []).includes(owner);
+
+/**
+ * Die Adresse des Bildes von jemandem - oder null.
+ *
+ * Die Pruefung hier ist die zweite Sperre, nicht die erste: geholt wird ein
+ * ausgeblendetes Bild schon in ensureAvatar() nicht. Sie steht trotzdem da,
+ * weil sie den Satz "ausgeblendet heisst nicht zu sehen" wahr macht,
+ * unabhaengig davon, was gerade im Zwischenspeicher liegt - und das ist
+ * billiger als die Zusicherung an jeder Anzeigestelle einzeln zu pruefen.
+ */
+const avatarUrl = (owner) => (bildVersteckt(owner) ? null : app.avatars.get(owner)?.url ?? null);
 
 /** Welches Bild steht fuer diesen Chat? In einer Gruppe ihres, sonst das des Gegenuebers. */
 function chatAvatarOwner() {
@@ -1331,25 +1415,75 @@ function fillAvatar(knoten, owner, name) {
  * Legt eine winzige Fassung des Chatbildes ins Geraet - fuer die Liste auf
  * der Startseite, die keine Verbindung zu diesem Raum hat.
  */
-function rememberChatAvatar() {
-  if (!app.session) return;
+function rememberChatAvatar(erwartet = app.session?.roomId) {
+  // Wer inzwischen in einem anderen Chat steht, hat hier nichts mehr
+  // aufzuraeumen: das Bildchen dieses anderen Chats gehoert ihm nicht.
+  // Die Aufrufer starten teils vor einem Abruf, der Sekunden dauern kann.
+  if (!app.session || app.session.roomId !== erwartet) return;
   const owner = chatAvatarOwner();
   const eintrag = owner ? app.avatars.get(owner) : null;
+  // Ausgeblendet, oder es gibt dort gar kein Bild: dann muss auch das
+  // Bildchen der Uebersicht weg - sonst zeigt ausgerechnet die Startseite
+  // weiter, was es im Chat nicht mehr gibt.
+  //
+  // "Gibt es dort kein Bild" entscheidet die Fassung, nicht der
+  // Zwischenspeicher. Ein Abruf kann fehlschlagen - ein Serverfehler, ein
+  // abgebrochenes Netz -, und daraus zu schliessen, das Bild sei weg, hiesse
+  // die Uebersicht wegen einer Stoerung leerzuraeumen.
+  if (bildVersteckt(owner) || !hatBildFassung(owner)) {
+    vergissListenbild();
+    return;
+  }
   if (!eintrag?.bytes) return;
-  // Den Raum jetzt festhalten: das Verkleinern dauert, und wer inzwischen
-  // in einen anderen Chat gewechselt ist, bekaeme dort sonst dieses Bild
-  // in die Liste geschrieben.
+  // Den Raum und den Besitzer jetzt festhalten: das Verkleinern dauert
+  // mehrere Bildaufbauten, und wer inzwischen in einen anderen Chat
+  // gewechselt ist, bekaeme dort sonst dieses Bild in die Liste geschrieben.
   const roomId = app.session.roomId;
   shrinkToDataUrl(eintrag.bytes).then((klein) => {
     if (!klein) return;
+    const stand = getSession(roomId);
+    if (!stand) return;
+    // In der Zwischenzeit ausgeblendet? Dann nicht doch noch hinschreiben.
+    // Sonst gewinnt das haengende Verkleinern gegen den Knopf, und das
+    // ausgeblendete Gesicht stuende dauerhaft auf der Startseite.
+    if ((stand.hiddenAvatars ?? []).includes(owner)) return;
     // Nichts schreiben, wenn sich nichts geaendert hat: jeder Schreibvorgang
     // legt die ganze Chatliste neu ab.
-    if (getSession(roomId)?.listAvatar === klein) return;
+    if (stand.listAvatar === klein) return;
     const gemerkt = patchSession(roomId, { listAvatar: klein });
     if (!gemerkt) return;
     if (app.session?.roomId === roomId) app.session = gemerkt;
     renderChatList();
   }).catch(() => { /* ohne Bildchen eben mit Buchstabe */ });
+}
+
+/** Sagt der Server, dass es fuer diesen Besitzer ueberhaupt ein Bild gibt? */
+function hatBildFassung(owner) {
+  if (!owner) return false;
+  if (owner === 'group') return Boolean(app.groupAvatarVer);
+  return Boolean(app.members.get(owner)?.avatarVer);
+}
+
+/**
+ * Nimmt das Bildchen dieses Chats aus der Uebersicht.
+ *
+ * Gebraucht an zwei Stellen: wenn das Gegenueber sein Bild wegnimmt, und
+ * wenn man es selbst ausblendet. Ohne das zeigte die Startseite noch
+ * tagelang, was es im Chat nicht mehr zu sehen gibt.
+ */
+function vergissListenbild() {
+  if (!app.session?.listAvatar) return;
+  const gemerkt = patchSession(app.session.roomId, { listAvatar: null });
+  if (gemerkt) app.session = gemerkt;
+  renderChatList();
+}
+
+/** Die entschluesselte Kopie eines Bildes wegwerfen. */
+function vergissBild(owner) {
+  const alt = app.avatars.get(owner);
+  if (!alt) return;
+  URL.revokeObjectURL(alt.url);
+  app.avatars.delete(owner);
 }
 
 /** Verkleinert Bildbytes zu einer kleinen Data-URL. */
@@ -1369,6 +1503,30 @@ async function shrinkToDataUrl(bytes) {
 }
 
 /**
+ * Ist das eigene Bild in diesem Chat verborgen?
+ *
+ * Das ist die ernstgemeinte Haelfte des Verbergens: verborgen heisst, dass
+ * das Bild in diesem Raum gar nicht erst liegt. Das Gegenueber sieht den
+ * Anfangsbuchstaben, weil es nichts anderes gibt - nicht, weil es gebeten
+ * wurde, wegzusehen.
+ */
+const meinBildVerborgen = (session = app.session) => session?.hideMyAvatar === true;
+
+/**
+ * Bilder gehen der Reihe nach hoch und wieder weg.
+ *
+ * Hinlegen und Wegnehmen sind zwei Anfragen an denselben Ort. Laufen sie
+ * gleichzeitig - weil jemand den Schalter umlegt, waehrend das Betreten des
+ * Raums noch hochlaedt -, entscheidet der Zufall, was am Ende dort liegt.
+ * Und der Zufall darf hier nicht entscheiden.
+ */
+let bildWarteschlange = Promise.resolve();
+const nacheinander = (aufgabe) => {
+  bildWarteschlange = bildWarteschlange.then(aufgabe, aufgabe);
+  return bildWarteschlange;
+};
+
+/**
  * Schickt das eigene Bild in diesen Raum - aber nur, wenn es dort noch nicht
  * (oder in einer aelteren Fassung) liegt.
  *
@@ -1376,20 +1534,82 @@ async function shrinkToDataUrl(bytes) {
  * jeden Raum muss es trotzdem einzeln: es wird mit dem Schluessel DIESES
  * Raums verschluesselt, und niemand sonst soll es aufmachen koennen.
  */
-async function publishMyAvatar({ force = false } = {}) {
+/**
+ * Welcher Raum jetzt gemeint ist.
+ *
+ * Alles, was in die Warteschlange geht, bekommt das mit. Zwischen Einreihen
+ * und Ausfuehren kann jemand den Chat gewechselt haben, und eine Aufgabe,
+ * die erst beim Ausfuehren nachsieht, wo sie steht, raeumt dann im falschen
+ * Raum auf. Genau so verschwand ein Bild aus einem Chat, in dem niemand
+ * etwas verborgen hatte.
+ */
+const jetzigerRaum = () => ({
+  roomId: app.session?.roomId ?? null,
+  token: app.session?.token ?? null,
+  wer: app.me?.id ?? null,
+});
+
+function publishMyAvatar({ force = false } = {}) {
+  const ziel = jetzigerRaum();
+  const verborgen = meinBildVerborgen();
+  const liegtDort = Boolean(app.me?.avatarVer || app.session?.avatarSig);
+  return nacheinander(() => bildHochladen(ziel, { force, verborgen, liegtDort }));
+}
+
+/** @returns {Promise<boolean>} ob danach wirklich ein Bild im Raum liegt */
+async function bildHochladen(ziel, { force, verborgen, liegtDort }) {
+  if (!ziel.roomId || !ziel.token || !ziel.wer) return false;
+  // Dort verborgen: nicht hochladen - und wegnehmen, falls doch etwas
+  // daliegt. Das kann sein, weil die Sperre ohne Verbindung gesetzt wurde
+  // oder weil ein zweites eigenes Geraet das Bild hingelegt hat.
+  if (verborgen) {
+    if (liegtDort) await bildWegnehmen(ziel);
+    return false;
+  }
   const roh = app.prefs?.avatar;
-  if (!app.session?.token || !app.key) return;
-  if (!roh) return;
+  if (!roh) return false;
   const marke = app.prefs.avatarSig ?? '';
-  if (!force && app.session.avatarSig === marke) return;
+  if (!force && getSession(ziel.roomId)?.avatarSig === marke) return true;
+  // Verschluesselt wird mit dem Schluessel DIESES Raums, und den gibt es nur,
+  // solange man darin steht. Wer inzwischen woanders ist, laesst es: beim
+  // Betreten wird ohnehin wieder hochgeladen.
+  if (app.session?.roomId !== ziel.roomId || !app.key) return false;
+  const { roomId, token, wer } = ziel;
   try {
     const bytes = fromBase64(roh.slice(roh.indexOf(',') + 1));
     const sealed = await encryptBytes(app.key, bytes);
-    await putAvatar(app.session.roomId, app.session.token, app.me.id, sealed);
+    await putAvatar(roomId, token, wer, sealed);
     const patch = { avatarSig: marke };
-    app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+    const gemerkt = patchSession(roomId, patch);
+    if (app.session?.roomId === roomId) app.session = gemerkt ?? { ...app.session, ...patch };
+    return true;
   } catch {
     // Beim naechsten Betreten wieder - ein Bild ist kein Grund fuer eine Fehlermeldung.
+    return false;
+  }
+}
+
+/**
+ * Das eigene Bild aus diesem einen Raum wegnehmen.
+ *
+ * Nicht zu verwechseln mit removeMyAvatar(): dort wird das Bild ueberall
+ * weggenommen und auch aus den Einstellungen. Hier bleibt es bestehen und
+ * gilt in allen anderen Chats weiter - nur in diesem einen liegt es nicht.
+ */
+async function bildWegnehmen(ziel = jetzigerRaum()) {
+  const { roomId, token, wer } = ziel;
+  if (!roomId || !token || !wer) return false;
+  try {
+    await deleteAvatar(roomId, token, wer);
+    if (app.me?.id === wer) app.me.avatarVer = null;
+    const patch = { avatarSig: null };
+    const gemerkt = patchSession(roomId, patch);
+    if (app.session?.roomId === roomId) app.session = gemerkt ?? { ...app.session, ...patch };
+    return true;
+  } catch {
+    // Ein Raum, der gerade nicht erreichbar ist, bekommt es beim naechsten
+    // Betreten mit: publishMyAvatar() raeumt dort dann auf.
+    return false;
   }
 }
 
@@ -1403,15 +1623,12 @@ function onAvatarChanged(frame) {
   if (owner === app.me?.id) return;
   if (owner === 'group') app.groupAvatarVer = ver;
   else memberOf(owner).avatarVer = ver;
-  // Verschwindet das Bild dieses Chats, muss auch das Bildchen in der Liste
-  // weg - sonst zeigt die Startseite noch tagelang, was es nicht mehr gibt.
-  if (!ver && owner === chatAvatarOwner() && app.session) {
-    const gemerkt = patchSession(app.session.roomId, { listAvatar: null });
-    if (gemerkt) app.session = gemerkt;
-    renderChatList();
-  }
+  // Verschwindet das Bild dieses Chats, muss auch das Bildchen in der Liste weg.
+  if (!ver && owner === chatAvatarOwner()) vergissListenbild();
+  const raum = app.session?.roomId;
   void ensureAvatar(owner, ver).then(() => {
-    rememberChatAvatar();
+    if (app.session?.roomId !== raum) return;
+    rememberChatAvatar(raum);
     updatePeerStatus();
     redrawAll();
   });
@@ -1658,6 +1875,79 @@ function markiereAlsGezeigt() {
   for (const id of app.order) schonGezeigt.add(id);
 }
 
+// ===========================================================================
+// Verborgene Nachrichten
+//
+// Der Absender entscheidet vor dem Abschicken, dass eine Nachricht verdeckt
+// ankommen soll. Beim Empfaenger steht dann eine Flaeche statt des Inhalts;
+// ein Antippen deckt auf, das naechste deckt wieder zu.
+//
+// Verdeckt heisst hier: nicht im Bild. Der Inhalt wird nicht unscharf
+// gezeichnet und nicht dahintergelegt, sondern gar nicht erst gebaut - was
+// nicht dasteht, kann auch niemand im Vorbeigehen mitlesen oder aus einem
+// Bildschirmfoto herausrechnen.
+//
+// Die Kennzeichnung reist im verschluesselten Paket mit. Der Server sieht
+// nicht, welche Nachricht verdeckt ist - fuer ihn ist alles derselbe
+// Zahlensalat.
+// ===========================================================================
+
+/**
+ * Welche Nachrichten gerade aufgedeckt sind.
+ *
+ * Nur fuer diesen Besuch. Wer den Chat verlaesst und wiederkommt, findet
+ * alles wieder zugedeckt vor - sonst waere das Verbergen eine einmalige
+ * Huerde und keine Eigenschaft der Nachricht.
+ */
+const aufgedeckt = new Set();
+
+/** Traegt diese Nachricht die Kennzeichnung "verdeckt"? */
+const istVerdeckt = (entry) => entry?.payload?.hidden === true && !entry.deleted;
+
+/** Und ist sie es gerade auch auf dem Bildschirm? */
+const zeigtDecke = (entry) => istVerdeckt(entry) && !aufgedeckt.has(entry.id);
+
+/** Auf- und wieder zudecken. */
+function toggleReveal(entry) {
+  if (!istVerdeckt(entry)) return;
+  if (aufgedeckt.has(entry.id)) aufgedeckt.delete(entry.id);
+  else aufgedeckt.add(entry.id);
+  redrawAll();
+}
+
+/**
+ * Die Decke: eine Flaeche, hinter der nichts liegt.
+ *
+ * Sie sagt nicht, was sie verdeckt - weder "Bild" noch die ersten Worte.
+ * Sonst waere die Haelfte schon verraten, und der Absender hat sich anders
+ * entschieden.
+ */
+function buildHiddenNode(entry) {
+  const knopf = make('button', 'spoiler');
+  knopf.type = 'button';
+  knopf.appendChild(icon('i-eye-off'));
+  knopf.appendChild(make('span', 'spoiler__label', t('spoilerCovered')));
+  knopf.setAttribute('aria-label', t('spoilerReveal'));
+  knopf.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleReveal(entry);
+  });
+  return knopf;
+}
+
+/** Der kleine Knopf, der eine aufgedeckte Nachricht wieder zudeckt. */
+function buildCoverAgain(entry) {
+  const knopf = make('button', 'spoiler-again');
+  knopf.type = 'button';
+  knopf.appendChild(icon('i-eye'));
+  knopf.setAttribute('aria-label', t('spoilerCoverAgain'));
+  knopf.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleReveal(entry);
+  });
+  return knopf;
+}
+
 function buildMessageNode(entry, sameSender) {
   const mine = isMine(entry);
   const wrapper = make('div', `msg ${mine ? 'msg--out' : 'msg--in'}${sameSender ? ' msg--same' : ''}`);
@@ -1682,7 +1972,23 @@ function buildMessageNode(entry, sameSender) {
   } else if (!payload) {
     bubble.classList.add('is-deleted');
     bubble.appendChild(make('span', 'bubble__text', t('undecryptable')));
+  } else if (zeigtDecke(entry)) {
+    // Auch das Zitat bleibt drunter: es gehoert zur Nachricht, und wer die
+    // Antwort verdeckt, hat nicht die Frage freigegeben.
+    bubble.classList.add('is-spoiler');
+    bubble.appendChild(buildHiddenNode(entry));
   } else {
+    if (istVerdeckt(entry)) {
+      bubble.classList.add('is-spoiler', 'is-revealed');
+      // Ein Klick auf die Blase deckt wieder zu - aber nicht, wenn er einem
+      // Link, einem Bild oder einem Knopf galt, und nicht, waehrend jemand
+      // Text markiert. Sonst verschwaende das Zudecken jede Auswahl.
+      bubble.addEventListener('click', (event) => {
+        if (event.target.closest('a, button, img, audio, video, .image-wrap, .voice')) return;
+        if (!(window.getSelection()?.isCollapsed ?? true)) return;
+        toggleReveal(entry);
+      });
+    }
     if (payload.reply) bubble.appendChild(buildQuote(payload.reply));
     const media = payload.media;
     if (payload.kind === 'image' && entry.att[0]) {
@@ -1744,6 +2050,10 @@ function buildQuote(reply) {
 
 function buildMeta(entry, mine) {
   const meta = make('div', 'bubble__meta');
+  // Bei einer aufgedeckten Nachricht steht hier der Weg zurueck. Er muss
+  // sein: bei einem Bild ist die ganze Blase das Bild, ein Klick darauf
+  // gehoert der Lupe, und ohne diesen Knopf bekaeme man sie nie wieder zu.
+  if (istVerdeckt(entry) && aufgedeckt.has(entry.id)) meta.appendChild(buildCoverAgain(entry));
   if (entry.editedAt) meta.appendChild(make('span', null, t('edited')));
   meta.appendChild(make('span', null, formatClock(entry.ts)));
   if (!mine) return meta;
@@ -2319,8 +2629,15 @@ async function sendMessage() {
   app.replyTo = null;
   renderReplyPreview();
 
+  // Den Schalter jetzt ablesen und gleich zuruecksetzen: das Hochladen der
+  // Anhaenge dauert, und wer inzwischen weiterschreibt, soll nicht
+  // versehentlich noch eine verdeckte Nachricht abschicken.
+  const verdeckt = app.sendHidden;
+  app.sendHidden = false;
+  renderSpoilerBar();
+
   if (attachments.length === 0) {
-    await deliver({ v: 1, kind: 'text', text, reply }, []);
+    await deliver({ v: 1, kind: 'text', text, reply, ...(verdeckt ? { hidden: true } : {}) }, []);
   } else {
     // Erster Anhang bekommt den Text als Bildunterschrift, die weiteren gehen einzeln raus.
     for (let i = 0; i < attachments.length; i += 1) {
@@ -2332,6 +2649,9 @@ async function sendMessage() {
         text: i === 0 ? text : '',
         reply: i === 0 ? reply : null,
         media: item.media,
+        // Jeder Anhang einzeln: sonst laege der zweite offen da, waehrend
+        // der erste noch zugedeckt ist.
+        ...(verdeckt ? { hidden: true } : {}),
       }, [item.blobId]);
     }
     // Per Identitaet, nicht per Merkmal: waehrend des Sendens kann ein neuer
@@ -2397,6 +2717,11 @@ const previewOf = (entry) => {
   if (entry.deleted) return t('messageDeleted');
   const payload = entry.payload;
   if (!payload) return t('undecryptable');
+  // Eine verdeckte Nachricht bleibt auch in der Vorschau verdeckt. Sonst
+  // stuende sie im Zitat einer Antwort, in der Meldung des Betriebssystems
+  // und in der Ansage fuer den Screenreader - dreimal offen, und niemand
+  // haette getippt.
+  if (payload.hidden === true) return t('spoilerCovered');
   if (payload.text) return payload.text;
   if (payload.kind === 'image') return `🖼 ${t('image')}`;
   if (payload.kind === 'audio') return `🎤 ${t('voiceMessage')}`;
@@ -3050,7 +3375,32 @@ function openAttachSheet() {
       hint: t('searchGifHint'),
       onClick: openGifPicker,
     }] : []),
+    {
+      icon: app.sendHidden ? 'i-eye-off' : 'i-eye',
+      label: t('sendHidden'),
+      hint: t('sendHiddenHint'),
+      value: app.sendHidden ? t('switchOn') : t('switchOff'),
+      onClick: toggleSendHidden,
+    },
   ]);
+}
+
+/**
+ * Die naechste Nachricht verdeckt schicken - oder eben doch nicht.
+ *
+ * Der Schalter gilt fuer eine Nachricht und faellt danach von selbst zurueck.
+ * Andersherum waere es die gefaehrlichere Voreinstellung: wer einmal
+ * umgelegt hat und es vergisst, schickt tagelang Flaechen statt Saetzen.
+ */
+function toggleSendHidden() {
+  app.sendHidden = !app.sendHidden;
+  renderSpoilerBar();
+}
+
+/** Die Leiste ueber der Textzeile zeigt, was gleich hinausgeht. */
+function renderSpoilerBar() {
+  const leiste = el('spoiler-bar');
+  if (leiste) leiste.hidden = !app.sendHidden;
 }
 
 /**
@@ -3159,7 +3509,10 @@ function openMessageMenu(entry) {
     el('message-input').focus();
   } });
 
-  if (entry.payload?.text) {
+  // Kopieren erst, wenn aufgedeckt ist: sonst nimmt man aus der Zwischenablage
+  // mit, was man nicht angesehen hat - und der Absender hatte sich anders
+  // entschieden.
+  if (entry.payload?.text && !zeigtDecke(entry)) {
     items.push({ icon: 'i-copy', label: t('copy'), onClick: async () => {
       toast(await copyText(entry.payload.text) ? t('copied') : t('copyFailed'));
     } });
@@ -3362,6 +3715,16 @@ function openChatMenu() {
       onClick: shareDeviceLink,
     }]),
     { icon: 'i-user', label: t('myProfile'), hint: t('myProfileHint'), onClick: openMyProfile },
+    // Nur zeigen, wenn es etwas zu verbergen gibt - oder schon etwas
+    // verborgen ist. Ein Schalter fuer ein Bild, das man gar nicht hat,
+    // waere Ratespiel statt Einstellung.
+    ...(app.prefs?.avatar || meinBildVerborgen() ? [{
+      icon: meinBildVerborgen() ? 'i-eye-off' : 'i-eye',
+      label: t('hideMyAvatar'),
+      hint: isGroup() ? t('hideMyAvatarGroupHint') : t('hideMyAvatarHint'),
+      value: meinBildVerborgen() ? t('switchOn') : t('switchOff'),
+      onClick: () => void toggleMyAvatarHere(),
+    }] : []),
     // Das Gegenueber - oder in einer Gruppe die Gruppe selbst, mit dem Weg
     // zu jedem einzelnen Mitglied.
     {
@@ -3709,7 +4072,7 @@ async function chooseMyAvatar() {
     await publishMyAvatar({ force: true });
     busy(false);
   }
-  toast(t('avatarSaved'));
+  toast(meinBildVerborgen() ? t('avatarHiddenHereStill') : t('avatarSaved'));
   refreshAvatarChip();
 }
 
@@ -3737,6 +4100,88 @@ async function removeMyAvatar() {
     busy(false);
   }
   toast(t('avatarRemoved'));
+}
+
+/**
+ * Das eigene Bild in diesem Chat verbergen - oder wieder zeigen.
+ *
+ * Verbergen heisst hier nicht "bitte nicht anzeigen", sondern: das Bild
+ * liegt in diesem Raum nicht. Es wird weggenommen, und in allen anderen
+ * Chats gilt es unveraendert weiter.
+ *
+ * In einer Gruppe geht das nur fuer alle auf einmal. Es gibt dort einen
+ * Schluessel fuer den ganzen Raum und kein Geheimnis zwischen zwei einzelnen
+ * Mitgliedern - ein Bild, das die eine sieht und die andere nicht, liesse
+ * sich gar nicht ablegen. Die Beschriftung sagt das auch so.
+ */
+async function toggleMyAvatarHere() {
+  if (!app.session) return;
+  const verbergen = !meinBildVerborgen();
+  // Genau dieser Chat, kein anderer: das Bild wohnt in den Einstellungen und
+  // geht in jeden Raum einzeln - eine Sperre, die ueber alle Chats laeuft,
+  // naehme es ueberall weg.
+  const patch = { hideMyAvatar: verbergen };
+  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  busy(true, t('avatarSaving'));
+  let geschafft = true;
+  try {
+    const ziel = jetzigerRaum();
+    if (verbergen) geschafft = await nacheinander(() => bildWegnehmen(ziel));
+    else geschafft = await publishMyAvatar({ force: true });
+  } finally {
+    busy(false);
+  }
+  // Ohne Verbindung ist die Sperre umgelegt, das Bild aber noch nicht weg -
+  // oder eben noch nicht wieder da. Das muss man erfahren: bei einer Zusage
+  // ueber Sichtbarkeit ist die stille Erfolgsmeldung der eine Fehler, der
+  // nicht passieren darf. Nachgeholt wird es beim naechsten Betreten, dafuer
+  // sorgt bildHochladen().
+  if (!app.prefs?.avatar) toast(t('saved'));
+  else if (verbergen) toast(geschafft ? t('avatarHiddenMineOn') : t('avatarHideLater'));
+  else toast(geschafft ? t('avatarHiddenMineOff') : t('avatarShowLater'));
+}
+
+/**
+ * Das Bild von jemand anderem ausblenden - oder wieder zeigen.
+ *
+ * Bleibt auf diesem Geraet. Die andere Person erfaehrt nichts davon, und ihr
+ * Bild liegt weiter im Raum: das hier ist eine Entscheidung darueber, was
+ * man selbst sehen will.
+ */
+function toggleHiddenAvatar(owner) {
+  if (!app.session || !owner) return;
+  const bisher = app.session.hiddenAvatars ?? [];
+  const verbergen = !bisher.includes(owner);
+  const liste = verbergen ? [...bisher, owner] : bisher.filter((eintrag) => eintrag !== owner);
+  const patch = { hiddenAvatars: liste };
+  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  if (verbergen) {
+    // Nicht nur nicht zeigen: die entschluesselte Kopie kommt weg. Sie wieder
+    // zu holen kostet eine Anfrage, und die faellt nur an, wenn man es
+    // wirklich wieder sehen will.
+    vergissBild(owner);
+    nachAusblenden();
+  } else {
+    const ver = owner === 'group' ? app.groupAvatarVer : memberOf(owner).avatarVer;
+    const raum = app.session.roomId;
+    void ensureAvatar(owner, ver).then(() => {
+      if (app.session?.roomId === raum) nachAusblenden();
+    });
+  }
+  toast(verbergen ? t('avatarHiddenTheirsOn') : t('avatarHiddenTheirsOff'));
+}
+
+/** Nach dem Aus- oder Einblenden: ueberall nachziehen, wo ein Bild steht. */
+function nachAusblenden() {
+  // Das Bildchen auf der Startseite haengt am selben Zustand - es geht mit
+  // weg und kommt mit wieder.
+  rememberChatAvatar();
+  updatePeerStatus();
+  redrawAll();
+  renderChatList();
+  // Das grosse Gesicht im Anruf wird sonst nur beim Aufbau gesetzt und
+  // bliebe mitten im Gespraech stehen.
+  if (app.call) fillAvatar(el('call-avatar'), chatAvatarOwner(), peerName());
 }
 
 /** Der Knopf in der Fusszeile zeigt, ob schon ein Bild hinterlegt ist. */
@@ -3812,6 +4257,15 @@ function openMyProfile() {
       bio: app.prefs?.bio ?? '',
     }),
     make('p', 'sheet-note', t('myProfileHint')),
+    // Sonst wirkt der Schalter kaputt: hier steht das eigene Bild ja weiter
+    // gross da. Und der naechste Griff waere "Bild entfernen" - was es in
+    // ALLEN Chats wegnaehme.
+    ...(meinBildVerborgen() && app.prefs?.avatar
+      ? [
+        make('p', 'sheet-note sheet-note--warn', t('avatarHiddenHere')),
+        { icon: 'i-eye', label: t('avatarShowHereAgain'), onClick: () => void toggleMyAvatarHere() },
+      ]
+      : []),
     {
       icon: 'i-image',
       label: app.prefs?.avatar ? t('avatarChange') : t('avatarChoose'),
@@ -3835,6 +4289,7 @@ function openMemberProfile(member) {
     ...(isGroup()
       ? [make('p', 'sheet-note', istAdmin ? t('roleAdminNote') : t('roleMemberNote'))]
       : []),
+    ...bildAusblendenEintrag(member.id, Boolean(member.avatarVer)),
     ...(darfVergeben ? [{
       icon: 'i-shield',
       label: istAdmin ? t('roleTake') : t('roleGive'),
@@ -3868,12 +4323,31 @@ function openChatProfile() {
       name: peerName(),
       bio: t('membersHint', { n: app.session?.capacity ?? others().length + 1 }),
     }),
+    ...bildAusblendenEintrag('group', Boolean(app.groupAvatarVer)),
     ...(darf ? [
       { icon: 'i-image', label: t('groupPicture'), hint: t('groupPictureHint'), onClick: () => void chooseGroupAvatar() },
       { icon: 'i-plus', label: t('inviteMore'), onClick: () => void inviteMore() },
     ] : []),
     { icon: 'i-users', label: t('members'), value: String(others().length + 1), onClick: showMembers },
   ]);
+}
+
+/**
+ * Der Eintrag "Bild ausblenden" - oder keiner.
+ *
+ * Ohne Bild gibt es nichts auszublenden, und ein Schalter fuer nichts
+ * verwirrt mehr, als er nuetzt. Steht die Sperre dagegen schon, muss der
+ * Eintrag bleiben: sonst kaeme man nie wieder heran.
+ */
+function bildAusblendenEintrag(owner, hatBild) {
+  const versteckt = bildVersteckt(owner);
+  if (!hatBild && !versteckt) return [];
+  return [{
+    icon: versteckt ? 'i-eye' : 'i-eye-off',
+    label: versteckt ? t('avatarShowTheirs') : t('avatarHideTheirs'),
+    hint: owner === 'group' ? t('avatarHideGroupHint') : t('avatarHideTheirsHint'),
+    onClick: () => toggleHiddenAvatar(owner),
+  }];
 }
 
 /** Ein paar Zeilen ueber sich - gehen in jeden Chat mit. */
@@ -3894,6 +4368,9 @@ async function changeBio() {
 /** Das Bild der Gruppe - nur Verwalter duerfen es aendern. */
 async function chooseGroupAvatar() {
   if (!isGroup() || app.myRole !== 'admin') return;
+  // Wer das Gruppenbild setzt, will es sehen. Sonst hiesse es "Bild
+  // gespeichert" und auf dem Bildschirm aendert sich nichts.
+  if (bildVersteckt('group')) toggleHiddenAvatar('group');
   const bild = await askForAvatar();
   if (!bild) return;
   busy(true, t('avatarSaving'));
@@ -4453,8 +4930,12 @@ function chatListMeta(session) {
 
 /** Einen Chat aus der Liste oeffnen - Gruppen haben keinen Code. */
 function openFromList(session) {
-  if (session.kind === 'group') return openSession({ ...session, unread: 0 }, { screen: 'chat' });
-  return enterChat(session.code, { known: session });
+  // Die Liste haelt einen Schnappschuss von ihrem letzten Aufbau in der Hand.
+  // Was seither gespeichert wurde - eine Bildsperre etwa -, steht nur im
+  // Speicher des Geraets. Also von dort lesen, nicht aus dem Klick.
+  const stand = getSession(session.roomId) ?? session;
+  if (stand.kind === 'group') return openSession({ ...stand, unread: 0 }, { screen: 'chat' });
+  return enterChat(stand.code, { known: stand });
 }
 
 /**
@@ -4733,6 +5214,10 @@ function wireStaticHandlers() {
   el('reply-cancel').addEventListener('click', () => {
     app.replyTo = null;
     renderReplyPreview();
+  });
+  el('spoiler-cancel').addEventListener('click', () => {
+    app.sendHidden = false;
+    renderSpoilerBar();
   });
 
   const messageInput = el('message-input');
