@@ -15,3 +15,9 @@ blob-report/
 .vscode/
 coverage/
 dist/
+
+# Wegwerf-Sonden aus einer Oberflaechenpruefung. Sie werden geschrieben, einmal
+# laufen gelassen und wieder geloescht - ein Messgeruest, kein Test. Ohne diese
+# Zeile taucht so etwas als unversionierte Datei auf und wandert im
+# schlimmsten Fall mit in einen Commit.
+test/e2e/_audit_*.spec.js
