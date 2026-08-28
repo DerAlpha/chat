@@ -24,6 +24,22 @@
   --radius: 14px;
   --radius-lg: 22px;
   --header-h: 56px;
+
+  /* --------------------------------------------------------- Bewegung ---
+     Vier Werte fuer die ganze App. Eine Oberflaeche, in der jedes Teil sein
+     eigenes Tempo hat, wirkt unruhig; dieselbe Kurve ueberall wirkt wie aus
+     einem Guss.
+
+     Kurz ist fuer Dinge unter dem Finger - ein Knopf muss sofort antworten,
+     sonst fuehlt er sich klebrig an. Mittel ist der Normalfall. Lang ist
+     fuer Flaechen, die kommen und gehen.
+
+     Die Kurve faengt schnell an und laeuft weich aus: so bewegt sich etwas,
+     das man angestossen hat. */
+  --dauer-kurz: 110ms;
+  --dauer: 190ms;
+  --dauer-lang: 280ms;
+  --kurve: cubic-bezier(.2, .9, .3, 1);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -132,7 +148,10 @@ button, input, textarea { font: inherit; color: inherit; }
 @supports (height: 100dvh) { #app { min-height: 0; } }
 
 .screen { display: none; flex: 1 1 auto; min-height: 0; }
-.screen[data-active] { display: flex; flex-direction: column; }
+/* Ein Bildschirmwechsel ist ein Ortswechsel - er darf kurz zu sehen sein.
+   Sechs Bildpunkte und knapp zwei Zehntel reichen dafuer; alles darueber
+   faengt an, im Weg zu stehen. */
+.screen[data-active] { display: flex; flex-direction: column; animation: auftauchen var(--dauer) var(--kurve); }
 
 .screen--scroll {
   overflow-y: auto;
@@ -197,7 +216,8 @@ button, input, textarea { font: inherit; color: inherit; }
   font-weight: 560;
   cursor: pointer;
   user-select: none;
-  transition: transform .08s ease, background-color .15s ease, opacity .15s ease;
+  transition: transform var(--dauer-kurz) var(--kurve), background-color var(--dauer-kurz) ease,
+              opacity var(--dauer-kurz) ease, border-color var(--dauer-kurz) ease;
 }
 .btn:active { transform: scale(.975); }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
@@ -222,6 +242,7 @@ button, input, textarea { font: inherit; color: inherit; }
   flex: none;
 }
 .btn--icon:hover { background: var(--bg-sunken); }
+.btn--icon:active { transform: scale(.9); }
 .btn--icon.danger { color: var(--danger); }
 
 .btn--send {
@@ -252,6 +273,8 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--bg-elevated);
   cursor: pointer;
   user-select: none;
+  transition: background-color var(--dauer-kurz) ease, border-color var(--dauer-kurz) ease,
+              transform var(--dauer-kurz) ease;
 }
 .chat-list__item:active { transform: scale(.99); }
 .chat-list__item:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
@@ -301,6 +324,9 @@ button, input, textarea { font: inherit; color: inherit; }
   text-transform: uppercase;
   box-shadow: none;
 }
+.profile__avatar { transition: transform var(--dauer) var(--kurve), box-shadow var(--dauer) ease; }
+.profile__avatar:not(.is-empty):hover { transform: scale(1.02); }
+.profile__avatar:not(.is-empty):active { transform: scale(.98); }
 .profile__avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .profile__name { font-size: 1.15rem; }
 .profile__bio { color: var(--text-muted); font-size: .92rem; max-width: 34ch; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -374,6 +400,8 @@ button, input, textarea { font: inherit; color: inherit; }
    kein Strich. Die Farbe ist die der Marke: der Punkt gehoert zur App und
    ist keine Warnung. */
 .pill--unread {
+  /* Ein Punkt, der auftaucht, darf auftauchen. */
+  animation: aufploppen var(--dauer) var(--kurve);
   flex: none;
   min-width: 22px;
   height: 22px;
@@ -559,6 +587,7 @@ button, input, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .banner.is-warn { background: color-mix(in srgb, var(--danger) 16%, var(--bg-elevated)); }
+.banner:not([hidden]) { animation: auftauchen var(--dauer) var(--kurve); }
 
 .messages {
   overflow-y: auto;
@@ -585,6 +614,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35; }
 
 .msg { display: flex; flex-direction: column; max-width: 82%; position: relative; }
+/* Nur wirklich neue Blasen bewegen sich. Die Liste wird bei jeder
+   Aenderung neu aufgebaut - ohne diese Unterscheidung zappelte bei jeder
+   Lesebestaetigung der ganze Verlauf. */
+.msg.is-new { animation: auftauchen var(--dauer) var(--kurve); }
 .msg--out { align-self: flex-end; align-items: flex-end; }
 .msg--in { align-self: flex-start; align-items: flex-start; }
 .msg + .msg--out.msg--same, .msg + .msg--in.msg--same { margin-top: 0; }
@@ -736,6 +769,8 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .seen:hover, .seen:focus-visible { background: rgba(255, 255, 255, .16); outline: none; }
 .seen__count { font-size: .72rem; font-variant-numeric: tabular-nums; }
+.seen { transition: color var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve); }
+.seen:active { transform: scale(.92); }
 .seen.is-read { color: #7fd1ff; }
 
 /* Die Blase waechst aus dem Auge heraus - mit Spitze nach unten. Es gibt sie
@@ -744,9 +779,25 @@ button, input, textarea { font: inherit; color: inherit; }
 .seen__bubble { display: none; }
 
 @media (hover: hover) and (pointer: fine) {
+  /* Am Rechner ist die Blase immer da, nur unsichtbar - so kann sie
+     einblenden statt hart umzuspringen. `visibility` sorgt dafuer, dass sie
+     unsichtbar auch wirklich nicht im Weg ist. */
+  .seen .seen__bubble {
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve),
+                visibility 0s linear var(--dauer-kurz);
+  }
   .seen:hover .seen__bubble,
   .seen:focus-visible .seen__bubble {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+  }
+  .seen .seen__bubble {
     flex-direction: column;
     gap: 3px;
     position: absolute;
@@ -766,8 +817,7 @@ button, input, textarea { font: inherit; color: inherit; }
     white-space: normal;
     cursor: default;
   }
-  .seen:hover .seen__bubble::after,
-  .seen:focus-visible .seen__bubble::after {
+  .seen .seen__bubble::after {
     content: "";
     position: absolute;
     right: 10px;
@@ -811,6 +861,9 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--bg-sunken) center/cover no-repeat;
   cursor: zoom-in;
 }
+/* Von der unscharfen Vorschau zum Bild: die Blase behaelt ihre Groesse, nur
+   die Schaerfe kommt dazu. Ein hartes Umspringen sieht nach Fehler aus. */
+.bubble__image { transition: filter var(--dauer-lang) ease, transform var(--dauer-lang) ease; }
 .bubble__image.is-loading { filter: blur(8px); transform: scale(1.02); }
 .image-wrap { position: relative; overflow: hidden; border-radius: 14px; max-width: min(260px, 68vw); }
 .image-wrap .spinner { position: absolute; inset: 0; margin: auto; }
@@ -838,6 +891,8 @@ button, input, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow);
   cursor: pointer;
 }
+.reaction { transition: border-color var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve); }
+.reaction:active { transform: scale(.92); }
 .reaction.is-mine { border-color: var(--accent); }
 
 .jump-down {
@@ -854,6 +909,7 @@ button, input, textarea { font: inherit; color: inherit; }
   cursor: pointer;
   z-index: 6;
 }
+.jump-down:not([hidden]) { animation: aufploppen var(--dauer) var(--kurve); }
 .jump-down .badge {
   position: absolute; top: -5px; right: -5px;
   min-width: 20px; height: 20px;
@@ -903,6 +959,14 @@ button, input, textarea { font: inherit; color: inherit; }
   line-height: 1.35;
 }
 .composer__input:focus { outline: none; border-color: var(--accent); }
+/* Der Sendeknopf erscheint, sobald etwas im Feld steht - das darf man sehen. */
+#btn-send:not([hidden]) { animation: aufploppen var(--dauer-kurz) var(--kurve); }
+
+/* Antwort, Anhaenge, Aufnahme: alles drei schiebt die Textzeile nach oben.
+   Ohne Bewegung springt der halbe Bildschirm. */
+.reply-preview:not([hidden]),
+.attachments:not([hidden]),
+.recorder:not([hidden]) { animation: auftauchen var(--dauer) var(--kurve); }
 
 .reply-preview, .attachments, .recorder {
   display: flex;
@@ -949,7 +1013,7 @@ button, input, textarea { font: inherit; color: inherit; }
 /* -------------------------------------------------------------- Overlays --- */
 
 .sheet { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-end; justify-content: center; }
-.sheet__backdrop { position: absolute; inset: 0; background: rgba(6, 10, 18, .45); animation: fade .18s ease; }
+.sheet__backdrop { position: absolute; inset: 0; background: rgba(6, 10, 18, .45); animation: fade var(--dauer) ease; }
 .sheet__panel {
   position: relative;
   width: 100%;
@@ -962,7 +1026,7 @@ button, input, textarea { font: inherit; color: inherit; }
   border-radius: 22px 22px 0 0;
   padding: 8px 16px calc(var(--safe-bottom) + 16px);
   box-shadow: var(--shadow-lg);
-  animation: slide-up .22s cubic-bezier(.2, .9, .3, 1);
+  animation: slide-up var(--dauer-lang) var(--kurve);
 }
 /* Nicht nur Zierde: auf schmalen Displays ist der Hintergrund fast verdeckt,
    also muss der Griff selbst zum Schliessen taugen. */
@@ -988,6 +1052,14 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .sheet__title { font-size: 1rem; margin-bottom: 8px; padding: 0 4px; }
 .sheet__body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+/* Der Inhalt kommt in der Reihenfolge herein, in der man ihn liest - ein
+   Hauch Versatz, nicht mehr. Nach den ersten Zeilen ist Schluss: bei einer
+   langen Liste wuerde man sonst unten auf sein Blatt warten. */
+.sheet__body > * { animation: auftauchen var(--dauer) var(--kurve) both; }
+.sheet__body > *:nth-child(2) { animation-delay: 24ms; }
+.sheet__body > *:nth-child(3) { animation-delay: 48ms; }
+.sheet__body > *:nth-child(4) { animation-delay: 72ms; }
+.sheet__body > *:nth-child(n+5) { animation-delay: 90ms; }
 
 .sheet-item {
   display: flex; align-items: center; gap: 13px;
@@ -1002,7 +1074,9 @@ button, input, textarea { font: inherit; color: inherit; }
   font-size: 1rem;
   cursor: pointer;
 }
+.sheet-item { transition: background-color var(--dauer-kurz) ease, transform var(--dauer-kurz) ease; }
 .sheet-item:hover { background: var(--bg-sunken); }
+.sheet-item:active { transform: scale(.99); background: var(--bg-sunken); }
 .sheet-item.is-danger { color: var(--danger); }
 .sheet-item .icon { color: var(--text-muted); }
 .sheet-item.is-danger .icon { color: var(--danger); }
@@ -1170,7 +1244,7 @@ button, input, textarea { font: inherit; color: inherit; }
   font-weight: 550;
   text-align: center;
   box-shadow: var(--shadow-lg);
-  animation: slide-up .2s ease;
+  animation: slide-up var(--dauer) var(--kurve);
 }
 
 .busy {
@@ -1194,6 +1268,21 @@ button, input, textarea { font: inherit; color: inherit; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fade { from { opacity: 0; } }
 @keyframes slide-up { from { transform: translateY(14px); opacity: 0; } }
+
+/* =========================================================================
+   Bewegung
+   Drei Muster fuer die ganze App, alle nach demselben Bauplan: der Anfang
+   ist beschrieben, das Ende ist der normale Zustand des Elements. Das ist
+   nicht Geschmack, sondern Vorsicht - wer "prefers-reduced-motion" gesetzt
+   hat, bekommt die Dauer auf null gesetzt, und dann muss das Element ohne
+   die Bewegung genau richtig dastehen. Ein Muster, das auf opacity: 0
+   endet, waere unsichtbar.
+   ========================================================================= */
+
+/** Auftauchen: ein Hauch von unten. Fuer alles, was neu dazukommt. */
+@keyframes auftauchen { from { opacity: 0; transform: translateY(6px); } }
+/** Aufploppen: kommt aus der Mitte. Fuer Punkte, Zahlen, kleine Knoepfe. */
+@keyframes aufploppen { from { opacity: 0; transform: scale(.72); } }
 
 .typing-bubble { display: inline-flex; gap: 4px; padding: 11px 14px; }
 .typing-bubble i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.2s infinite; }
@@ -1532,6 +1621,12 @@ body.is-calling { overflow: hidden; }
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
     scroll-behavior: auto !important;
+    /* Die Verzoegerungen muessen mit weg. Sonst wartet ein gestaffelter
+       Eintrag seine 90 ms weiter ab - und haelt dabei wegen `both` seinen
+       Anfangszustand, also opacity 0. Ohne Bewegung waere er dann schlicht
+       fuer einen Moment nicht da. */
+    animation-delay: 0s !important;
+    transition-delay: 0s !important;
   }
 }
 

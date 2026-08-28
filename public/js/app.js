@@ -616,6 +616,7 @@ function teardownChat() {
   app.groupAvatarVer = null;
   app.myRole = 'member';
   typingNode = null;
+  schonGezeigt.clear();
   stopKeepAtBottom();
   clearTimeout(app.typingTimer);
   for (const member of app.members.values()) clearTimeout(member.typingTimer);
@@ -1067,6 +1068,9 @@ async function renderHistory(messages, { replace = false } = {}) {
   if (replace) {
     for (const pending of app.pending.values()) insertEntry(pending);
   }
+  // Ein frisch geoeffneter Chat faehrt nicht dreihundert Blasen ein: was
+  // beim Betreten schon da ist, steht einfach da.
+  markiereAlsGezeigt();
   redrawAll();
   scrollToBottom(true);
   keepAtBottom();
@@ -1081,6 +1085,8 @@ async function onHistory(frame) {
   const previousTop = list.scrollTop;
   const entries = await Promise.all(frame.messages.map(toEntry));
   for (const entry of entries) insertEntry(entry);
+  // Nachgeladene alte Nachrichten sind alt - sie fahren nicht ein.
+  markiereAlsGezeigt();
   redrawAll();
   if (app.atBottom) {
     // Wer unten stand, will unten bleiben - auch wenn oben etwas dazukam.
@@ -1633,10 +1639,29 @@ function syncTypingBubble() {
   if (app.atBottom) scrollToBottom(true);
 }
 
+/**
+ * Welche Nachrichten schon einmal auf dem Bildschirm standen.
+ *
+ * Die Liste wird bei jeder Aenderung komplett neu aufgebaut - bei jeder
+ * Lesebestaetigung, bei jedem Tippen des Gegenuebers. Ohne dieses Gedaechtnis
+ * huepfte dabei jedes Mal der ganze Verlauf. Bewegen soll sich nur, was
+ * wirklich neu ist.
+ */
+const schonGezeigt = new Set();
+
+/** Alles, was gerade da ist, gilt als gezeigt - ohne Bewegung. */
+function markiereAlsGezeigt() {
+  for (const id of app.order) schonGezeigt.add(id);
+}
+
 function buildMessageNode(entry, sameSender) {
   const mine = isMine(entry);
   const wrapper = make('div', `msg ${mine ? 'msg--out' : 'msg--in'}${sameSender ? ' msg--same' : ''}`);
   wrapper.dataset.id = entry.id;
+  if (!schonGezeigt.has(entry.id)) {
+    wrapper.classList.add('is-new');
+    schonGezeigt.add(entry.id);
+  }
 
   const bubble = make('div', 'bubble');
   // In einer Gruppe steht über fremden Blasen, von wem sie kommt - sonst

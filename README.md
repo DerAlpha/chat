@@ -146,6 +146,25 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Der Rahmen schneidet ab, der Streifen darin bewegt sich: so bleibt die
   Kopfzeile schmal, statt das Fenster nach rechts wachsen zu lassen
 
+**Wie es sich bewegt**
+- Vier Werte für die ganze App: kurz für alles unter dem Finger, mittel für
+  den Normalfall, lang für Flächen, die kommen und gehen – und eine einzige
+  Kurve. Jedes Teil mit eigenem Tempo wirkt unruhig
+- Bewegt wird, was etwas erklärt: ein Bildschirmwechsel, eine neue Nachricht,
+  ein Menü, das aufgeht, der Sendeknopf, der erscheint. Nichts blinkt, nichts
+  dreht sich, nichts hüpft
+- Bewegt wird nur, was wirklich neu ist. Der Nachrichtenverlauf wird bei jeder
+  Kleinigkeit neu aufgebaut – bei jeder Lesebestätigung, bei jedem Tippen des
+  Gegenübers. Ohne dieses Gedächtnis zappelte dabei jedes Mal der ganze Chat
+- Ein Menü kommt in der Reihenfolge herein, in der man es liest – ein Hauch
+  Versatz, und nach den ersten Zeilen ist Schluss. Sonst wartet man unten auf
+  sein Blatt
+- Jede Einblendung beschreibt nur ihren Anfang; das Ende ist der normale
+  Zustand. Das ist kein Geschmack, sondern Vorsicht: wer „prefers-reduced-motion"
+  gesetzt hat, bekommt die Dauer auf null – und dann muss ohne die Bewegung
+  alles genau richtig dastehen. Ein Muster, das auf `opacity: 0` endet, wäre
+  ein unsichtbares Fenster
+
 **Wie es klingt**
 - Neun Klänge, alle aus einer Fünftonleiter: was hintereinander erklingt,
   passt zusammen
@@ -470,7 +489,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 120 Tests am Smartphone + 16 am Rechner
+npm run test:e2e          # 123 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -505,7 +524,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 136 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 139 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -533,6 +552,13 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Bei der Laufschrift wird nicht die Klasse geprüft, sondern die Bewegung:
   dieselbe Stelle, zwei Zeitpunkte, und dazwischen muss sich etwas getan
   haben.
+- Bei den Animationen wird gezählt, was sich bewegt: nach dem Öffnen eines
+  Chats keine einzige Blase, bei einer eingehenden Nachricht genau eine – und
+  nach der nächsten Lesebestätigung immer noch nicht der ganze Verlauf.
+- Und die wichtigere Hälfte: mit abgestellter Bewegung wird jede sichtbare
+  Fläche nachgemessen. Nichts darf halb durchsichtig oder verschoben
+  hängenbleiben, auch kein Menüeintrag – eine stehengebliebene Verzögerung
+  hielte ihn in seinem Anfangszustand fest, und der ist unsichtbar.
 - Beim Austritt wird nachgemessen, dass das alte Token wirklich nichts mehr
   öffnet – auch nicht die Übersicht, die sonst weiter verraten hätte, wann in
   der Gruppe zuletzt etwas ankam und wer gerade tippt.
