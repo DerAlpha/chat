@@ -88,11 +88,23 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Aktualisieren und neu starten
+        # Die Eingabe kommt ueber die Umgebung, nicht in die Befehlszeile:
+        # `${{ }}` wird von GitHub eingesetzt, BEVOR die Shell den Befehl
+        # sieht - ein Apostroph darin bricht sonst aus den Anfuehrungszeichen
+        # aus und der Rest laeuft als eigener Befehl auf dem Server.
+        #
+        # `printf %q` liefert schon eine fertig gequotete Zeichenkette. Noch
+        # einmal in Anfuehrungszeichen gesetzt kaeme sie mit ihren
+        # Fluchtzeichen drin an: aus `feature/x y` wuerde `feature/x\ y`.
+        env:
+          DEPLOY_REF: ${{ inputs.ref }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
-          ssh -i ~/.ssh/id_deploy -p "${{ secrets.DEPLOY_PORT || 22 }}" \
+          ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
               -o StrictHostKeyChecking=yes \
-              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "REF='${{ inputs.ref }}' bash -s" <<'REMOTE'
+              "$DEPLOY_TARGET" \
+              "REF=$(printf '%q' "$DEPLOY_REF") bash -s" <<'REMOTE'
           set -euo pipefail
           APP_DIR=/opt/fluesterchat
           cd "$APP_DIR"

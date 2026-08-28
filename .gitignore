@@ -2,6 +2,9 @@ node_modules/
 data/
 !data/.gitkeep
 .env
+# Die oertliche Konfiguration des PHP-Backends: dort stehen der Giphy-Schluessel
+# und das TURN-Geheimnis. Sie war nie eingecheckt - aber nichts hielt davon ab.
+php/api/lib/config.local.php
 *.log
 npm-debug.log*
 test-results/
