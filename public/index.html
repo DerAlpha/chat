@@ -168,7 +168,7 @@
         <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
       </button>
 
-      <h2 id="invite-title" data-i18n="yourCode"></h2>
+      <h1 id="invite-title" data-i18n="yourCode"></h1>
       <p class="muted center" data-i18n="codeHint"></p>
 
       <output class="code-display" id="code-display" aria-live="polite"></output>
@@ -205,7 +205,7 @@
         <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
       </button>
 
-      <h2 id="group-title" data-i18n="groupCodes"></h2>
+      <h1 id="group-title" data-i18n="groupCodes"></h1>
       <p class="muted center" data-i18n="groupCodesHint"></p>
       <p class="muted center small" id="group-progress" aria-live="polite"></p>
 
@@ -222,7 +222,7 @@
         <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
       </button>
 
-      <h2 id="join-title" data-i18n="enterCode"></h2>
+      <h1 id="join-title" data-i18n="enterCode"></h1>
       <p class="muted center" data-i18n="enterCodeHint"></p>
 
       <form id="join-form" novalidate>
@@ -242,7 +242,7 @@
   </section>
 
   <!-- --------------------------------------------------------------- Chat -->
-  <section class="screen screen--chat" id="screen-chat" hidden>
+  <section class="screen screen--chat" id="screen-chat" hidden aria-labelledby="peer-name">
     <header class="chat-header">
       <button class="btn btn--icon" id="chat-back" type="button" data-i18n-attr="aria-label:back">
         <svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>
@@ -250,7 +250,7 @@
       <button class="chat-header__who" id="peer-open" type="button" data-i18n-attr="aria-label:profile">
         <span class="avatar" id="peer-avatar" aria-hidden="true">?</span>
         <span class="chat-header__text">
-          <strong id="peer-name"></strong>
+          <h1 class="chat-header__name" id="peer-name"></h1>
           <span class="chat-header__status" id="peer-status"><span id="peer-status-text"></span></span>
         </span>
       </button>
@@ -260,7 +260,7 @@
       <button class="btn btn--icon" id="btn-call-video" type="button" data-i18n-attr="aria-label:callVideo" hidden>
         <svg class="icon" aria-hidden="true"><use href="#i-video"/></svg>
       </button>
-      <button class="btn btn--icon" id="chat-menu" type="button" data-i18n-attr="aria-label:menu" aria-haspopup="true">
+      <button class="btn btn--icon" id="chat-menu" type="button" data-i18n-attr="aria-label:menu" aria-haspopup="dialog">
         <svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>
       </button>
     </header>
@@ -326,23 +326,34 @@
       </form>
     </div>
 
-    <input class="visually-hidden" id="file-gallery" type="file" accept="image/*" multiple tabindex="-1">
-    <input class="visually-hidden" id="file-camera" type="file" accept="image/*" capture="environment" tabindex="-1">
-    <input class="visually-hidden" id="file-any" type="file" tabindex="-1">
+    <!-- Diese Felder bedient niemand von Hand: die sichtbaren Eintraege im
+         Blatt oeffnen sie, und die tragen die Beschriftung. Aus dem
+         Barrierefreiheitsbaum gehoeren sie deshalb heraus - sonst stuenden
+         dort drei namenlose Bedienelemente, die zu nichts fuehren. -->
+    <input class="visually-hidden" id="file-gallery" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true">
+    <input class="visually-hidden" id="file-camera" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">
+    <input class="visually-hidden" id="file-any" type="file" tabindex="-1" aria-hidden="true">
   </section>
 
   <!-- Fuer Profilbilder: liegt ausserhalb des Chats, weil man sein Bild auch
        von der Startseite aus setzen kann. -->
-  <input class="visually-hidden" id="file-avatar" type="file" accept="image/*" tabindex="-1">
+  <input class="visually-hidden" id="file-avatar" type="file" accept="image/*" tabindex="-1" aria-hidden="true">
 
   <!-- ---------------------------------------- Platzhalter neben der Liste -->
-  <section class="screen screen--empty" id="screen-empty" hidden aria-labelledby="empty-title">
+  <section class="screen screen--empty" id="screen-empty" hidden aria-labelledby="empty-hint">
     <div class="empty">
       <div class="logo logo--mark" aria-hidden="true"><svg><use href="#i-logo"/></svg></div>
-      <h2 id="empty-title" data-i18n="appName">Flüsterchat</h2>
+      <!-- Der Name gross in der Mitte, aber ausdrücklich KEINE Überschrift:
+           diesen Platzhalter gibt es nur am Rechner, und dort steht er immer
+           neben der Seitenleiste, die schon "Flüsterchat" als Überschrift
+           trägt. Zweimal dasselbe ist für jeden, der die Seite über die
+           Überschriften abläuft, eine Sackgasse - und angesagt wird es
+           daneben ohnehin schon. Was diese Fläche wirklich ist, sagt der
+           Hinweis darunter; der benennt sie deshalb auch. -->
+      <p class="empty__name" data-i18n="appName" aria-hidden="true">Flüsterchat</p>
       <p class="muted" data-i18n="tagline"></p>
       <div class="slot" id="slot-empty"></div>
-      <p class="muted small" data-i18n="emptyHint"></p>
+      <p class="muted small" id="empty-hint" data-i18n="emptyHint"></p>
     </div>
   </section>
 
@@ -350,7 +361,7 @@
   <section class="screen screen--scroll" id="screen-error" hidden aria-labelledby="error-title">
     <div class="screen__inner center-block">
       <div class="logo logo--warn" aria-hidden="true"><svg><use href="#i-warning"/></svg></div>
-      <h2 id="error-title" data-i18n="errorTitle"></h2>
+      <h1 id="error-title" data-i18n="errorTitle"></h1>
       <p class="muted center" id="error-text"></p>
       <div class="stack">
         <button class="btn btn--primary" id="error-retry" type="button" hidden data-i18n="tryAgain"></button>
@@ -421,7 +432,7 @@
   </div>
 </div>
 
-<div class="lightbox" id="lightbox" hidden>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-labelledby="lightbox-caption">
   <div class="lightbox__bar">
     <button class="btn btn--icon" id="lightbox-close" type="button" data-i18n-attr="aria-label:close">
       <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>

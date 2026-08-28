@@ -136,3 +136,31 @@ test('Node und PHP lesen dieselbe Fassung', { skip: phpVorhanden ? false : 'PHP 
   assert.equal(ausgabe.trim(), appVersion(PUBLIC_DIR));
   forgetVersion();
 });
+
+/**
+ * Der Service Worker haelt eine Liste von Dateien vor. Steht dort auch nur
+ * ein Pfad, den es nicht gibt, lehnt `cache.addAll` das GANZE Paket ab - und
+ * der Fang darum verschluckt es stillschweigend. Die App waere dann nicht
+ * offline verfuegbar, ohne dass irgendetwas darauf hinweist.
+ */
+test('Jede Datei, die der Service Worker vorhaelt, gibt es auch', () => {
+  const sw = fs.readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
+  const block = sw.slice(sw.indexOf('const SHELL = ['), sw.indexOf('].map((path) => BASE + path);'));
+  const pfade = [...block.matchAll(/'([^']*)'/g)].map((m) => m[1]);
+
+  assert.ok(pfade.length > 10, 'die Liste wurde nicht gefunden');
+  assert.ok(pfade.includes(''), 'die Startseite selbst fehlt');
+
+  const fehlend = pfade
+    .filter((pfad) => pfad !== '')
+    .filter((pfad) => !fs.existsSync(new URL(`../../public/${pfad}`, import.meta.url)));
+  assert.deepEqual(fehlend, [], `im Service Worker steht, was es nicht gibt: ${fehlend.join(', ')}`);
+
+  // Und andersherum: jede ausgelieferte JS-Datei gehoert dazu. Eine neue, die
+  // niemand einträgt, fehlte offline.
+  const js = fs.readdirSync(new URL('../../public/js', import.meta.url))
+    .filter((name) => name.endsWith('.js'))
+    .map((name) => `js/${name}`);
+  const vergessen = js.filter((pfad) => !pfade.includes(pfad));
+  assert.deepEqual(vergessen, [], `nicht im Service Worker eingetragen: ${vergessen.join(', ')}`);
+});

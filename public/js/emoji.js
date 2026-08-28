@@ -613,8 +613,6 @@ export const emojiGroups = () => GROUPS.map((group) => ({
   emoji: CATALOG.filter((item) => item.group === group.id).map((item) => item.char),
 }));
 
-export const allEmoji = () => CATALOG.map((item) => item.char);
-
 /**
  * Sucht nach Anfangsstücken der Suchwörter. "her" findet Herz, "heart"
  * ebenfalls - und wer ein Emoji direkt eintippt oder einfügt, findet es auch.

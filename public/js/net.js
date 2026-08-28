@@ -3,8 +3,8 @@
 import { appPath, socketUrl } from './base.js';
 
 export class ApiError extends Error {
-  constructor(code, message, status) {
-    super(message);
+  constructor(code, message, status, options) {
+    super(message, options);
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
@@ -28,7 +28,10 @@ async function request(path, options = {}) {
   try {
     response = await fetch(path, options);
   } catch (cause) {
-    throw new ApiError('network', 'Netzwerkfehler', 0);
+    // Die Ursache mitnehmen: ohne sie steht in der Konsole nur
+    // "Netzwerkfehler", und ob das ein abgebrochenes Netz, eine abgelaufene
+    // Frist oder eine verweigerte Verbindung war, weiss danach niemand mehr.
+    throw new ApiError('network', 'Netzwerkfehler', 0, { cause });
   }
   if (response.status === 204) return null;
   const isJson = (response.headers.get('content-type') ?? '').includes('application/json');

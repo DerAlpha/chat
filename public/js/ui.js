@@ -205,6 +205,10 @@ export function promptSheet(title, { value = '', placeholder = '', maxLength = 4
     input.placeholder = placeholder;
     input.maxLength = maxLength;
     input.autocomplete = 'off';
+    // Ohne Namen heisst das Feld im Barrierefreiheitsbaum gar nichts. Der
+    // Titel des Blattes steht direkt darueber und sagt genau das Richtige -
+    // ein Platzhalter waere kein Ersatz, er verschwindet beim Tippen.
+    input.setAttribute('aria-labelledby', 'sheet-title');
     const submit = make('button', 'btn btn--primary', confirmLabel ?? t('save'));
     submit.type = 'button';
     field.append(input, submit);

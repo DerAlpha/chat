@@ -546,3 +546,52 @@ test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browse
   await contextB.close();
   await contextC.close();
 });
+
+/**
+ * Zwei Spalten heisst auch: zwei Bildschirme gleichzeitig sichtbar - und
+ * damit zwei Ueberschriften auf einer Seite. Der Platzhalter neben der Liste
+ * trug dieselbe wie die Liste selbst ("Fluesterchat"), beide als h1. Wer die
+ * Seite ueber die Ueberschriften ablaeuft, landet dann zweimal am selben
+ * Punkt und weiss nicht, wo er ist.
+ *
+ * Geprueft wird der Barrierefreiheitsbaum, nicht das Markup: was ist wirklich
+ * sichtbar, und wie heisst es.
+ */
+test('Am Rechner steht keine Überschrift doppelt', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('#screen-start')).toBeVisible();
+  await expect(page.locator('#screen-empty')).toBeVisible();
+
+  const sichtbar = await page.evaluate(() => [...document.querySelectorAll('h1, h2, h3')]
+    .filter((n) => n.getClientRects().length > 0 && !n.closest('[aria-hidden="true"]'))
+    .map((n) => ({ stufe: n.tagName, text: n.textContent.trim() })));
+
+  const ersteStufe = sichtbar.filter((h) => h.stufe === 'H1');
+  expect(ersteStufe.map((h) => h.text), 'genau eine oberste Überschrift, und zwar die der App')
+    .toEqual(['Flüsterchat']);
+
+  const texte = sichtbar.map((h) => h.text);
+  const doppelt = texte.filter((t, i) => texte.indexOf(t) !== i);
+  expect(doppelt, `steht zweimal da: ${doppelt.join(', ')}`).toEqual([]);
+});
+
+/**
+ * Und mit offenem Chat: dort tragen Liste und Unterhaltung zu Recht je eine
+ * oberste Ueberschrift - es sind zwei eigenstaendige Bereiche, und am Handy
+ * ist der Name des Gegenuebers die einzige Ueberschrift der Seite. Doppelt
+ * heissen duerfen sie trotzdem nicht.
+ */
+test('Mit offenem Chat trägt jeder Bereich seinen eigenen Namen', async ({ browser }) => {
+  const { contextA, contextB, pageA } = await pairUp(browser);
+
+  const sichtbar = await pageA.evaluate(() => [...document.querySelectorAll('h1')]
+    .filter((n) => n.getClientRects().length > 0)
+    .map((n) => n.textContent.trim()));
+
+  expect(sichtbar.length, `oberste Überschriften: ${sichtbar.join(', ')}`).toBe(2);
+  expect(sichtbar).toContain('Flüsterchat');
+  expect(new Set(sichtbar).size, 'beide Bereiche heissen gleich').toBe(2);
+
+  await contextA.close();
+  await contextB.close();
+});

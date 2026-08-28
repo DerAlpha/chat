@@ -7,7 +7,7 @@
  */
 
 import {
-  cryptoAvailable, generateCode, formatCode, normalizeCode, isCompleteCode, codeLength,
+  cryptoAvailable, generateCode, formatCode, normalizeCode, isCompleteCode,
   deriveSecrets, deriveSlot, generateGroupKey, randomRoomId, wrapGroupKey, unwrapGroupKey,
   importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
   toBase64, fromBase64, randomId,
@@ -20,7 +20,7 @@ import { APP_VERSION } from './version.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, leaveRoom, addSlots, putAvatar, fetchAvatar, deleteAvatar, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
-import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, openForCrop, finishAvatar, closeSource, AVATAR_EDGE } from './media.js';
+import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, openForCrop, finishAvatar, closeSource } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
@@ -344,12 +344,16 @@ function askGroupSetup() {
 
     const name = document.createElement('input');
     name.type = 'text';
-    name.placeholder = t('groupNamePlaceholder');
     name.maxLength = 40;
     name.autocomplete = 'off';
     name.id = 'group-name';
+    // Eine richtige Beschriftung, wie sie das Feld darunter schon hat. Ein
+    // Platzhalter ist keine: er verschwindet beim ersten Zeichen, und im
+    // Barrierefreiheitsbaum hiess das Feld gar nichts.
+    const nameLabel = make('label', 'sheet-field__label', t('groupNamePlaceholder'));
+    nameLabel.htmlFor = name.id;
     const nameZeile = make('div', 'sheet-field');
-    nameZeile.appendChild(name);
+    nameZeile.append(nameLabel, name);
 
     const zahl = document.createElement('input');
     zahl.type = 'number';
@@ -3041,6 +3045,14 @@ function renderCall(state) {
     return;
   }
 
+  // Ein hereinkommender Anruf uebernimmt den Bildschirm - und liegt unter den
+  // Blaettern, damit die Pruefzeichen mitten im Gespraech aufrufbar sind. Also
+  // schliesst er offene Blaetter, sonst staende er selbst dahinter.
+  //
+  // Nur beim Auftauchen: renderCall() laeuft bei jeder Zustandsmeldung, und
+  // unbedingt geschlossen fiele einem das Blatt mit den Pruefzeichen bei der
+  // naechsten gleich wieder zu.
+  if (overlay.hidden && sheetOpen()) closeSheet();
   overlay.hidden = false;
   document.body.classList.add('is-calling');
   overlay.dataset.state = state.state;
@@ -3938,8 +3950,14 @@ async function burnCurrentChat() {
   if (!ok) return;
   const session = app.session;
   try {
-    app.conn?.send({ t: 'burn' });
-    await burnRoom(session.roomId, session.token).catch(() => {});
+    // Ueber die Leitung, nicht ueber den Kanal: die Anfrage sagt, ob es
+    // geklappt hat, und funktioniert bei beiden Auslieferungen gleich. Der
+    // Kanal bleibt der Rueckweg, falls sie gar nicht erst durchkommt.
+    //
+    // Vorher liefen beide: der Kanal loeschte den Raum, und die Anfrage
+    // danach fand nichts mehr vor - eine 404 bei jedem einzelnen Loeschen.
+    const weg = await burnRoom(session.roomId, session.token).then(() => true, () => false);
+    if (!weg) app.conn?.send({ t: 'burn' });
   } finally {
     removeSession(session.roomId);
     teardownChat();
@@ -5080,7 +5098,13 @@ function openFromList(session) {
   // Was seither gespeichert wurde - eine Bildsperre etwa -, steht nur im
   // Speicher des Geraets. Also von dort lesen, nicht aus dem Klick.
   const stand = getSession(session.roomId) ?? session;
-  if (stand.kind === 'group') return openSession({ ...stand, unread: 0 }, { screen: 'chat' });
+  // Gruppen gehen direkt auf - ohne Code, den man erst ableiten muesste.
+  // Aber mit derselben Fehlerbehandlung wie enterChat(): scheitert das
+  // Verbinden, sah man vorher gar nichts. Der Klick verpuffte, und in der
+  // Konsole stand eine unbehandelte Zusage.
+  if (stand.kind === 'group') {
+    return openSession({ ...stand, unread: 0 }, { screen: 'chat' }).catch(reportError);
+  }
   return enterChat(stand.code, { known: stand });
 }
 

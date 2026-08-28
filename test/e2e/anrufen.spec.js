@@ -140,6 +140,31 @@ test('Ton und Bild laufen doppelt verschlüsselt', async ({ browser }) => {
   await pageA.locator('#call-safety').click();
   await expect(pageA.locator('#sheet-body')).toContainText(/doppelt verschlüsselt/i);
 
+  /*
+   * Und man sieht ihn auch. Dass der Text im Dokument steht, sagt darüber
+   * nichts: das Blatt lag unter dem Anrufbildschirm und war damit ausgerechnet
+   * dort unsichtbar, wo man es braucht - mitten im Gespräch. Geprüft wird
+   * deshalb, wer an dieser Stelle wirklich obenauf liegt.
+   */
+  const obenauf = await pageA.evaluate(() => {
+    const blatt = document.querySelector('.sheet__panel');
+    const r = blatt.getBoundingClientRect();
+    const punkte = [
+      [r.left + 8, r.top + 8], [r.right - 8, r.top + 8],
+      [r.left + r.width / 2, r.top + r.height / 2],
+    ];
+    return punkte
+      .map(([x, y]) => document.elementFromPoint(Math.round(x), Math.round(y)))
+      .filter((n) => !n || !n.closest('.sheet'))
+      .map((n) => (n ? `${n.tagName}.${String(n.className).slice(0, 30)}` : 'nichts'));
+  });
+  expect(obenauf, `über den Prüfzeichen liegt: ${obenauf.join(', ')}`).toEqual([]);
+
+  // Genau deshalb muss das Blatt erst zu, bevor man auflegt - es liegt jetzt
+  // über dem Anruf, und das ist so gewollt.
+  await pageA.keyboard.press('Escape');
+  await expect(pageA.locator('#sheet')).toBeHidden();
+
   await pageA.locator('#call-hangup').click();
   await contextA.close();
   await contextB.close();

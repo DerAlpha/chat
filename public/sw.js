@@ -11,7 +11,7 @@
  * Datei, aendert sich die Fassung - und dieser Worker raeumt seinen Speicher.
  * Ein Test wird rot, wenn der Stempel nicht mehr zum Inhalt passt.
  */
-const VERSION = '437811be6d99';
+const VERSION = '5d7f8f1e2110';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
@@ -42,9 +42,16 @@ const SHELL = [
   'js/ui.js',
   'js/version.js',
   'manifest.webmanifest',
+  // Nur, was die laufende App selbst braucht: das Zeichen im Browser-Reiter
+  // und das Abzeichen an einer Benachrichtigung - zusammen keine 3 KB.
+  //
+  // Die grossen Symbole stehen bewusst NICHT hier. Sie sind fuer das
+  // Betriebssystem, das sie beim Einrichten der App ueber das Netz holt; die
+  // Seite zeigt sie nie an. Vorgehalten kosteten sie 80 KB beim allerersten
+  // Aufruf - fuer nichts, was man je zu sehen bekaeme.
   'img/icon.svg',
   'img/icon-192.png',
-  'img/icon-512.png',
+  'img/badge.png',
 ].map((path) => BASE + path);
 
 self.addEventListener('install', (event) => {

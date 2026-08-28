@@ -1,0 +1,12 @@
+# Fluesterchat gehoert nicht in einen Suchindex - das steht in jeder Seite
+# (<meta name="robots" content="noindex">).
+#
+# Genau deshalb steht hier KEIN "Disallow: /": wer nicht hereinsehen darf,
+# liest auch das noindex nicht und traegt die Adresse trotzdem ein, nur eben
+# ohne Inhalt. Kriechen erlaubt, eintragen nicht - so herum wirkt es.
+#
+# Und ueberhaupt eine Datei, weil die Anfrage sonst in die Auffangregel lief
+# und auf die Startseite umgeleitet wurde: eine 302 auf HTML als Antwort auf
+# robots.txt.
+User-agent: *
+Disallow:
