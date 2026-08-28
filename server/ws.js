@@ -237,6 +237,11 @@ export class Hub {
         return this.broadcast(room.id, { t: 'react', id: message.id, from: member.id, ct });
       }
 
+      case 'reveal': {
+        const message = this.store.addReveal(room, member, String(frame.id ?? ''));
+        return this.broadcast(room.id, { t: 'reveal', id: message.id, from: member.id });
+      }
+
       case 'read': {
         const seq = this.store.markRead(room, member, frame.seq);
         return this.broadcast(room.id, { t: 'read', from: member.id, seq }, ws);

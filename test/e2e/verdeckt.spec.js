@@ -13,6 +13,20 @@
 import { test, expect, devices } from './fixtures.js';
 import { createChat, joinChat, sendText, withName, makePng, longPress } from './helpers.js';
 
+/** Legt eine Gruppe an und gibt die Beitrittslinks zurueck. */
+async function gruppeAnlegen(page, { count = 2, nick = 'Anton' } = {}) {
+  if (nick) await withName(page, nick);
+  await page.goto('./');
+  await page.getByRole('button', { name: /Gruppe erstellen/i }).click();
+  await page.locator('#sheet input[type="text"]').fill('Verein');
+  await page.locator('#group-size').fill(String(count));
+  await page.locator('#sheet').getByRole('button', { name: /^Anlegen$/ }).click();
+  await expect(page.locator('#screen-group')).toBeVisible({ timeout: 20_000 });
+  const codes = await page.locator('#group-codes .invite-row__code').allInnerTexts();
+  const basis = new URL(page.url());
+  return codes.map((c) => `${basis.origin}${basis.pathname}#g:${encodeURIComponent(c.trim())}`);
+}
+
 const HANDY = { ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' };
 
 /** Legt den Schalter "Verdeckt senden" um. */
@@ -171,6 +185,133 @@ test('Auch beim Absender ist sie zugedeckt', async ({ browser }) => {
 
   await kontextA.close();
   await kontextB.close();
+});
+
+/**
+ * Der Absender will wissen, ob schon jemand hingesehen hat.
+ *
+ * Geprüft wird beides: dass es vorher NICHT dasteht - sonst wäre die Marke
+ * eine Behauptung, kein Befund - und dass es hinterher dasteht.
+ */
+test('Der Absender sieht, ob schon aufgedeckt wurde', async ({ browser }) => {
+  const { kontextA, kontextB, seiteA, seiteB } = await paar(browser);
+
+  await verdecktScharfmachen(seiteA);
+  await seiteA.locator('#message-input').fill('Erst nach dem Tippen');
+  await seiteA.locator('#btn-send').click();
+
+  const eigene = seiteA.locator('#messages .msg--out').last();
+  const marke = eigene.locator('.reveal-mark');
+  await expect(marke).toHaveText('zugedeckt', { timeout: 25_000 });
+
+  // Mira hat sie zwar bekommen und gelesen - aber nicht aufgedeckt.
+  const fremde = seiteB.locator('#messages .msg--in:not(.msg--typing)').last();
+  await expect(fremde.locator('.spoiler')).toBeVisible({ timeout: 30_000 });
+  await seiteA.waitForTimeout(1500);
+  await expect(marke).toHaveText('zugedeckt');
+
+  // Und jetzt tippt sie.
+  await fremde.locator('.spoiler').click();
+  await expect(fremde.locator('.bubble__text')).toHaveText('Erst nach dem Tippen');
+  await expect(marke).toHaveText('aufgedeckt', { timeout: 30_000 });
+
+  // Wieder zudecken nimmt die Auskunft nicht zurück: hingesehen wurde.
+  await fremde.locator('.spoiler-again').click();
+  await expect(fremde.locator('.spoiler')).toBeVisible();
+  await seiteA.waitForTimeout(1200);
+  await expect(marke).toHaveText('aufgedeckt');
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+/**
+ * Und die Auskunft muss ein Neuladen überstehen - sie steht beim Server,
+ * nicht nur im Fenster, das sie gerade gesehen hat.
+ */
+test('Aufgedeckt bleibt aufgedeckt, auch nach dem Neuladen', async ({ browser }) => {
+  const { kontextA, kontextB, seiteA, seiteB } = await paar(browser);
+
+  await verdecktScharfmachen(seiteA);
+  await seiteA.locator('#message-input').fill('Bleibt bekannt');
+  await seiteA.locator('#btn-send').click();
+
+  const fremde = seiteB.locator('#messages .msg--in:not(.msg--typing)').last();
+  await expect(fremde.locator('.spoiler')).toBeVisible({ timeout: 30_000 });
+  await fremde.locator('.spoiler').click();
+  await expect(seiteA.locator('#messages .msg--out').last().locator('.reveal-mark'))
+    .toHaveText('aufgedeckt', { timeout: 30_000 });
+
+  await seiteA.reload();
+  const eintrag = seiteA.locator('#chat-list .chat-list__item').first();
+  await expect(eintrag).toBeVisible({ timeout: 25_000 });
+  await eintrag.click();
+  await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+  await expect(seiteA.locator('#messages .msg--out').last().locator('.reveal-mark'))
+    .toHaveText('aufgedeckt', { timeout: 30_000 });
+
+  await kontextA.close();
+  await kontextB.close();
+});
+
+/**
+ * In einer Gruppe reicht ein Ja/Nein nicht: bei sechs Leuten ist "jemand hat
+ * aufgedeckt" nichtssagend. Also die Zahl - und wer dahintersteckt, auf
+ * Wunsch.
+ */
+test('In der Gruppe steht die Zahl - und wer dahintersteckt', async ({ browser }) => {
+  const kontextA = await browser.newContext(HANDY);
+  const kontextB = await browser.newContext(HANDY);
+  const kontextC = await browser.newContext(HANDY);
+  const seiteA = await kontextA.newPage();
+  const seiteB = await kontextB.newPage();
+  const seiteC = await kontextC.newPage();
+
+  const [linkB, linkC] = await gruppeAnlegen(seiteA, { count: 2, nick: 'Anton' });
+  await withName(seiteB, 'Mira');
+  await seiteB.goto(linkB);
+  await expect(seiteB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+  await withName(seiteC, 'Nora');
+  await seiteC.goto(linkC);
+  await expect(seiteC.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+  await seiteA.locator('#btn-group-to-chat').click();
+
+  await verdecktScharfmachen(seiteA);
+  await seiteA.locator('#message-input').fill('Nur für den Verein');
+  await seiteA.locator('#btn-send').click();
+
+  const marke = seiteA.locator('#messages .msg--out').last().locator('.reveal-mark');
+  await expect(marke).toHaveText('zugedeckt', { timeout: 25_000 });
+
+  // Nur Mira deckt auf.
+  const beiMira = seiteB.locator('#messages .msg--in:not(.msg--typing)').last();
+  await expect(beiMira.locator('.spoiler')).toBeVisible({ timeout: 30_000 });
+  await beiMira.locator('.spoiler').click();
+  await expect(marke).toHaveText('aufgedeckt · 1', { timeout: 30_000 });
+
+  // Und im Blatt steht, wer - und wer noch nicht.
+  await marke.click();
+  await expect(seiteA.locator('#sheet')).toBeVisible({ timeout: 10_000 });
+  const blatt = await seiteA.locator('#sheet-body').innerText();
+  expect(blatt).toContain('Mira');
+  expect(blatt).toContain('Nora');
+  const zeilen = await seiteA.evaluate(() => ({
+    auf: [...document.querySelectorAll('#sheet-body .seen-list.is-read .seen-row__name')].map((n) => n.textContent.trim()),
+    zu: [...document.querySelectorAll('#sheet-body .seen-list.is-pending .seen-row__name')].map((n) => n.textContent.trim()),
+  }));
+  expect(zeilen.auf).toEqual(['Mira']);
+  expect(zeilen.zu).toEqual(['Nora']);
+  await seiteA.keyboard.press('Escape');
+
+  // Deckt Nora auch auf, wird aus eins zwei.
+  const beiNora = seiteC.locator('#messages .msg--in:not(.msg--typing)').last();
+  await expect(beiNora.locator('.spoiler')).toBeVisible({ timeout: 30_000 });
+  await beiNora.locator('.spoiler').click();
+  await expect(marke).toHaveText('aufgedeckt · 2', { timeout: 30_000 });
+
+  await kontextA.close();
+  await kontextB.close();
+  await kontextC.close();
 });
 
 /** Wer den Chat verlässt, findet alles wieder zugedeckt vor. */

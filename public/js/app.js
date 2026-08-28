@@ -646,6 +646,7 @@ function teardownChat() {
   typingNode = null;
   schonGezeigt.clear();
   aufgedeckt.clear();
+  gemeldet.clear();
   versteckeSeenBlase();
   app.sendHidden = false;
   renderSpoilerBar();
@@ -837,6 +838,7 @@ function handleFrame(frame) {
     case 'presence': return onPresence(frame);
     case 'role': return onRole(frame);
     case 'avatar': return onAvatarChanged(frame);
+    case 'reveal': return onRevealed(frame);
     case 'left': return onMemberLeft(frame);
     case 'capacity': return onCapacity(frame);
     case 'history': return onHistory(frame);
@@ -967,6 +969,8 @@ async function toEntry(message) {
     att: message.att ?? [],
     payload,
     reactions,
+    /** Wer diese verdeckte Nachricht schon aufgedeckt hat. */
+    revealedBy: Array.isArray(message.revealedBy) ? message.revealedBy : [],
     status: 'sent',
     node: null,
   };
@@ -1204,6 +1208,17 @@ async function onReaction(frame) {
     const value = await safeDecrypt(frame.ct);
     if (value?.e) entry.reactions[frame.from] = value.e;
   }
+  redrawAll();
+}
+
+/** Jemand hat eine verdeckt geschickte Nachricht aufgedeckt. */
+function onRevealed(frame) {
+  const entry = app.messages.get(frame.id);
+  const wer = String(frame.from ?? '');
+  if (!entry || !wer) return;
+  if (!Array.isArray(entry.revealedBy)) entry.revealedBy = [];
+  if (entry.revealedBy.includes(wer)) return;
+  entry.revealedBy.push(wer);
   redrawAll();
 }
 
@@ -1908,12 +1923,37 @@ const istVerdeckt = (entry) => entry?.payload?.hidden === true && !entry.deleted
 /** Und ist sie es gerade auch auf dem Bildschirm? */
 const zeigtDecke = (entry) => istVerdeckt(entry) && !aufgedeckt.has(entry.id);
 
+/**
+ * Welche Aufdeckungen schon gemeldet sind.
+ *
+ * Der Server nimmt eine zweite Meldung nicht an, aber sie zu schicken waere
+ * Laerm: wer eine Nachricht dreimal auf- und zudeckt, meldet einmal.
+ */
+const gemeldet = new Set();
+
 /** Auf- und wieder zudecken. */
 function toggleReveal(entry) {
   if (!istVerdeckt(entry)) return;
   if (aufgedeckt.has(entry.id)) aufgedeckt.delete(entry.id);
-  else aufgedeckt.add(entry.id);
+  else {
+    aufgedeckt.add(entry.id);
+    meldeAufgedeckt(entry);
+  }
   redrawAll();
+}
+
+/**
+ * Sagt dem Absender, dass seine verdeckte Nachricht angesehen wurde.
+ *
+ * Nur beim ersten Mal, nur bei fremden Nachrichten und nur bei solchen, die
+ * der Server schon kennt - eine eigene, noch nicht abgeschickte hat nur eine
+ * vorlaeufige Kennung.
+ */
+function meldeAufgedeckt(entry) {
+  if (isMine(entry) || entry.pending || String(entry.id).startsWith('local:')) return;
+  if (gemeldet.has(entry.id)) return;
+  gemeldet.add(entry.id);
+  app.conn?.send({ t: 'reveal', id: entry.id });
 }
 
 /**
@@ -2049,12 +2089,61 @@ function buildQuote(reply) {
   return quote;
 }
 
+/**
+ * Wer eine verdeckte Nachricht aufgedeckt hat - ohne die, die nicht mehr da
+ * sind, und ohne einen selbst.
+ */
+function aufdecker(entry) {
+  return (entry.revealedBy ?? [])
+    .filter((id) => id !== app.me?.id)
+    .map((id) => app.members.get(id))
+    .filter((member) => member && member.left !== true);
+}
+
+/**
+ * Die Marke an der eigenen verdeckten Nachricht: schon angesehen oder nicht.
+ *
+ * Bewusst Text und kein zweites Auge. In einer Gruppe steht neben der
+ * Lesebestaetigung schon eines, und zwei fast gleiche Augen nebeneinander
+ * sagen weniger als ein Wort.
+ */
+function buildRevealMark(entry) {
+  const wer = aufdecker(entry);
+  const offen = others().filter((member) => !wer.includes(member));
+  const auf = wer.length > 0;
+  const text = auf && isGroup() ? `${t('spoilerOpened')} · ${wer.length}` : (auf ? t('spoilerOpened') : t('spoilerStillCovered'));
+
+  // In einer Gruppe ist die Zahl nur der Anfang der Frage - wer denn?
+  const knoten = isGroup() ? make('button', 'reveal-mark', text) : make('span', 'reveal-mark', text);
+  knoten.classList.toggle('is-open', auf);
+  if (isGroup()) {
+    knoten.type = 'button';
+    knoten.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openSheet(t('spoilerWhoTitle'), [
+        make('p', 'sheet-note sheet-note--strong', `${t('spoilerOpenedBy')} (${wer.length})`),
+        namensListe(wer, 'is-read'),
+        ...(offen.length > 0 ? [
+          make('p', 'sheet-note sheet-note--strong', `${t('spoilerNotYet')} (${offen.length})`),
+          make('p', 'sheet-note', t('spoilerWhoHint')),
+          namensListe(offen, 'is-pending'),
+        ] : []),
+      ], { autofocus: false });
+    });
+  } else {
+    knoten.setAttribute('title', auf ? t('spoilerOpened') : t('spoilerStillCovered'));
+  }
+  return knoten;
+}
+
 function buildMeta(entry, mine) {
   const meta = make('div', 'bubble__meta');
   // Bei einer aufgedeckten Nachricht steht hier der Weg zurueck. Er muss
   // sein: bei einem Bild ist die ganze Blase das Bild, ein Klick darauf
   // gehoert der Lupe, und ohne diesen Knopf bekaeme man sie nie wieder zu.
   if (istVerdeckt(entry) && aufgedeckt.has(entry.id)) meta.appendChild(buildCoverAgain(entry));
+  // Und beim Absender: ob drueben schon jemand hingesehen hat.
+  if (mine && istVerdeckt(entry) && entry.status === 'sent') meta.appendChild(buildRevealMark(entry));
   if (entry.editedAt) meta.appendChild(make('span', null, t('edited')));
   meta.appendChild(make('span', null, formatClock(entry.ts)));
   if (!mine) return meta;
@@ -2187,19 +2276,22 @@ function seenLines(gelesen, offen) {
 }
 
 /** Die ausfuehrliche Liste - am Handy der Weg dorthin. */
+/** Eine Liste mit Bild und Namen - fuer die Lesebestaetigung wie fuers Aufdecken. */
+function namensListe(mitglieder, klasse) {
+  const block = make('div', `seen-list ${klasse}`);
+  for (const member of mitglieder) {
+    const zeile = make('div', 'seen-row');
+    zeile.appendChild(avatarNode(member.id, memberName(member), 'avatar--sm'));
+    zeile.appendChild(make('span', 'seen-row__name', memberName(member)));
+    block.appendChild(zeile);
+  }
+  if (mitglieder.length === 0) block.appendChild(make('p', 'sheet-note', t('seenNobody')));
+  return block;
+}
+
 function openSeenSheet(entry) {
   const { gelesen, offen } = seenSplit(entry.seq);
-  const liste = (mitglieder, klasse) => {
-    const block = make('div', `seen-list ${klasse}`);
-    for (const member of mitglieder) {
-      const zeile = make('div', 'seen-row');
-      zeile.appendChild(avatarNode(member.id, memberName(member), 'avatar--sm'));
-      zeile.appendChild(make('span', 'seen-row__name', memberName(member)));
-      block.appendChild(zeile);
-    }
-    if (mitglieder.length === 0) block.appendChild(make('p', 'sheet-note', t('seenNobody')));
-    return block;
-  };
+  const liste = namensListe;
 
   openSheet(t('seenTitle'), [
     make('p', 'sheet-note sheet-note--strong', `${t('seenRead')} (${gelesen.length})`),

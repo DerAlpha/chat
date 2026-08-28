@@ -1027,6 +1027,24 @@ button, input, textarea { font: inherit; color: inherit; }
 /* Der Weg zurueck sitzt in der Fusszeile der Blase, wo sonst die Uhrzeit
    steht - klein, aber immer erreichbar, auch wenn die ganze Blase ein Bild
    ist und jeder Klick darauf der Lupe gehoert. */
+/* Die Marke an der eigenen verdeckten Nachricht: hat drueben schon jemand
+   hingesehen? Bewusst ein Wort und kein zweites Auge - in einer Gruppe steht
+   neben der Lesebestaetigung schon eines, und zwei fast gleiche Augen
+   nebeneinander sagen weniger als ein Wort. */
+.reveal-mark {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: .72rem;
+  opacity: .9;
+  cursor: inherit;
+}
+button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.reveal-mark.is-open { font-weight: 600; }
+.msg--out .reveal-mark.is-open { color: #cfe9ff; }
+
 .spoiler-again {
   display: inline-grid;
   place-items: center;

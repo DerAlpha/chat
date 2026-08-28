@@ -830,6 +830,7 @@ final class App
                 $nachrichten[$i]['ct'] = '';
                 $nachrichten[$i]['att'] = [];
                 $nachrichten[$i]['reactions'] = (object) [];
+                $nachrichten[$i]['revealedBy'] = [];
             }
             $this->store->saveMessages($raum['id'], $nachrichten);
             foreach ($frei as $blobId) {

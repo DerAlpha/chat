@@ -179,6 +179,41 @@ test('Reaktionen kommen an und lassen sich zuruecknehmen', async () => {
   });
 });
 
+/**
+ * Aufdecken ist eine Einbahnstrasse: einmal gemeldet, bleibt es stehen. Und
+ * die eigene aufzudecken sagt niemandem etwas - sonst stuende beim Absender
+ * "aufgedeckt", weil er selbst nachgesehen hat.
+ */
+test('Aufdecken wird gemeldet - einmal, und nicht fuer sich selbst', async () => {
+  await withServer(async (ctx) => {
+    const { a, b, welcomeB } = await twoMembers(ctx);
+    a.send({ t: 'msg', cid: 'm', ct: b64('verdeckt') });
+    const ack = await a.next('ack');
+    await b.next('msg');
+
+    b.send({ t: 'reveal', id: ack.id });
+    const auf = await a.next('reveal');
+    assert.equal(auf.id, ack.id);
+    assert.equal(auf.from, welcomeB.you.id);
+
+    // Der Absender selbst zaehlt nicht mit: keine Meldung, kein Eintrag.
+    a.send({ t: 'reveal', id: ack.id });
+    a.send({ t: 'ping' });
+    const danach = await a.next('pong');
+    assert.ok(danach, 'der Server hat auf das eigene Aufdecken nicht geantwortet');
+
+    // Und im Verlauf steht genau einer - auch nach einem zweiten Melden.
+    b.send({ t: 'reveal', id: ack.id });
+    b.send({ t: 'history', before: 9_999_999 });
+    const verlauf = await b.next('history');
+    const nachricht = verlauf.messages.find((m) => m.id === ack.id);
+    assert.ok(nachricht, 'die Nachricht steht nicht im Verlauf');
+    assert.deepEqual(nachricht.revealedBy, [welcomeB.you.id]);
+    a.close();
+    b.close();
+  });
+});
+
 test('Verlauf wird beim Wiederverbinden mitgeliefert', async () => {
   await withServer(async (ctx) => {
     const { roomId, a, b, welcomeA } = await twoMembers(ctx);

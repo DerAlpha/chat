@@ -76,10 +76,17 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
 - Der Schalter gilt für genau eine Nachricht und fällt danach zurück. Eine
   Leiste über der Textzeile sagt, dass die nächste verdeckt hinausgeht –
   andersherum schickte man unbemerkt tagelang Flächen statt Sätzen
-- Die Kennzeichnung reist im verschlüsselten Paket mit. Der Server sieht
-  nicht, welche Nachricht verdeckt ist
+- Die Kennzeichnung reist im verschlüsselten Paket mit. Der Server sieht ihr
+  nicht an, dass sie verdeckt ist – er erfährt es erst, wenn jemand aufdeckt
+  und die Meldung dafür bei ihm ankommt (siehe *Was der Server trotzdem weiß*)
 - Aufgedeckt bleibt nur für diesen Besuch: wer den Chat verlässt und
   wiederkommt, findet alles wieder zugedeckt
+- Der Absender sieht an seiner eigenen Blase, ob drüben schon jemand
+  hingesehen hat: „zugedeckt" oder „aufgedeckt". In einer Gruppe steht die
+  Zahl dabei, und ein Antippen zeigt, wer – und wer noch nicht
+- Einmal aufgedeckt bleibt aufgedeckt. Wer wieder zudeckt, hat trotzdem
+  hingesehen; eine Auskunft, die einmal stimmte, wird nicht zurückgenommen
+- Gemeldet wird nur das Aufdecken – nicht, wie lange jemand hingesehen hat
 
 **Wer hat es gelesen?**
 - Unter der eigenen Nachricht steht in Gruppen ein Auge mit einer Zahl: so
@@ -438,6 +445,11 @@ Ehrlichkeit gehört dazu. Der Server sieht:
 - wer wann verbunden ist, und wie viele Anhänge es gibt,
 - die Zugangstoken, die er selbst vergeben hat,
 - wer gerade tippt (nicht was) – das braucht die Übersicht auf der Startseite,
+- wer welche Nachricht aufgedeckt hat. Das ist der Preis dafür, dass der
+  Absender es erfährt: die Meldung nennt die Nachricht beim Namen, und damit
+  weiß der Server auch, dass genau diese verdeckt geschickt wurde. Ohne diese
+  Auskunft ginge das Feature nicht – also steht es hier und nicht im
+  Kleingedruckten,
 - die IP-Adressen der Verbindungen (wie bei jedem Webserver).
 
 Er sieht **nicht**: Codes, Klartexte, Bilder, Namen, Dateinamen oder Reaktionen.
@@ -537,8 +549,8 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 ## Tests
 
 ```bash
-npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 143 Tests am Smartphone + 16 am Rechner
+npm test                  # 315 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
+npm run test:e2e          # 146 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -573,7 +585,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 159 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 162 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -604,6 +616,10 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Beim Verdeckten wird nicht die Klasse im DOM geprüft, sondern gesucht: der
   Text darf nirgends im Dokument stehen, solange nicht getippt wurde. Ein Test
   legt zur Gegenprobe den Inhalt hinter die Fläche – und wird rot.
+- Bei der Rückmeldung ans Absender-Gerät wird auch das Vorher geprüft: die
+  Marke muss „zugedeckt" sagen, solange niemand getippt hat. Ohne diese
+  Hälfte wäre sie eine Behauptung und kein Befund. Und ein Neuladen muss sie
+  überstehen – sie steht beim Server, nicht nur im Fenster, das sie sah.
 - Beim Verbergen wird nicht die Anzeige geprüft, sondern der Server: die
   Gegenseite fragt mit ihrem eigenen, gültigen Token nach dem Bild und muss
   404 bekommen. Eine leere Kopfzeile beweist nichts, wenn das Bild eine

@@ -541,6 +541,14 @@ export class Store {
       deleted: false,
       editedAt: null,
       reactions: {},
+      /**
+       * Wer eine verdeckt geschickte Nachricht aufgedeckt hat.
+       *
+       * Steht hier fuer JEDE Nachricht, nicht nur fuer verdeckte: der Server
+       * weiss ohnehin nicht, welche verdeckt ist, und ein Feld, das es nur
+       * bei manchen gibt, waere schon die Antwort darauf.
+       */
+      revealedBy: [],
     };
     for (const blobId of attachments) room.blobs.get(blobId).messageId = message.id;
     room.messages.push(message);
@@ -577,6 +585,7 @@ export class Store {
     message.deleted = true;
     message.ct = '';
     message.reactions = {};
+    message.revealedBy = [];
     this.releaseAttachments(room, message);
     message.att = [];
     room.touch(this.now());
@@ -596,6 +605,27 @@ export class Store {
       }
       message.reactions[member.id] = ct;
     }
+    room.touch(this.now());
+    this.markDirty();
+    return message;
+  }
+
+  /**
+   * Jemand hat eine verdeckte Nachricht aufgedeckt.
+   *
+   * Einmal aufgedeckt bleibt aufgedeckt: wer wieder zudeckt, hat trotzdem
+   * hingesehen, und der Absender bekommt keine Auskunft zurueckgenommen, die
+   * einmal stimmte.
+   */
+  addReveal(room, member, messageId) {
+    const message = room.messages.find((m) => m.id === messageId);
+    if (!message) throw new BadRequest('unknown_message', 'Nachricht nicht gefunden.');
+    if (message.deleted) throw new BadRequest('message_deleted', 'Nachricht ist geloescht.');
+    // Die eigene aufzudecken sagt niemandem etwas.
+    if (message.from === member.id) return message;
+    if (!Array.isArray(message.revealedBy)) message.revealedBy = [];
+    if (message.revealedBy.includes(member.id)) return message;
+    message.revealedBy.push(member.id);
     room.touch(this.now());
     this.markDirty();
     return message;

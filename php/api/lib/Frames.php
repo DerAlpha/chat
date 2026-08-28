@@ -55,6 +55,7 @@ final class Frames
             'edit' => $this->edit($frame),
             'del' => $this->delete($frame),
             'react' => $this->react($frame),
+            'reveal' => $this->reveal($frame),
             'read' => $this->read($frame),
             'typing' => $this->typing($frame),
             'nick' => $this->nick($frame),
@@ -111,6 +112,10 @@ final class Frames
                 'deleted' => false,
                 'editedAt' => null,
                 'reactions' => (object) [],
+                // Steht bei JEDER Nachricht, nicht nur bei verdeckten: der
+                // Server weiss ohnehin nicht, welche verdeckt ist, und ein
+                // Feld, das es nur bei manchen gibt, waere schon die Antwort.
+                'revealedBy' => [],
             ];
             foreach ($blobIds as $blobId) {
                 $room['blobs'][$blobId]['messageId'] = $message['id'];
@@ -187,6 +192,7 @@ final class Frames
             $messages[$index]['ct'] = '';
             $messages[$index]['att'] = [];
             $messages[$index]['reactions'] = (object) [];
+            $messages[$index]['revealedBy'] = [];
             $this->store->saveMessages($this->roomId, $messages);
 
             [$room] = $this->store->appendEvent($this->roomId, $room, ['t' => 'del', 'id' => $id, 'from' => $memberId]);
@@ -221,6 +227,48 @@ final class Frames
 
             [$room] = $this->store->appendEvent($this->roomId, $room, [
                 't' => 'react', 'id' => $id, 'from' => $memberId, 'ct' => $ct,
+            ]);
+            return [$room, null];
+        });
+    }
+
+    /**
+     * Jemand hat eine verdeckte Nachricht aufgedeckt.
+     *
+     * Einmal aufgedeckt bleibt aufgedeckt: wer wieder zudeckt, hat trotzdem
+     * hingesehen, und der Absender bekommt keine Auskunft zurueckgenommen,
+     * die einmal stimmte.
+     *
+     * @param array<string,mixed> $frame
+     */
+    private function reveal(array $frame): void
+    {
+        $id = (string) ($frame['id'] ?? '');
+        $memberId = $this->memberId;
+
+        $this->store->mutate($this->roomId, function (array $room) use ($id, $memberId): array {
+            $messages = $this->store->loadMessages($this->roomId);
+            $index = $this->findMessage($messages, $id);
+            if (!empty($messages[$index]['deleted'])) {
+                Http::fail(400, 'message_deleted', 'Nachricht ist geloescht.');
+            }
+            // Die eigene aufzudecken sagt niemandem etwas.
+            if ((string) ($messages[$index]['from'] ?? '') === $memberId) {
+                return [$room, null];
+            }
+            $wer = array_values(array_filter(
+                (array) ($messages[$index]['revealedBy'] ?? []),
+                static fn ($eintrag): bool => is_string($eintrag),
+            ));
+            if (in_array($memberId, $wer, true)) {
+                return [$room, null];
+            }
+            $wer[] = $memberId;
+            $messages[$index]['revealedBy'] = $wer;
+            $this->store->saveMessages($this->roomId, $messages);
+
+            [$room] = $this->store->appendEvent($this->roomId, $room, [
+                't' => 'reveal', 'id' => $id, 'from' => $memberId,
             ]);
             return [$room, null];
         });
