@@ -513,6 +513,11 @@ server/
   ws.js         WebSocket-Verteiler: Nachrichten, Präsenz, Tippanzeige
   store.js      Räume, Mitglieder, Verlauf, Anhänge, Momentaufnahme auf Platte
   ratelimit.js  Token-Bucket ohne Fremdcode
+  ice.js        STUN/TURN-Auskunft für Anrufe
+  gifs.js       Die GIF-Suche, die den Browser nicht zu Giphy schickt
+  secrets.js    Das Servergeheimnis, das die kurzlebigen Zugangsdaten trägt
+  version.js    Liest die gestempelte Fassung
+  logger.js     Ausgaben, ohne Fremdcode
   config.js     Alle Stellschrauben an einem Ort
 public/
   index.html    Grundgerüst inklusive Icon-Sprite
@@ -534,7 +539,10 @@ public/
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
 scripts/
-  version.mjs   Rechnet die Fassung aus dem Inhalt und stempelt sie ein
+  version.mjs        Rechnet die Fassung aus dem Inhalt und stempelt sie ein
+  build-webspace.mjs Schnürt das fertige Verzeichnis zum Hochladen
+  make-icons.mjs     Rechnet die Icons aus der Bildmarke
+  php-dev.mjs        Startet das PHP-Backend zum Ausprobieren
 turn/
   stun.js       STUN/TURN-Nachrichten lesen und schreiben (RFC 5389/5766)
   server.js     Der eigene Relaisdienst für Anrufe
@@ -543,13 +551,13 @@ turn/
 ```
 
 Keine Build-Kette, kein Bundler, kein Framework: Der Browser lädt die ES-Module direkt.
-Auf dem Node-Server stehen nur `express` und `ws`, im PHP-Backend gar keine
-Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
+Auf dem Node-Server stehen nur `express`, `ws` und `compression`, im PHP-Backend
+gar keine Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ## Tests
 
 ```bash
-npm test                  # 315 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
+npm test                  # 331 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
 npm run test:e2e          # 146 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
@@ -666,6 +674,24 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   Ecken der runden Symbole durchsichtig sind (dort lag vorher eine flache
   Farbe hinter einem Verlauf – ein blauer Viertelmond im violetten Eck) und
   dass das Abzeichen für die Statusleiste seine Leinwand ausfüllt.
+- Die Farbkontraste werden gerechnet, nicht geschätzt: ein Test liest die
+  Farbtoken aus dem Stilblatt – hell UND dunkel, denn dort war der
+  Unterschied – und rechnet jede Paarung nach WCAG 2.2 AA nach. Eine Farbe,
+  die „noch geht", geht bei Sonnenlicht auf einem billigen Bildschirm eben
+  nicht mehr.
+- Was mit Anhängen passiert, wenn niemand mehr auf sie zeigt, wird gegen
+  beide Backends gefahren: eine verdrängte Nachricht nimmt ihre Anhänge mit,
+  ein Upload ohne Nachricht bleibt erst einmal liegen – wer beim Aufräumen
+  die Altersgrenze vergisst, reißt dem, der drei Bilder für eine Nachricht
+  auswählt, die ersten beiden weg.
+- Und dass beide Server dasselbe als Chiffrat durchgehen lassen: aus `ct: 123`
+  wurde auf der PHP-Seite `"123"`, aus einem Feld `"Array"` – unlesbar für
+  jeden, und nicht mehr aus dem Verlauf zu bekommen.
+- Beim Anklopfen an einem fremden Raum wird mitgezählt, wie oft: die
+  WebSocket war der Weg, über den der Beitritt tatsächlich zustande kommt,
+  und lag als einziger außerhalb jeder Begrenzung. Wer schon ein Token hat,
+  zählt nicht mit – sonst sperrt sich eine wacklige Mobilfunkleitung selbst
+  aus.
 - Das gebaute Upload-Paket wurde zusätzlich unter einem echten Apache mit
   `mod_php` und der mitgelieferten `.htaccess` durchgetestet. Dabei fiel auf,
   dass Apache vielerorts ein `Alias /icons/` auf sein eigenes Symbolverzeichnis

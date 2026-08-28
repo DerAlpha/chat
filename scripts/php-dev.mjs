@@ -31,9 +31,30 @@ export function buildDocRoot(target = docRoot) {
   return target;
 }
 
+/**
+ * Schreibt die oertliche Konfiguration als PHP.
+ *
+ * Nicht als JSON mit getauschten Anfuehrungszeichen: `{ 'a': 1 }` ist ein
+ * gueltiges JavaScript-Objekt, aber kein gueltiges PHP - dort braucht es
+ * eckige Klammern und `=>`. Die Datei liess sich deshalb nicht einlesen, und
+ * `npm run php:dev` antwortete auf jede Anfrage mit einem Parse-Fehler.
+ */
 export function writeLocalConfig(target, overrides) {
-  const body = `<?php\nreturn ${JSON.stringify(overrides, null, 4).replace(/"/g, "'")};\n`;
-  fs.writeFileSync(path.join(target, 'api', 'lib', 'config.local.php'), body);
+  fs.writeFileSync(path.join(target, 'api', 'lib', 'config.local.php'), phpConfig(overrides));
+}
+
+/** @param {Record<string, string|number|boolean>} overrides */
+export function phpConfig(overrides) {
+  const zeilen = Object.entries(overrides).map(([name, wert]) => `    ${phpWert(name)} => ${phpWert(wert)},`);
+  return `<?php\nreturn [\n${zeilen.join('\n')}\n];\n`;
+}
+
+function phpWert(wert) {
+  if (typeof wert === 'number' && Number.isFinite(wert)) return String(wert);
+  if (typeof wert === 'boolean') return wert ? 'true' : 'false';
+  // Einfache Anfuehrungszeichen kennen in PHP genau zwei Fluchtzeichen:
+  // den Backslash und das Anfuehrungszeichen selbst.
+  return `'${String(wert).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
