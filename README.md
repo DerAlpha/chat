@@ -489,7 +489,7 @@ Fremdbibliothek – nur `json` und `mbstring` aus der Standardausstattung.
 
 ```bash
 npm test                  # 314 Unit-Tests (Server, Krypto, QR, i18n, Installer, STUN/TURN, GIFs, Anrufe, Gruppen, Uebersicht, Klang, Bildmarke, Fassung)
-npm run test:e2e          # 123 Tests am Smartphone + 16 am Rechner
+npm run test:e2e          # 124 Tests am Smartphone + 16 am Rechner
 npm run test:e2e:subpath  # dieselben Tests unter /chats
 npm run test:e2e:php      # dieselben Tests gegen das PHP-Backend
 npm run test:all
@@ -524,7 +524,7 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
 - Ein Mitschnitt des Aushandlungskanals belegt, dass weder Angebot noch
   Adresskandidat noch Zertifikats-Fingerabdruck im Klartext über den Server gehen.
 - Die komplette Suite läuft mehrfach: gegen Node, gegen Node unter `/chats` und
-  gegen das PHP-Backend. Dieselben 139 Tests, drei Auslieferungen – damit fällt
+  gegen das PHP-Backend. Dieselben 140 Tests, drei Auslieferungen – damit fällt
   auf, wenn eine davon bei der nächsten Änderung wegbricht.
 - Für die Übersicht wird nachgemessen, dass mit falschem Token nichts über
   den Inhalt eines Raums herauskommt – keine Zahl, keine Zeit, kein Tippen.
@@ -559,6 +559,11 @@ Ein paar Dinge, die dabei tatsächlich geprüft werden:
   Fläche nachgemessen. Nichts darf halb durchsichtig oder verschoben
   hängenbleiben, auch kein Menüeintrag – eine stehengebliebene Verzögerung
   hielte ihn in seinem Anfangszustand fest, und der ist unsichtbar.
+- Die Tippblase wird nicht als Nachricht mitgezählt. Sie sah aus wie eine
+  eingehende Blase und stand auch so im Verlauf – ohne Absender, ohne Text.
+  Zwei Gruppentests fielen deshalb gegen PHP immer wieder grundlos um: beim
+  langen Abfragen kommt die Tippmeldung genau im falschen Moment, die Zählung
+  ist erfüllt, und der Test sucht dann einen Namen, den es dort nie gab.
 - Beim Austritt wird nachgemessen, dass das alte Token wirklich nichts mehr
   öffnet – auch nicht die Übersicht, die sonst weiter verraten hätte, wann in
   der Gruppe zuletzt etwas ankam und wer gerade tippt.

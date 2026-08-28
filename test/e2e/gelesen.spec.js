@@ -25,7 +25,7 @@ async function gruppeAnlegen(page, { name = 'Verein', count = 2, nick = 'Anton' 
   return codes.map((code) => `${basis.origin}${basis.pathname}#g:${encodeURIComponent(code.trim())}`);
 }
 
-const auge = (seite) => seite.locator('#messages .msg--out .seen').last();
+const auge = (seite) => seite.locator('#messages .msg--out:not(.msg--typing) .seen').last();
 
 test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ browser }) => {
   const kontextA = await browser.newContext(HANDY);
@@ -51,7 +51,7 @@ test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ 
   await seiteA.locator('#btn-send').click();
 
   // Mira hat den Chat offen und liest - Cem nicht.
-  await expect(seiteB.locator('#messages .msg--in')).toContainText('Wer liest das?', { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Wer liest das?', { timeout: 30_000 });
 
   // Das Auge steht da und zählt mit.
   await expect(auge(seiteA)).toBeVisible({ timeout: 20_000 });
@@ -82,7 +82,7 @@ test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ 
   // Liest Cem doch noch, zählt das Auge weiter.
   await seiteA.keyboard.press('Escape');
   await seiteC.locator('#chat-list .chat-list__item').first().click();
-  await expect(seiteC.locator('#messages .msg--in')).toContainText('Wer liest das?', { timeout: 30_000 });
+  await expect(seiteC.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Wer liest das?', { timeout: 30_000 });
   await expect(auge(seiteA).locator('.seen__count')).toHaveText('2', { timeout: 40_000 });
 
   await kontextA.close();
@@ -101,11 +101,11 @@ test('Im Zweiergespräch bleibt es beim Haken', async ({ browser }) => {
 
   await seiteA.locator('#message-input').fill('Nur wir zwei');
   await seiteA.locator('#btn-send').click();
-  await expect(seiteB.locator('#messages .msg--in')).toContainText('Nur wir zwei', { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Nur wir zwei', { timeout: 30_000 });
 
   // Kein Auge - bei einer Person sagt der Haken alles.
-  await expect(seiteA.locator('#messages .msg--out .seen')).toHaveCount(0);
-  await expect(seiteA.locator('#messages .msg--out .bubble__meta .icon')).toBeVisible();
+  await expect(seiteA.locator('#messages .msg--out:not(.msg--typing) .seen')).toHaveCount(0);
+  await expect(seiteA.locator('#messages .msg--out:not(.msg--typing) .bubble__meta .icon')).toBeVisible();
 
   await kontextA.close();
   await kontextB.close();

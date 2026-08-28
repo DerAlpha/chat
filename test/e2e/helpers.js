@@ -93,7 +93,9 @@ export async function sendText(page, text) {
   await page.locator('#btn-send').click();
 }
 
-export const bubbles = (page) => page.locator('#messages .msg');
+/* Ohne die Tippblase: sie sieht aus wie eine eingehende Nachricht, ist aber
+   keine - und taucht gern genau dann auf, wenn gerade gezaehlt wird. */
+export const bubbles = (page) => page.locator('#messages .msg:not(.msg--typing)');
 
 /**
  * Echtes langes Druecken mit dem Finger. Playwright kennt nur Tippen, deshalb

@@ -138,7 +138,42 @@ test('Tippanzeige und Lesebestätigung', async ({ browser }) => {
   // Nachricht von A wird von B gelesen -> doppelter Haken bei A.
   await sendText(pageA, 'Gelesen?');
   await expect(bubbles(pageB).last()).toContainText('Gelesen?');
-  await expect(pageA.locator('#messages .msg--out').last().locator('.is-read')).toBeVisible({ timeout: 10_000 });
+  await expect(pageA.locator('#messages .msg--out:not(.msg--typing)').last().locator('.is-read')).toBeVisible({ timeout: 10_000 });
+
+  await contextA.close();
+  await contextB.close();
+});
+
+/**
+ * Die Tippblase ist keine Nachricht.
+ *
+ * Sie sieht aus wie eine eingehende Blase und stand auch so im Verlauf: als
+ * `.msg--in`, ohne Absender und ohne Text. Wer eingehende Nachrichten zählt,
+ * zählte sie mit – und wartete dann auf einen Namen, den es dort nie gab.
+ * Das war der Grund für zwei Tests, die gegen das PHP-Backend immer wieder
+ * grundlos umfielen: bei langem Abfragen kommt die Tippmeldung genau im
+ * falschen Moment.
+ */
+test('Wer tippt, hat noch nichts geschickt', async ({ browser }) => {
+  const { pageA, pageB, contextA, contextB } = await pairUp(browser);
+
+  await sendText(pageB, 'Eine echte Nachricht');
+  await expect(pageA.locator('#messages .msg--in:not(.msg--typing)')).toHaveCount(1, { timeout: 20_000 });
+
+  // Jetzt tippt B, ohne abzuschicken.
+  await pageB.locator('#message-input').pressSequentially('und noch eine', { delay: 20 });
+  await expect(pageA.locator('#messages .typing-bubble')).toBeVisible({ timeout: 15_000 });
+
+  // Solange die Blase steht, ist trotzdem nur eine Nachricht angekommen.
+  // In einem Zug gezaehlt: die Tippanzeige laeuft nach ein paar Sekunden ab,
+  // und ein Test, der so lange wartet, wuerde am Ende immer gruen.
+  const stand = await pageA.evaluate(() => ({
+    tippt: document.querySelectorAll('#messages .msg--typing').length,
+    eingehend: document.querySelectorAll('#messages .msg--in:not(.msg--typing)').length,
+    text: document.querySelector('#messages .msg--in:not(.msg--typing) .bubble__text')?.textContent?.trim(),
+  }));
+  expect(stand, `waehrend des Tippens gezaehlt: ${JSON.stringify(stand)}`)
+    .toEqual({ tippt: 1, eingehend: 1, text: 'Eine echte Nachricht' });
 
   await contextA.close();
   await contextB.close();

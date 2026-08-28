@@ -331,7 +331,7 @@ test('Ein langer Name schiebt die App nicht aus dem Bild', async ({ browser }) =
   await expect(page.locator('#peer-name')).toHaveText(/Maximiliane/);
 
   await sendText(page, 'Eine eigene Nachricht');
-  await expect(page.locator('#messages .msg')).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.locator('#messages .msg:not(.msg--typing)')).toHaveCount(1, { timeout: 20_000 });
   // Der Sende-Knopf zeigt sich nur, wenn etwas im Feld steht.
   await page.locator('#message-input').fill('Noch etwas');
 
@@ -455,7 +455,7 @@ test('Mehrere schnell abgeschickte Nachrichten behalten ihre Reihenfolge', async
       input.dispatchEvent(new Event('input', { bubbles: true }));
       send.click();
     }
-    return [...document.querySelectorAll('#messages .msg')].map((node) => node.textContent);
+    return [...document.querySelectorAll('#messages .msg:not(.msg--typing)')].map((node) => node.textContent);
   }, expected);
 
   expect(whileStillPending).toHaveLength(expected.length);

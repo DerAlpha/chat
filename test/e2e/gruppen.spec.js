@@ -64,12 +64,12 @@ test('Drei Leute reden in derselben Gruppe', async ({ browser }) => {
   await senden(seiteB, 'Hallo zusammen');
   // Beide anderen sehen es - und sehen, von wem es kommt.
   for (const seite of [seiteA, seiteC]) {
-    await expect(seite.locator('#messages .msg--in').last()).toContainText('Hallo zusammen', { timeout: 25_000 });
-    await expect(seite.locator('#messages .msg--in').last().locator('.bubble__from')).toHaveText('Mira');
+    await expect(seite.locator('#messages .msg--in:not(.msg--typing)').last()).toContainText('Hallo zusammen', { timeout: 25_000 });
+    await expect(seite.locator('#messages .msg--in:not(.msg--typing)').last().locator('.bubble__from')).toHaveText('Mira');
   }
 
   await senden(seiteC, 'Moin');
-  await expect(seiteB.locator('#messages .msg--in').last()).toContainText('Moin', { timeout: 25_000 });
+  await expect(seiteB.locator('#messages .msg--in:not(.msg--typing)').last()).toContainText('Moin', { timeout: 25_000 });
 
   await kontextA.close();
   await kontextB.close();
@@ -259,7 +259,7 @@ test('Neu laden fuehrt zurueck in dieselbe Gruppe', async ({ browser }) => {
   await joinGroup(seiteB, link, 'Mira');
   await seiteB.locator('#message-input').fill('Bin da');
   await seiteB.locator('#btn-send').click();
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(1);
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(1);
 
   await seiteB.reload();
   // Wie bei einem Zweiergespraech landet man auf der Uebersicht und tippt
@@ -269,8 +269,8 @@ test('Neu laden fuehrt zurueck in dieselbe Gruppe', async ({ browser }) => {
   await seiteB.locator('#chat-list .chat-list__item').first().click();
   await expect(seiteB.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
   await expect(seiteB.locator('#peer-name')).toHaveText('Verein');
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(1, { timeout: 25_000 });
-  await expect(seiteB.locator('#messages .msg').first()).toContainText('Bin da');
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(1, { timeout: 25_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)').first()).toContainText('Bin da');
 
   await kontextA.close();
   await kontextB.close();
@@ -309,8 +309,8 @@ test('Namenlose in einer Gruppe bleiben unterscheidbar', async ({ browser }) => 
   await seiteC.locator('#message-input').fill('Zwei');
   await seiteC.locator('#btn-send').click();
 
-  await expect(seiteA.locator('#messages .msg--in')).toHaveCount(2, { timeout: 25_000 });
-  const namen = await seiteA.locator('#messages .msg--in .bubble__from').allInnerTexts();
+  await expect(seiteA.locator('#messages .msg--in:not(.msg--typing)')).toHaveCount(2, { timeout: 25_000 });
+  const namen = await seiteA.locator('#messages .msg--in:not(.msg--typing) .bubble__from').allInnerTexts();
   expect(namen).toHaveLength(2);
   expect(namen[0]).not.toBe(namen[1]);
   for (const name of namen) expect(name).toMatch(/Ohne Namen \d/);
@@ -349,12 +349,12 @@ test('Geht ein Namenloser, behalten die anderen ihre Nummer', async ({ browser }
   await seiteA.locator('#btn-group-to-chat').click();
   await senden(seiteB, 'Eins');
   await senden(seiteC, 'Zwei');
-  await expect(seiteA.locator('#messages .msg--in')).toHaveCount(2, { timeout: 25_000 });
+  await expect(seiteA.locator('#messages .msg--in:not(.msg--typing)')).toHaveCount(2, { timeout: 25_000 });
 
   // Wer ist wer? Aus A's Sicht: welcher Name steht ueber welcher Nachricht.
   const zuordnung = await seiteA.evaluate(() => {
     const paare = {};
-    for (const blase of document.querySelectorAll('#messages .msg--in .bubble')) {
+    for (const blase of document.querySelectorAll('#messages .msg--in:not(.msg--typing) .bubble')) {
       const name = blase.querySelector('.bubble__from')?.textContent?.trim();
       const text = blase.querySelector('.bubble__text')?.textContent?.trim();
       if (name && text) paare[text] = name;
@@ -380,7 +380,7 @@ test('Geht ein Namenloser, behalten die anderen ihre Nummer', async ({ browser }
   await expect(seiteA.locator('#messages')).toContainText(/hat die Gruppe verlassen/i, { timeout: 30_000 });
 
   // Die verbliebene Blase traegt genau denselben Namen wie vorher.
-  const nachher = await seiteA.locator('#messages .msg--in .bubble__from').allInnerTexts();
+  const nachher = await seiteA.locator('#messages .msg--in:not(.msg--typing) .bubble__from').allInnerTexts();
   expect(nachher).toHaveLength(1);
   expect(nachher[0], `vorher hiess "${bleibt}" noch ${zuordnung[bleibt]}`).toBe(zuordnung[bleibt]);
 

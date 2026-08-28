@@ -458,9 +458,9 @@ test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browse
 
   await pageA.locator('#btn-group-to-chat').click();
   await sendText(pageA, 'Gelesen?');
-  await expect(pageB.locator('#messages .msg--in')).toContainText('Gelesen?', { timeout: 30_000 });
+  await expect(pageB.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Gelesen?', { timeout: 30_000 });
 
-  const auge = pageA.locator('#messages .msg--out .seen').last();
+  const auge = pageA.locator('#messages .msg--out:not(.msg--typing) .seen').last();
   await expect(auge).toBeVisible({ timeout: 20_000 });
   await expect(auge.locator('.seen__count')).toHaveText('1', { timeout: 30_000 });
 
@@ -477,7 +477,7 @@ test('Wer über das Auge fährt, sieht die Blase mit den Namen', async ({ browse
 
   // Und sie steht über dem Auge, nicht irgendwo.
   const lage = await pageA.evaluate(() => {
-    const knopf = [...document.querySelectorAll('#messages .msg--out .seen')].pop();
+    const knopf = [...document.querySelectorAll('#messages .msg--out:not(.msg--typing) .seen')].pop();
     const b = knopf.querySelector('.seen__bubble').getBoundingClientRect();
     const a = knopf.getBoundingClientRect();
     return { blaseUnten: Math.round(b.bottom), augeOben: Math.round(a.top), breit: Math.round(b.width) };

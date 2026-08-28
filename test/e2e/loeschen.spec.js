@@ -43,7 +43,7 @@ async function zweiChats(browser) {
     await joinChat(seite, link, { nick });
     await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
     await sendText(seiteA, `Hallo ${nick}`);
-    await expect(seite.locator('#messages .msg')).toHaveCount(1, { timeout: 25_000 });
+    await expect(seite.locator('#messages .msg:not(.msg--typing)')).toHaveCount(1, { timeout: 25_000 });
     await seiteA.locator('#chat-back').click();
     await expect(seiteA.locator('#screen-start')).toBeVisible();
     gegen.push(seite);
@@ -299,9 +299,9 @@ test('Beim Löschen wird eine Gruppe verlassen, nicht vernichtet', async ({ brow
 
   await seiteA.locator('#btn-group-to-chat').click();
   await sendText(seiteA, 'Das hier verschwindet');
-  await expect(seiteB.locator('#messages .msg--in')).toContainText('Das hier verschwindet', { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Das hier verschwindet', { timeout: 30_000 });
   await sendText(seiteB, 'Das hier bleibt');
-  await expect(seiteA.locator('#messages .msg--in')).toContainText('Das hier bleibt', { timeout: 30_000 });
+  await expect(seiteA.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Das hier bleibt', { timeout: 30_000 });
 
   await seiteA.locator('#chat-back').click();
   await expect(seiteA.locator('#screen-start')).toBeVisible();

@@ -22,20 +22,20 @@ test('Nur wirklich neue Nachrichten bewegen sich', async ({ browser }) => {
   await expect(seiteA.locator('#screen-chat')).toBeVisible({ timeout: 20_000 });
 
   for (let i = 0; i < 3; i += 1) await sendText(seiteA, `Zeile ${i}`);
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(3, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(3, { timeout: 30_000 });
 
   // Frisch geöffnet: der Verlauf steht einfach da, nichts fährt ein.
   await seiteB.reload();
   const eintrag = seiteB.locator('#chat-list .chat-list__item').first();
   await expect(eintrag).toBeVisible({ timeout: 25_000 });
   await eintrag.click();
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(3, { timeout: 25_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(3, { timeout: 25_000 });
   expect(await seiteB.locator('#messages .msg.is-new').count(),
     'der ganze Verlauf faehrt beim Oeffnen ein').toBe(0);
 
   // Eine neue Nachricht bewegt sich - und nur sie.
   await sendText(seiteA, 'Und jetzt neu');
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(4, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(4, { timeout: 30_000 });
   await expect(seiteB.locator('#messages .msg.is-new')).toHaveCount(1);
   await expect(seiteB.locator('#messages .msg.is-new')).toContainText('Und jetzt neu');
   const bewegt = await seiteB.locator('#messages .msg.is-new')
@@ -45,7 +45,7 @@ test('Nur wirklich neue Nachrichten bewegen sich', async ({ browser }) => {
   // Und bei der nächsten Kleinigkeit - hier eine Lesebestätigung, die den
   // ganzen Verlauf neu aufbaut - hüpft nichts hinterher.
   await sendText(seiteB, 'Gelesen');
-  await expect(seiteA.locator('#messages .msg')).toHaveCount(5, { timeout: 30_000 });
+  await expect(seiteA.locator('#messages .msg:not(.msg--typing)')).toHaveCount(5, { timeout: 30_000 });
   await seiteB.waitForTimeout(600);
   const nochNeu = await seiteB.locator('#messages .msg.is-new').allInnerTexts();
   expect(nochNeu.length, `noch als neu markiert: ${nochNeu.join(' / ')}`).toBeLessThanOrEqual(1);
@@ -94,7 +94,7 @@ test('Ohne Bewegung ist trotzdem alles da', async ({ browser }) => {
 
   // Alles Sichtbare ist wirklich sichtbar - keine hängengebliebene Einblendung.
   const durchsichtig = await seiteB.evaluate(() => {
-    const verdaechtig = ['#screen-chat', '.chat-header', '#messages', '#messages .msg', '.composer', '#composer'];
+    const verdaechtig = ['#screen-chat', '.chat-header', '#messages', '#messages .msg:not(.msg--typing)', '.composer', '#composer'];
     const blass = [];
     for (const wahl of verdaechtig) {
       for (const knoten of document.querySelectorAll(wahl)) {

@@ -216,7 +216,7 @@ test('Wer den Ton abschaltet, hoert nichts mehr', async ({ browser }) => {
   await seiteA.evaluate(() => { window.__pegel = 0; });
   await sendText(seiteA, 'Leise');
   await sendText(seiteB, 'Auch leise');
-  await expect(seiteA.locator('#messages .msg').last()).toContainText('Auch leise', { timeout: 20_000 });
+  await expect(seiteA.locator('#messages .msg:not(.msg--typing)').last()).toContainText('Auch leise', { timeout: 20_000 });
   await seiteA.waitForTimeout(900);
 
   expect(await toene(seiteA)).toHaveLength(still);

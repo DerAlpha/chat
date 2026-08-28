@@ -1630,7 +1630,11 @@ function syncTypingBubble() {
     return;
   }
   if (!typingNode) {
-    typingNode = make('div', 'msg msg--in');
+    // Eigene Klasse, obwohl sie aussieht wie eine eingehende Blase: sie ist
+    // keine Nachricht. Wer Nachrichten zaehlt - die Oberflaeche wie die
+    // Tests -, muss sie auslassen koennen, sonst gilt ein Tippen als
+    // angekommene Nachricht.
+    typingNode = make('div', 'msg msg--in msg--typing');
     const bubble = make('div', 'bubble typing-bubble');
     bubble.append(make('i'), make('i'), make('i'));
     typingNode.appendChild(bubble);

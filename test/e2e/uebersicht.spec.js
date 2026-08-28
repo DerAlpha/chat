@@ -192,7 +192,7 @@ test('Ungelesene Nachrichten bekommen einen Punkt mit Zahl', async ({ browser })
 
   // Und wer den Chat oeffnet, hat sie gelesen.
   await seiteA.locator('#chat-list .chat-list__item').first().click();
-  await expect(seiteA.locator('#messages .msg')).toHaveCount(3, { timeout: 25_000 });
+  await expect(seiteA.locator('#messages .msg:not(.msg--typing)')).toHaveCount(3, { timeout: 25_000 });
   await seiteA.locator('#chat-back').click();
   await expect(seiteA.locator('#chat-list .pill--unread')).toHaveCount(0, { timeout: 30_000 });
 

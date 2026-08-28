@@ -41,7 +41,7 @@ async function langerChat(browser) {
     await seiteA.locator('#btn-send').click();
     await expect(seiteA.locator('#attachments')).toBeHidden({ timeout: 20_000 });
   }
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(24, { timeout: 60_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(24, { timeout: 60_000 });
   return { kontextA, kontextB, seiteA, seiteB };
 }
 
@@ -57,7 +57,7 @@ test('Ein längerer Chat öffnet sich bei der neuesten Nachricht', async ({ brow
     await seiteA.locator('#btn-send').click();
     await expect(seiteA.locator('#attachments')).toBeHidden({ timeout: 20_000 });
   }
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(29, { timeout: 60_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(29, { timeout: 60_000 });
 
   // Frisch laden und aus der Liste öffnen - so, wie man es morgens tut.
   await seiteB.reload();
@@ -74,11 +74,11 @@ test('Ein längerer Chat öffnet sich bei der neuesten Nachricht', async ({ brow
     expect(await abstandUnten(seiteB), `nach ${(i + 1) * 250} ms nicht mehr unten`).toBeLessThanOrEqual(4);
   }
   // Die neueste Nachricht steht im Bild, und der Sprungknopf hat nichts zu tun.
-  await expect(seiteB.locator('#messages .msg').last()).toBeInViewport();
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)').last()).toBeInViewport();
   await expect(seiteB.locator('#jump-down')).toBeHidden();
   // Und der Verlauf wurde nicht gleich mit hereingezogen: Aelteres kommt
   // erst, wenn jemand danach sucht.
-  const geladen = await seiteB.locator('#messages .msg').count();
+  const geladen = await seiteB.locator('#messages .msg:not(.msg--typing)').count();
   expect(geladen, 'beim Oeffnen wurde der ganze Verlauf geladen').toBeLessThan(29);
 
   // Und es war ein Sprung, keine Reise: eine weiche Bewegung durch den
@@ -123,7 +123,7 @@ test('Ein Wisch auf der Textzeile verschiebt die App nicht', async ({ browser })
     await seiteA.locator('#message-input').fill(`Zeile ${i} mit genug Text, damit die Liste über den Bildschirm hinausgeht`);
     await seiteA.locator('#btn-send').click();
   }
-  await expect(seiteA.locator('#messages .msg')).toHaveCount(12, { timeout: 30_000 });
+  await expect(seiteA.locator('#messages .msg:not(.msg--typing)')).toHaveCount(12, { timeout: 30_000 });
 
   const feld = seiteA.locator('#message-input');
   const kasten = await feld.boundingBox();
@@ -195,7 +195,7 @@ test('Ein eintreffendes Bild schiebt einen nicht vom Ende weg', async ({ browser
     await seiteA.locator('#message-input').fill(`Zeile ${i}, lang genug für mehrere Zeilen im Fenster des Gegenübers`);
     await seiteA.locator('#btn-send').click();
   }
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(8, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(8, { timeout: 30_000 });
   expect(await abstandUnten(seiteB)).toBeLessThanOrEqual(4);
 
   // Jetzt ein hohes Bild - B sieht gerade hin und steht unten.
@@ -237,7 +237,7 @@ test('Wächst der Verlauf nach dem Öffnen, bleibt die Ansicht unten', async ({ 
     await seiteA.locator('#message-input').fill(`Zeile ${i} im Verlauf`);
     await seiteA.locator('#btn-send').click();
   }
-  await expect(seiteB.locator('#messages .msg')).toHaveCount(6, { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg:not(.msg--typing)')).toHaveCount(6, { timeout: 30_000 });
 
   await seiteB.reload();
   const eintrag = seiteB.locator('#chat-list .chat-list__item').first();
@@ -249,7 +249,7 @@ test('Wächst der Verlauf nach dem Öffnen, bleibt die Ansicht unten', async ({ 
   // spät geladenes Bild täte.
   await seiteB.waitForTimeout(150);
   await seiteB.evaluate(() => {
-    const erste = document.querySelector('#messages .msg');
+    const erste = document.querySelector('#messages .msg:not(.msg--typing)');
     if (erste) erste.style.minHeight = '900px';
   });
 

@@ -154,7 +154,7 @@ test('Eine Gruppe lässt sich nachträglich erweitern', async ({ browser }) => {
   // Und Cem redet mit: seine Nachricht kommt bei beiden an.
   await seiteC.locator('#message-input').fill('Bin dabei');
   await seiteC.locator('#btn-send').click();
-  await expect(seiteB.locator('#messages .msg--in')).toContainText('Bin dabei', { timeout: 30_000 });
+  await expect(seiteB.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Bin dabei', { timeout: 30_000 });
 
   await seiteA.locator('#btn-group-to-chat').click();
   await expect(seiteA.locator('#peer-status')).toContainText(/von 4/, { timeout: 30_000 });
@@ -176,7 +176,7 @@ test('Nach dem Austritt öffnet das alte Token nichts mehr', async ({ browser })
   const { kontextA, kontextB, seiteA, seiteB } = await gruppeZuZweit(browser);
   await seiteB.locator('#message-input').fill('Noch da');
   await seiteB.locator('#btn-send').click();
-  await expect(seiteA.locator('#messages .msg--in')).toContainText('Noch da', { timeout: 30_000 });
+  await expect(seiteA.locator('#messages .msg--in:not(.msg--typing)')).toContainText('Noch da', { timeout: 30_000 });
 
   // B merkt sich seinen Zugang und tritt dann aus.
   const zugang = await seiteB.evaluate(() => {
