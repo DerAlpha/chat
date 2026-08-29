@@ -128,7 +128,11 @@ function boot() {
   applyTheme(app.prefs.theme);
   applyTranslations();
   wireStaticHandlers();
+  // Was beim letzten Mal als "tippt" gespeichert wurde, stimmt jetzt sicher
+  // nicht mehr.
+  tippenLoeschen();
   watchStatusWidth();
+  watchViewportHeight();
   onLayoutChange(placeFeatures);
   onLanguageChange(() => {
     applyTranslations();
@@ -2616,7 +2620,12 @@ function updatePeerStatus() {
   const status = el('peer-status');
   status.classList.remove('is-online', 'is-typing');
   if (app.connectionStatus === 'connecting' || app.connectionStatus === 'reconnecting') {
-    setStatusText(t('connecting'));
+    // Dasselbe sagen wie das Banner darunter. Vorher stand dort "Keine
+    // Verbindung. Nachrichten warten hier." und eine Zeile hoeher
+    // "Verbindung wird hergestellt …" - zwei Saetze uebereinander, die sich
+    // widersprachen. Ohne Netz wird eben nichts hergestellt.
+    setStatusText(navigator.onLine === false ? t('noNetwork')
+      : t(app.connectionStatus === 'reconnecting' ? 'reconnecting' : 'connecting'));
     return;
   }
   const tippen = typingNow();
@@ -3318,10 +3327,12 @@ function stopTyping() {
 
 async function addFiles(files, kind) {
   const list = [...files].slice(0, MAX_ATTACHMENTS - app.attachments.length);
-  if (!list.length) {
-    if (files.length) toast(t('errorTooLarge', { max: `${MAX_ATTACHMENTS}` }));
-    return;
-  }
+  // Was nicht mehr hineinpasst, faellt weg - aber nicht stillschweigend.
+  // Wer sechs Bilder auswaehlt und vier bekommt, soll es erfahren; vorher
+  // stand hier obendrein "Die Datei ist zu groß", was gar nicht stimmte.
+  const weggelassen = files.length - list.length;
+  if (weggelassen > 0) toast(t('tooManyFiles', { max: `${MAX_ATTACHMENTS}`, n: `${weggelassen}` }));
+  if (!list.length) return;
   for (const file of list) {
     const item = {
       localId: randomId(6),
@@ -5057,6 +5068,9 @@ function renderChatList() {
     } else {
       avatar.textContent = initial(name);
     }
+    // Der Kreis ist Schmuck: sein Buchstabe steht schon im Namen daneben und
+    // wurde sonst mit vorgelesen ("A Anton").
+    avatar.setAttribute('aria-hidden', 'true');
     const text = make('div', 'chat-list__text');
     text.appendChild(make('span', 'chat-list__name', name));
     text.appendChild(chatListMeta(session));
@@ -5211,10 +5225,29 @@ async function refreshOverview() {
     if (geaendert) renderChatList();
     if (verschwunden > 0) toast(t('chatGone'), 3600);
   } catch {
-    // Keine Verbindung, kein Drama - beim naechsten Mal wieder.
+    // Keine Verbindung, kein Drama - beim naechsten Mal wieder. Nur die
+    // Tippanzeige darf nicht stehen bleiben: sie ist eine Momentaufnahme,
+    // und ohne Auskunft vom Server ist der Moment vorbei. Sonst schrieb dort
+    // jemand fuer immer weiter - auch ueber ein Neuladen hinweg, weil der
+    // Zustand mit der Sitzung gespeichert wird.
+    if (tippenLoeschen()) renderChatList();
   } finally {
     overviewLaeuft = false;
   }
+}
+
+/**
+ * Nimmt aus allen gespeicherten Chats die Tippanzeige weg.
+ * @returns {boolean} ob sich etwas geaendert hat
+ */
+function tippenLoeschen() {
+  const patches = new Map();
+  for (const eintrag of listSessions()) {
+    if (eintrag.typing === true) patches.set(eintrag.roomId, { typing: false });
+  }
+  if (patches.size === 0) return false;
+  patchSessions(patches);
+  return true;
 }
 
 function openSessionMenu(session) {
