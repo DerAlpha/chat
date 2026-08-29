@@ -17,6 +17,7 @@ import { CallSession, mediaCryptoAvailable } from './call.js';
 import { emojiGroups, searchEmoji, looksLikeEmoji } from './emoji.js';
 import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
+import { CHANGELOG, NEUESTE_AENDERUNG } from './changelog.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
 import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, storageAvailable } from './session.js';
 import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, leaveRoom, addSlots, putAvatar, fetchAvatar, deleteAvatar, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
@@ -131,6 +132,8 @@ function boot() {
   // Was beim letzten Mal als "tippt" gespeichert wurde, stimmt jetzt sicher
   // nicht mehr.
   tippenLoeschen();
+  // Nach einer Aktualisierung zeigt sich von selbst, was neu ist.
+  changelogNachUpdate();
   watchStatusWidth();
   watchViewportHeight();
   onLayoutChange(placeFeatures);
@@ -4059,6 +4062,66 @@ async function leaveSession(roomId) {
   }
 }
 
+// ===========================================================================
+// Was sich geaendert hat
+// ===========================================================================
+
+/**
+ * Die Liste der Aenderungen, neueste zuerst.
+ *
+ * @param {{seit?: string|null}} [wie] `seit` markiert alles, was danach kam,
+ *   als neu - und stellt einen Satz voran. Ohne Angabe ist es die schlichte
+ *   Chronik, wie sie ueber den Knopf in der Fusszeile aufgeht.
+ */
+function showChangelog({ seit = null } = {}) {
+  const datum = new Intl.DateTimeFormat(getLanguage(), { dateStyle: 'medium', timeStyle: 'short' });
+  const liste = make('div', 'changelog');
+
+  for (const eintrag of CHANGELOG) {
+    const zeile = make('div', 'changelog__item');
+    if (seit && eintrag.ts > seit) zeile.classList.add('is-new');
+    const kopf = make('div', 'changelog__when');
+    kopf.appendChild(make('time', null, datum.format(new Date(eintrag.ts))));
+    // Die Zeit steht als maschinenlesbares Attribut daneben - sonst liest ein
+    // Vorleseprogramm "11:21" als Zahlenfolge statt als Uhrzeit.
+    kopf.querySelector('time').dateTime = eintrag.ts;
+    if (seit && eintrag.ts > seit) kopf.appendChild(make('span', 'changelog__neu', t('changelogNew')));
+    zeile.appendChild(kopf);
+    zeile.appendChild(make('p', 'changelog__text', getLanguage() === 'en' ? eintrag.en : eintrag.de));
+    liste.appendChild(zeile);
+  }
+
+  openSheet(t('changelogTitle'), [
+    make('p', 'sheet-note', seit ? t('changelogSinceVisit') : t('changelogHint')),
+    liste,
+  ], { autofocus: false });
+  merkeChangelog();
+}
+
+/** Ab jetzt gilt alles als gesehen. */
+function merkeChangelog() {
+  app.prefs = setPrefs({ seenVersion: APP_VERSION, seenChangelog: NEUESTE_AENDERUNG });
+}
+
+/**
+ * Beim Start: hat sich seit dem letzten Besuch die Fassung geaendert?
+ *
+ * Dann geht die Liste von selbst auf - genau einmal, denn sie merkt sich
+ * dabei sofort, dass sie gesehen wurde. Beim allerersten Besuch passiert
+ * nichts: wer die App gerade erst gefunden hat, will keine Chronik lesen,
+ * sondern schreiben.
+ */
+function changelogNachUpdate() {
+  const vorher = app.prefs?.seenVersion ?? null;
+  if (!vorher) {
+    // Erster Besuch: still merken, nichts zeigen.
+    merkeChangelog();
+    return;
+  }
+  if (vorher === APP_VERSION) return;
+  showChangelog({ seit: app.prefs?.seenChangelog ?? null });
+}
+
 function showAbout() {
   openSheet(t('about'), [
     make('p', 'sheet-note', t('aboutText')),
@@ -5419,6 +5482,7 @@ function wireStaticHandlers() {
   el('btn-lang').addEventListener('click', cycleLanguage);
   el('btn-theme').addEventListener('click', cycleTheme);
   el('btn-about').addEventListener('click', showAbout);
+  el('btn-changelog').addEventListener('click', () => showChangelog());
   // Bild und Name in der Kopfzeile fuehren zum Profil - dort, wo man
   // danach greift.
   el('peer-open')?.addEventListener('click', openChatProfile);

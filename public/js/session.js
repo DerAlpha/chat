@@ -27,6 +27,17 @@ const DEFAULT_PREFS = {
   recentEmoji: [],
   /** Anrufe nur über den Relaisdienst leiten - verbirgt die eigene Adresse. */
   hideIp: false,
+  /**
+   * Die Fassung, die beim letzten Besuch lief.
+   *
+   * Ist sie gesetzt und stimmt nicht mehr, hat es zwischendurch eine
+   * Aktualisierung gegeben - dann geht die Liste der Änderungen von selbst
+   * auf. Beim allerersten Besuch bleibt sie zu; wer die App gerade erst
+   * gefunden hat, will keine Chronik lesen.
+   */
+  seenVersion: null,
+  /** Zeitstempel des neuesten Eintrags, den man schon gesehen hat. */
+  seenChangelog: null,
 };
 
 function readJson(key, fallback) {

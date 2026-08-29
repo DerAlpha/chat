@@ -11,7 +11,7 @@
  * Datei, aendert sich die Fassung - und dieser Worker raeumt seinen Speicher.
  * Ein Test wird rot, wenn der Stempel nicht mehr zum Inhalt passt.
  */
-const VERSION = '88b93ac42f35';
+const VERSION = 'afc459e679c5';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
@@ -28,6 +28,7 @@ const SHELL = [
   'css/app.css',
   'js/app.js',
   'js/base.js',
+  'js/changelog.js',
   'js/call.js',
   'js/call-worker.js',
   'js/crypto.js',

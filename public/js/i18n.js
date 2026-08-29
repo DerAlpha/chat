@@ -104,6 +104,11 @@ const STRINGS = {
     stateSent: 'gesendet',
     stateDelivered: 'zugestellt',
     stateRead: 'gelesen',
+    changelog: 'Änderungen',
+    changelogTitle: 'Was sich geändert hat',
+    changelogHint: 'Jede Änderung mit dem Zeitpunkt, zu dem sie eingespielt wurde.',
+    changelogNew: 'neu',
+    changelogSinceVisit: 'Seit deinem letzten Besuch hat sich etwas getan:',
 
     you: 'Du',
     partner: 'Gegenüber',
@@ -431,6 +436,11 @@ const STRINGS = {
     stateSent: 'sent',
     stateDelivered: 'delivered',
     stateRead: 'read',
+    changelog: 'Changes',
+    changelogTitle: 'What has changed',
+    changelogHint: 'Every change with the moment it went live.',
+    changelogNew: 'new',
+    changelogSinceVisit: 'Something has changed since your last visit:',
 
     you: 'You',
     partner: 'Them',

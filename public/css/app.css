@@ -1671,6 +1671,38 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 .typing-bubble i:nth-child(2) { animation-delay: .15s; }
 .typing-bubble i:nth-child(3) { animation-delay: .3s; }
 
+/* ------------------------------------------------- Was sich geaendert hat ---
+   Eine Chronik, keine Tabelle: der Zeitpunkt klein darueber, der Satz
+   darunter. So liest sie sich von oben nach unten wie ein Verlauf - und das
+   ist sie auch. */
+.changelog { display: flex; flex-direction: column; gap: 2px; padding: 0 4px 4px; }
+.changelog__item {
+  padding: 9px 6px;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  margin-left: 2px;
+}
+/* Was seit dem letzten Besuch dazugekommen ist, traegt den Akzent am Rand -
+   die Farbe allein muesste es nicht tun, daneben steht das Wort "neu". */
+.changelog__item.is-new { border-left-color: var(--accent); }
+.changelog__when {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: .76rem; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.changelog__neu {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 650;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.changelog__text { margin: 2px 0 0; font-size: .92rem; line-height: 1.45; }
+
 /* ------------------------------------------------------------ Platzhalter --- */
 
 .empty {
