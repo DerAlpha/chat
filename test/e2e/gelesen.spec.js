@@ -110,16 +110,27 @@ test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ 
   await expect(offen).not.toContainText('Mira');
   await expect(seiteA.locator('#sheet')).toContainText(/noch nicht geöffnet/i);
 
-  // Die Zugestellten stehen blasser da als die, die hingesehen haben.
-  const blass = await seiteA.evaluate(() => {
-    const wert = (wahl) => {
-      const knoten = document.querySelector(wahl);
-      const stil = getComputedStyle(knoten);
-      return Number.parseFloat(stil.opacity);
-    };
-    return { gelesen: wert('#sheet .seen-list.is-read'), offen: wert('#sheet .seen-list.is-pending') };
-  });
-  expect(blass.offen, 'die Zugestellten sind nicht ausgegraut').toBeLessThan(blass.gelesen);
+  /*
+   * Die Zugestellten stehen blasser da als die, die hingesehen haben.
+   *
+   * Gemessen wird erst, wenn beide Listen fertig eingeschwebt sind. Die
+   * Blattinhalte kommen gestaffelt (`.sheet__body > * { animation:
+   * auftauchen ... both }`), und mittendrin sagt die Deckkraft nichts ueber
+   * das Ausgrauen: zuerst stehen beide auf 0 ("Expected: < 0, Received: 0"),
+   * kurz darauf steht die eine schon auf 1, waehrend die andere noch
+   * auftaucht - dann waere der Vergleich sogar erfuellt, ohne dass es die
+   * Regel gaebe. Also auf das Ende der Bewegung warten, dann messen.
+   */
+  await expect.poll(async () => seiteA.evaluate(() => {
+    const gelesen = document.querySelector('#sheet .seen-list.is-read');
+    const offen = document.querySelector('#sheet .seen-list.is-pending');
+    if (!gelesen || !offen) return null;
+    const bewegt = [gelesen, offen]
+      .some((knoten) => knoten.getAnimations().some((lauf) => lauf.playState === 'running'));
+    if (bewegt) return null;
+    const deckung = (knoten) => Number.parseFloat(getComputedStyle(knoten).opacity);
+    return deckung(offen) < deckung(gelesen);
+  }), { message: 'die Zugestellten sind nicht ausgegraut' }).toBe(true);
 
   // Liest Cem doch noch, zählt das Auge weiter.
   await seiteA.keyboard.press('Escape');
