@@ -297,6 +297,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .btn:active { transform: scale(.975); }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Ganz am Rand liegt der Ring sonst zur Haelfte ausserhalb von #app und wird
+   dort abgeschnitten. Nach innen gelegt bleibt er vollstaendig sichtbar. */
+.chat-header > .btn:first-child:focus-visible,
+.chat-header > .btn:last-child:focus-visible { outline-offset: -2px; }
 
 .btn--primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 .btn--ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
@@ -356,7 +360,13 @@ button, input, textarea { font: inherit; color: inherit; }
 .chat-list__item.is-active { border-color: var(--accent); background: var(--accent-soft); }
 .chat-list__text { flex: 1; min-width: 0; }
 .chat-list__name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-list__meta { display: block; font-size: .82rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Zwei Kaesten statt eines Textes: der Hinweis darf gekuerzt werden, die
+   Zeit nicht - sie ist die Angabe, nach der die Liste sortiert ist. */
+.chat-list__meta { display: flex; align-items: baseline; gap: 5px; font-size: .82rem; color: var(--text-muted); min-width: 0; }
+.chat-list__hinweis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Der Punkt steht nur da, wo wirklich zwei Angaben nebeneinander stehen. */
+.chat-list__hinweis + .chat-list__zeit::before { content: "\00b7"; margin-right: 5px; }
+.chat-list__zeit { flex: none; white-space: nowrap; }
 /* Dass gerade jemand schreibt, ist die einzige Angabe in dieser Zeile, die
    gleich wieder verschwindet - deshalb sticht sie heraus. */
 .chat-list__meta.is-typing { color: var(--accent); font-style: italic; }
@@ -421,9 +431,18 @@ button, input, textarea { font: inherit; color: inherit; }
 .crop {
   position: relative;
   width: 100%;
-  max-width: 280px;
+  /* Die Breite ist an die verfuegbare Hoehe gebunden. Sonst hielt das
+     Fenster stur seine 280 Bildpunkte Breite, waehrend der Flex-Kontext ihm
+     die Hoehe wegnahm: bei 320x480 blieben 280x78 uebrig, im Querformat
+     280x0. Es war dann kein Quadrat mehr - und die Zuschneide-Rechnung geht
+     von einem aus. */
+  max-width: min(280px, 42dvh);
   margin: 4px auto 10px;
   aspect-ratio: 1;
+  /* Nicht schrumpfen. `overflow: hidden` setzt die automatische Mindestgroesse
+     auf null, damit war das Fenster beliebig zusammendrueckbar. Lieber rollt
+     das Blatt, als dass der Ausschnitt verschwindet. */
+  flex: none;
   overflow: hidden;
   border-radius: 14px;
   /* Schwarz, weil genau das im Profilbild steht, wo kein Bild mehr ist.
@@ -460,7 +479,16 @@ button, input, textarea { font: inherit; color: inherit; }
   -webkit-mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
   mask: radial-gradient(circle closest-side at 50% 50%, transparent 99.5%, #000 100%);
 }
-.crop__zoom { width: 100%; margin: 0 0 10px; accent-color: var(--accent); }
+/* Der Regler war 16 Bildpunkte hoch - mit dem Daumen kaum zu fassen, und er
+   ist der einzige Weg, den Ausschnitt zu waehlen. Die Bahn bleibt duenn, die
+   Flaeche darum wird hoch genug. */
+.crop__zoom {
+  width: 100%;
+  height: 44px;
+  margin: 0 0 6px;
+  accent-color: var(--accent);
+  background: none;
+}
 
 .pill {
   font-size: .72rem;
@@ -512,7 +540,11 @@ button, input, textarea { font: inherit; color: inherit; }
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   border: 1px dashed var(--border);
-  word-break: break-all;
+  /* Umbrechen ja - aber an den Bindestrichen, nicht mitten in einer Gruppe.
+     Mit break-all stand auf schmalen Geraeten das letzte Zeichen allein in
+     der naechsten Zeile; einen Code liest und diktiert man aber in Gruppen. */
+  word-break: normal;
+  overflow-wrap: break-word;
   user-select: all;
 }
 
@@ -713,8 +745,6 @@ button, input, textarea { font: inherit; color: inherit; }
    Zeile - unaufgeregt und in der Mitte, wie ein Datum. */
 .day-sep--left { font-weight: 500; font-style: italic; }
 .day-sep { align-self: center; margin: 14px 0 8px; padding: 4px 12px; font-size: .76rem; font-weight: 600; color: var(--text-muted); background: var(--bg-sunken); border-radius: 999px; }
-.unread-sep { align-self: stretch; display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--accent); font-size: .76rem; font-weight: 600; }
-.unread-sep::before, .unread-sep::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35; }
 
 .msg { display: flex; flex-direction: column; max-width: 82%; position: relative; }
 /* Nur wirklich neue Blasen bewegen sich. Die Liste wird bei jeder
@@ -744,7 +774,12 @@ button, input, textarea { font: inherit; color: inherit; }
 .msg--same.msg--out .bubble { border-top-right-radius: 6px; }
 .bubble.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bubble.is-media { padding: 4px 4px 6px; }
-.bubble.is-deleted { font-style: italic; opacity: .65; }
+/* Ohne Deckkraft: auf der eigenen (blauen) Blase blieben davon 2,61:1 uebrig -
+   der Grabstein war nicht mehr zu lesen. Kursiv und eine eigene Farbe setzen
+   ihn genauso ab, ohne ihn wegzunehmen. */
+.bubble.is-deleted { font-style: italic; }
+.msg--in .bubble.is-deleted { color: var(--text-muted); }
+.msg--out .bubble.is-deleted { color: var(--auf-blase); }
 
 /* Mit dem Finger heißt langes Drücken "Menü öffnen" - nicht "Text markieren".
    Ohne diese Regel legt der Browser beim Halten seine eigene Auswahl samt Lupe
@@ -788,7 +823,11 @@ button, input, textarea { font: inherit; color: inherit; }
 /* --------------------------------------------------- Codeliste der Gruppe --- */
 /* Ein Code je Person, alle untereinander. Wer eine Gruppe zusammenstellt,
    verteilt sie in einem Zug und muss sehen, welchen er schon vergeben hat. */
-.invite-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+/* padding: 0 muss dastehen: `list-style: none` nimmt nur die Punkte weg, das
+   Polster von 40 Bildpunkten, das ein <ul> von Haus aus mitbringt, bleibt.
+   Die ganze Codeliste stand dadurch eingerueckt und schob die Codes aus dem
+   Rahmen. */
+.invite-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 
 .invite-row {
   display: flex;
@@ -820,7 +859,10 @@ button, input, textarea { font: inherit; color: inherit; }
   overflow-wrap: anywhere;
 }
 .invite-row__hint { font-size: .72rem; color: var(--text-muted); }
-.invite-row__actions { flex: none; }
+/* Mit Abstand: die beiden runden Knoepfe stiessen ohne Zwischenraum
+   aneinander, und die Trennlinie zwischen "QR zeigen" und "Kopieren" war
+   nicht zu sehen - man traf mit dem Daumen den falschen. */
+.invite-row__actions { flex: none; display: flex; gap: 6px; }
 
 /* In einer Gruppe steht über fremden Blasen, von wem sie kommt. Eine eigene
    Farbe je Person wäre hübsch, aber Namen sind hier frei wählbar und nicht
@@ -960,9 +1002,15 @@ button, input, textarea { font: inherit; color: inherit; }
 .seen-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg--in .bubble__meta .is-read { color: var(--accent); }
 
+/* Ein Knopf, der aussieht wie ein Zitat - deshalb muss der Knopfschmuck weg. */
 .quote {
-  display: block;
+  width: 100%;
+  border: none;
   border-left: 3px solid currentColor;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   padding: 3px 8px;
   margin-bottom: 5px;
   border-radius: 5px;
@@ -971,7 +1019,13 @@ button, input, textarea { font: inherit; color: inherit; }
   /* Ohne Deckkraft. Sie nahm dem Zitat in der eigenen (blauen) Blase gerade
      so viel, dass 3.75:1 uebrig blieben; zurueckgenommen sind es 4.54:1.
      Abgesetzt genug ist es ueber Rand und Hintergrund ohnehin. */
-  max-height: 3.4em;
+  /* Ganze Zeilen, keine halben: mit einer festen max-height blieben von der
+     letzten Zeile 1,8 von 15 Bildpunkten stehen - ein Streifen Buchstabenrest.
+     line-clamp schneidet zwischen den Zeilen und setzt Auslassungspunkte. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
   cursor: pointer;
 }
@@ -1054,7 +1108,12 @@ button, input, textarea { font: inherit; color: inherit; }
    Zeile als Bezugsrahmen - deshalb reicht `grid-row` und kein Rechnen. */
 .jump-down {
   position: absolute;
-  grid-row: 3;
+  /* Mit Endlinie, nicht nur mit Anfang: fuer ein absolut positioniertes
+     Rasterkind bedeutet `grid-row-end: auto` nicht "Ende von Zeile 3",
+     sondern die Unterkante des ganzen Rasters. Der Knopf sass damit 45 px
+     tief in der Textzeile und lag auf dem Sendeknopf - ein Tipp darauf
+     schickte nichts. Gemessen: Unterkante 626 statt 567 bei 360x640. */
+  grid-row: 3 / 4;
   justify-self: end;
   align-self: end;
   margin: 0 calc(var(--safe-right) + 14px) 14px 0;
@@ -1279,7 +1338,10 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
   display: block;
   width: 100%;
   max-width: 120px;
-  height: 26px;
+  /* Der Strich bleibt ein Strich (siehe ::before), die Flaeche darum wird
+     antippbar: 26 Bildpunkte waren zu wenig fuer den einzigen Weg, ein Blatt
+     mit dem Daumen zu schliessen. */
+  height: 44px;
   padding: 0;
   border: none;
   background: none;
@@ -1314,7 +1376,11 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 .sheet-item {
   display: flex; align-items: center; gap: 13px;
   width: 100%;
+  /* min-height, nicht height - aber flex-shrink muss trotzdem aus: in einem
+     Blatt, das selbst rollt, drueckte der Flex-Kontext die Zeilen unter ihre
+     Mindesthoehe, und der Hinweistext lief in die Zeile darunter. */
   min-height: 52px;
+  flex: none;
   padding: 8px 10px;
   border: none;
   border-radius: 12px;
@@ -1330,9 +1396,16 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 .sheet-item.is-danger { color: var(--danger); }
 .sheet-item .icon { color: var(--text-muted); }
 .sheet-item.is-danger .icon { color: var(--danger); }
-.sheet-item__text { flex: 1; min-width: 0; }
+/* Die Beschriftung darf umbrechen, statt sich ueber den Wert daneben zu
+   legen: ein langer Name wurde quer ueber das Abzeichen "Verwalter"
+   gedruckt, und im eigenen Profil schrumpfte der Textkasten auf 9
+   Bildpunkte. `min-width: 0` allein reicht dafuer nicht - ein langer Name
+   ohne Leerzeichen ist ein einziges Wort und laeuft trotzdem hinaus. */
+.sheet-item__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sheet-item__hint { display: block; font-size: .8rem; color: var(--text-muted); }
-.sheet-item__value { font-size: .85rem; color: var(--text-muted); }
+/* Der Wert gibt nicht nach: er ist kurz und steht rechts. Ohne flex: none
+   schrumpfte er auf null, sobald die Beschriftung lang wurde. */
+.sheet-item__value { flex: none; font-size: .85rem; color: var(--text-muted); }
 
 .sheet-note { padding: 4px 10px 8px; font-size: .87rem; color: var(--text-muted); }
 /* Der Satz, der die Zahlen nennt: keine Nebenbemerkung mehr. */
@@ -1480,7 +1553,8 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
   overflow-y: auto;
-  min-height: 0;
+  /* Wie beim Emoji-Katalog: nicht bis auf null zusammendruecken lassen. */
+  min-height: min(220px, 40dvh);
   max-height: 52dvh;
 }
 .gif-grid__item {
@@ -1529,6 +1603,11 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
   text-align: center;
   box-shadow: var(--shadow-lg);
   animation: slide-up var(--dauer) var(--kurve);
+  /* Eine Meldung, kein Bedienelement. Sie liegt ueber allem - auch ueber
+     einem offenen Blatt und ueber den Anrufknoepfen - und schluckte dort den
+     Tipp: gemessen lag an ihrer Mitte OUTPUT.toast obenauf, nicht der Knopf
+     darunter. Wer sie wegtippen will, tippt jetzt durch sie hindurch. */
+  pointer-events: none;
 }
 
 .busy {

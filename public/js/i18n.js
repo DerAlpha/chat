@@ -98,6 +98,7 @@ const STRINGS = {
     reconnecting: 'Verbindung unterbrochen – neuer Versuch …',
     offlineBanner: 'Keine Verbindung. Nachrichten warten hier.',
     noNetwork: 'keine Verbindung',
+    jumpToQuoted: 'Zur zitierten Nachricht von {name}',
 
     you: 'Du',
     partner: 'Gegenüber',
@@ -419,6 +420,7 @@ const STRINGS = {
     reconnecting: 'Connection lost – retrying …',
     offlineBanner: 'No connection. Messages will wait here.',
     noNetwork: 'no connection',
+    jumpToQuoted: 'Go to the quoted message from {name}',
 
     you: 'You',
     partner: 'Them',

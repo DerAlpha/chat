@@ -229,7 +229,13 @@
         <label class="visually-hidden" for="code-input" data-i18n="enterCode"></label>
         <input class="code-input" id="code-input" type="text" inputmode="text"
                autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
-               maxlength="14" data-i18n-attr="placeholder:codePlaceholder">
+               <!-- Grosszuegig, nicht knapp: der Code hat zwoelf Zeichen, angezeigt
+                    wird er mit zwei Bindestrichen. Wer ihn aus einer Nachricht
+                    kopiert, bringt Leerzeichen, Zeilenumbrueche oder einen Punkt
+                    mit - normalizeCode() wirft das alles weg. Bei maxlength="14"
+                    schnitt der Browser aber schon vorher ab, und aus einem
+                    gueltigen Code wurde ein zu kurzer. -->
+               maxlength="64" data-i18n-attr="placeholder:codePlaceholder">
         <p class="field-error" id="join-error" role="alert" hidden></p>
         <div class="stack">
           <button class="btn btn--primary btn--lg" id="btn-do-join" type="submit" disabled data-i18n="join"></button>

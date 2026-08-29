@@ -2087,10 +2087,16 @@ function buildMessageNode(entry, sameSender) {
 }
 
 function buildQuote(reply) {
-  const quote = make('div', 'quote');
+  // Ein Knopf, kein DIV: das Zitat fuehrt zur zitierten Nachricht, und das
+  // ging nur mit der Maus. Ein <div> mit Klick-Handler bekommt keinen Fokus,
+  // steht in keiner Tabulator-Reihenfolge und antwortet nicht auf die
+  // Eingabetaste.
+  const quote = make('button', 'quote');
+  quote.type = 'button';
   // Wer zitiert wird, steht mit Namen da - in einer Gruppe ist "das
   // Gegenüber" schlicht falsch, es gibt mehrere.
   const wer = reply.from === app.me?.id ? t('you') : (isGroup() ? nameOf(reply.from) : peerName());
+  quote.setAttribute('aria-label', t('jumpToQuoted', { name: wer }));
   quote.appendChild(make('strong', null, wer));
   quote.appendChild(document.createTextNode(reply.text ?? ''));
   quote.addEventListener('click', () => jumpTo(reply.id));
@@ -2152,7 +2158,9 @@ function buildMeta(entry, mine) {
   if (istVerdeckt(entry) && aufgedeckt.has(entry.id)) meta.appendChild(buildCoverAgain(entry));
   // Und beim Absender: ob drueben schon jemand hingesehen hat.
   if (mine && istVerdeckt(entry) && entry.status === 'sent') meta.appendChild(buildRevealMark(entry));
-  if (entry.editedAt) meta.appendChild(make('span', null, t('edited')));
+  // Nicht am Grabstein: die Nachricht ist geloescht, "bearbeitet" sagt darueber
+  // nichts mehr aus und stand dort trotzdem weiter.
+  if (entry.editedAt && !entry.deleted) meta.appendChild(make('span', null, t('edited')));
   meta.appendChild(make('span', null, formatClock(entry.ts)));
   if (!mine) return meta;
 
@@ -2728,6 +2736,32 @@ function watchStatusWidth() {
     zuletzt = breit;
     measureStatus();
   }).observe(rahmen);
+}
+
+/**
+ * Wird der Verlauf niedriger, bleibt sein Ende sichtbar.
+ *
+ * Der Chat ist ein Raster: Kopfzeile, Banner, Verlauf, Textzeile. Alles, was
+ * ueber oder unter dem Verlauf waechst, nimmt ihm Hoehe weg - das Banner
+ * "Verbindung weg", die Antwort-Vorschau, die Verdeckt-Leiste, eine Reihe
+ * Anhaenge, die aufgehende Aufnahme. Der Rollstand blieb dabei stehen, wo er
+ * war, und die neueste Nachricht rutschte unter den Rand: gemessen 31
+ * Bildpunkte beim Banner, mehr bei Vorschau plus Anhaengen.
+ *
+ * Nachgefuehrt wird nur, wer vorher unten stand. Wer im Verlauf nach oben
+ * gewischt hat, will dort bleiben.
+ */
+function watchViewportHeight() {
+  const liste = el('messages');
+  if (!liste || typeof ResizeObserver !== 'function') return;
+  let zuletzt = liste.clientHeight;
+  new ResizeObserver(() => {
+    const jetzt = liste.clientHeight;
+    if (jetzt === zuletzt) return;
+    const geschrumpft = jetzt < zuletzt;
+    zuletzt = jetzt;
+    if (geschrumpft && app.atBottom) scrollToBottom(true);
+  }).observe(liste);
 }
 
 function showBanner(text, warn = false) {
@@ -4131,7 +4165,15 @@ function cropSheet(vorlage) {
     };
 
     const vermessen = () => {
-      const neuKante = fenster.clientWidth || 240;
+      // Die KLEINERE der beiden Seiten, nicht die Breite.
+      //
+      // Hier stand `fenster.clientWidth`, und die ganze Rechnung setzt ein
+      // Quadrat voraus. Auf niedrigen Fenstern war es keins mehr: gemessen
+      // 280x78 bei 320x480. Der Ausschnitt wurde trotzdem mit 280 gerechnet,
+      // und im gespeicherten Bild stand danach Material, das nie auf dem
+      // Bildschirm zu sehen war - bei 320x480 waren nur 28 % des Ergebnisses
+      // je sichtbar. Wer ein Quadrat voraussetzt, misst es besser nach.
+      const neuKante = Math.min(fenster.clientWidth || 240, fenster.clientHeight || 240);
       if (neuKante === kante) return;
       kante = neuKante;
       deckung = kante / Math.min(vorlage.width, vorlage.height);
@@ -5106,9 +5148,19 @@ function chatListMeta(session) {
   const hinweis = zusatz && zusatz !== chatTitle(session) ? zusatz : (zusatz ? '' : session.code);
   // Ohne eine einzige fremde Nachricht gibt es nichts zu datieren - dann
   // bleibt es beim Hinweis, und wo auch der fehlt, bei gar nichts.
-  const wann = session.lastMessageAt ? relativeTime(session.lastMessageAt) : '';
-  const teile = [hinweis, wann].filter(Boolean);
-  return make('span', 'chat-list__meta', teile.join(' \u00b7 '));
+  const wann = session.lastMessageAt ? relativeTime(session.lastMessageAt, { kurz: true }) : '';
+  // Hinweis und Zeit in ZWEI Kaesten, nicht in einen Text.
+  //
+  // Zusammengefuegt und dann per Auslassungspunkten gekuerzt fiel immer das
+  // Hintere weg - also ausgerechnet die Zeit, nach der die Liste sortiert
+  // ist und die als Einzige sagt, ob dort vor fuenf Minuten oder vor drei
+  // Wochen etwas kam. Gemessen war sie bei einem langen Namen auf 320 und
+  // 360 Bildpunkten vollstaendig verschwunden. Jetzt kuerzt die Ellipse nur
+  // noch den Hinweis; die Zeit steht fest rechts.
+  const zeile = make('span', 'chat-list__meta');
+  if (hinweis) zeile.appendChild(make('span', 'chat-list__hinweis', hinweis));
+  if (wann) zeile.appendChild(make('span', 'chat-list__zeit', wann));
+  return zeile;
 }
 
 /** Einen Chat aus der Liste oeffnen - Gruppen haben keinen Code. */
