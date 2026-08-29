@@ -10,7 +10,7 @@
  * rollen und der letzte erreichbar ist - eine Liste, die in einem Flex-Kasten
  * zusammengedrückt wird, sieht vollständig aus und ist es nicht.
  */
-import { test, expect, devices } from './fixtures.js';
+import { test, expect, devices, rawContext } from './fixtures.js';
 const G = { ...devices['Pixel 5'], locale: 'de-DE', timezoneId: 'Europe/Berlin' };
 
 test('Der Knopf öffnet die Chronik', async ({ browser }) => {
@@ -102,5 +102,28 @@ test('Beim allerersten Besuch bleibt sie zu', async ({ browser }) => {
   }));
   expect(m.blattOffen, 'beim ersten Besuch soll nichts aufpoppen').toBe(false);
   expect(m.gemerkt, 'die Fassung wurde beim ersten Besuch nicht gemerkt').toBeTruthy();
+  await k.close();
+});
+
+/**
+ * Auf einem leeren Speicher legt die Chronik nichts an.
+ *
+ * Der Merker ist bequem - aber er ist ein Schluessel wie jeder andere. Wer
+ * gerade alles geloescht hat, faende ihn beim naechsten Start schon wieder
+ * vor. Hier ohne die Voreinstellungen der Testumgebung, die sonst selbst
+ * einen Eintrag schreibt und den Blick verstellt.
+ */
+test('Ohne gespeicherte Daten schreibt die Chronik nichts', async ({ browser }) => {
+  const k = await rawContext(browser, G);
+  const p = await k.newPage();
+  await p.goto('./');
+  await expect(p.locator('#screen-start')).toBeVisible({ timeout: 20_000 });
+  await p.waitForTimeout(1200);
+  const m = await p.evaluate(() => ({
+    blattOffen: !document.getElementById('sheet').hidden,
+    eigene: Object.keys(localStorage).filter((s) => s.startsWith('fc:')),
+  }));
+  expect(m.blattOffen, 'ohne Vorgeschichte soll nichts aufpoppen').toBe(false);
+  expect(m.eigene, `angelegt: ${m.eigene.join(', ')}`).toEqual([]);
   await k.close();
 });

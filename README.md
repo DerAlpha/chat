@@ -536,6 +536,7 @@ public/
   js/call-worker.js Eigener Faden, in dem sie angewendet wird
   js/ui.js      Screens, Sheets, Toasts, Zeitangaben
   js/version.js Die Fassung - gestempelt, nicht von Hand gezählt
+  js/changelog.js Was sich wann geändert hat - zweisprachig, neueste zuerst
   js/app.js     Ablaufsteuerung
   sw.js         Service Worker (nur die Hülle, niemals Inhalte)
 scripts/

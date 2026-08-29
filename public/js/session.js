@@ -168,6 +168,25 @@ export function getPrefs() {
   return { ...DEFAULT_PREFS, ...readJson(PREFS_KEY, {}) };
 }
 
+/**
+ * Liegt hier ueberhaupt schon etwas von dieser App?
+ *
+ * Gebraucht direkt nach "alle Daten loeschen": danach ist der Speicher leer,
+ * und die App darf ihn nicht von sich aus wieder anfassen. Ein Merker, den
+ * sie beim naechsten Start ungefragt anlegt, waere der erste Rueckstand -
+ * und das Loeschen damit keins mehr.
+ */
+export function etwasGespeichert() {
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      if (localStorage.key(i)?.startsWith(KEY_PREFIX)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function setPrefs(patch) {
   const merged = { ...getPrefs(), ...patch };
   writeJson(PREFS_KEY, merged);

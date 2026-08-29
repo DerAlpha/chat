@@ -19,7 +19,7 @@ import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
 import { CHANGELOG, NEUESTE_AENDERUNG } from './changelog.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
-import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, storageAvailable } from './session.js';
+import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, etwasGespeichert, storageAvailable } from './session.js';
 import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, leaveRoom, addSlots, putAvatar, fetchAvatar, deleteAvatar, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, openForCrop, finishAvatar, closeSource } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
@@ -4114,8 +4114,10 @@ function merkeChangelog() {
 function changelogNachUpdate() {
   const vorher = app.prefs?.seenVersion ?? null;
   if (!vorher) {
-    // Erster Besuch: still merken, nichts zeigen.
-    merkeChangelog();
+    // Erster Besuch: still merken, nichts zeigen - aber nur, wenn hier
+    // ohnehin schon etwas liegt. Direkt nach "alle Daten loeschen" ist der
+    // Speicher leer, und ein Lesezeichen waere der erste Rueckstand.
+    if (etwasGespeichert()) merkeChangelog();
     return;
   }
   if (vorher === APP_VERSION) return;
