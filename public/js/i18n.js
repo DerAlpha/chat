@@ -99,6 +99,11 @@ const STRINGS = {
     offlineBanner: 'Keine Verbindung. Nachrichten warten hier.',
     noNetwork: 'keine Verbindung',
     jumpToQuoted: 'Zur zitierten Nachricht von {name}',
+    stateSending: 'wird gesendet',
+    stateFailed: 'nicht gesendet – noch einmal versuchen',
+    stateSent: 'gesendet',
+    stateDelivered: 'zugestellt',
+    stateRead: 'gelesen',
 
     you: 'Du',
     partner: 'Gegenüber',
@@ -421,6 +426,11 @@ const STRINGS = {
     offlineBanner: 'No connection. Messages will wait here.',
     noNetwork: 'no connection',
     jumpToQuoted: 'Go to the quoted message from {name}',
+    stateSending: 'sending',
+    stateFailed: 'not sent – try again',
+    stateSent: 'sent',
+    stateDelivered: 'delivered',
+    stateRead: 'read',
 
     you: 'You',
     partner: 'Them',

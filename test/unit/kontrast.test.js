@@ -1,6 +1,11 @@
 /**
  * Farbkontraste nach WCAG 2.2 AA.
  *
+ * Die Farbwelt haengt an RAL Design 130 50 20 (#6b7c5d) - die eigene
+ * Nachrichtenblase traegt genau diesen Wert, alles andere ist darauf
+ * abgestimmt. Weiss darauf ergibt 4.5004:1, also gerade eben genug; wer an
+ * der Blase dreht, faellt hier sofort auf.
+ *
  * Gerechnet statt geschaut: eine Farbe, die "noch geht", geht bei
  * Sonnenlicht auf einem billigen Bildschirm eben nicht mehr. Geprueft werden
  * die Paarungen, die im Stilblatt wirklich vorkommen - in HELL und DUNKEL,
@@ -71,7 +76,7 @@ test('Die Farbtoken sind in beiden Erscheinungsbildern gelesen worden', () => {
   for (const [name, werte] of [['hell', hell], ['dunkel', dunkel]]) {
     for (const schluessel of ['bg', 'bg-elevated', 'text', 'text-muted', 'accent', 'accent-soft',
       'accent-strong', 'accent-text', 'bubble-in', 'bubble-out', 'bubble-out-text',
-      'danger', 'danger-text', 'success', 'auf-blase']) {
+      'danger', 'danger-text', 'success', 'auf-blase', 'lesehaken']) {
       assert.ok(werte[schluessel], `--${schluessel} fehlt im Schema ${name}`);
     }
   }
@@ -91,14 +96,19 @@ test('Text erreicht 4.5:1', () => {
     ['Erfolgsmeldung', t.success, t.bg, 4.5],
     ['Erfolgsmeldung auf Erhabenem', t.success, t['bg-elevated'], 4.5],
     ['Anfangsbuchstabe im Profilkreis', t['accent-strong'], t['accent-soft'], 4.5],
-    // Das Zitat liegt auf 14 % Grau ueber der Blase - beides mitgerechnet.
-    ['Zitat in der eigenen Blase', t['bubble-out-text'], mischen('#7f7f7f', t['bubble-out'], 0.14), 4.5],
+    // Das Zitat liegt auf 16 % Schwarz ueber der Blase - beides mitgerechnet.
+    // Aufgehellt statt abgedunkelt kam es auf der Moosblase nur auf 4.45:1.
+    ['Zitat in der eigenen Blase', t['bubble-out-text'], mischen('#000000', t['bubble-out'], 0.16), 4.5],
+    ['Zitat in der fremden Blase', t.text, mischen('#000000', t['bubble-in'], 0.16), 4.5],
   ]);
 });
 
 test('Bedienelemente und Symbole erreichen 3:1', () => {
   pruefe((t) => [
     ['Haken und Auge auf der eigenen Blase', t['auf-blase'], t['bubble-out'], 3],
+    // Die Lesebestaetigung. Blau ist hier eine bewusste Ausnahme von der
+    // gruenen Farbwelt - und muss als Bedienzeichen 3:1 halten (WCAG 1.4.11).
+    ['Lesehaken auf der eigenen Blase', t.lesehaken, t['bubble-out'], 3],
     ['Rahmen gegen den Grund', t.border, t.bg, 1.2],
     ['Akzent gegen den Grund', t.accent, t.bg, 3],
   ]);

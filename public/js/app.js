@@ -2164,10 +2164,31 @@ function buildMeta(entry, mine) {
   meta.appendChild(make('span', null, formatClock(entry.ts)));
   if (!mine) return meta;
 
-  if (entry.status === 'sending') meta.appendChild(icon('i-clock'));
+  /**
+   * Der Zustand einer eigenen Nachricht - und zwar nicht nur als Farbe.
+   *
+   * "Zugestellt" und "gelesen" sind derselbe Doppelhaken; ueber der Blase
+   * lassen sich die beiden Toene nur um 1.21:1 in der Helligkeit
+   * auseinanderziehen, weil beide 3:1 zur Blase halten muessen. Wer Blau
+   * und Weiss nicht unterscheiden kann, saehe zweimal dasselbe. Also traegt
+   * jeder Zustand seinen Namen mit - vorgelesen und beim Darueberfahren.
+   */
+  const zeichen = (name, text, gelesen = false) => {
+    const marke = icon(name);
+    if (gelesen) marke.classList.add('is-read');
+    marke.setAttribute('role', 'img');
+    marke.setAttribute('aria-label', text);
+    const titel = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    titel.textContent = text;
+    marke.appendChild(titel);
+    return marke;
+  };
+
+  if (entry.status === 'sending') meta.appendChild(zeichen('i-clock', t('stateSending')));
   else if (entry.status === 'failed') {
     const retry = make('button', 'btn btn--ghost', '↻');
     retry.type = 'button';
+    retry.setAttribute('aria-label', t('stateFailed'));
     retry.addEventListener('click', () => resend(entry));
     meta.appendChild(retry);
   } else if (isGroup()) {
@@ -2178,13 +2199,11 @@ function buildMeta(entry, mine) {
   } else if (allRead(entry.seq)) {
     // In einer Gruppe erst, wenn WIRKLICH alle gelesen haben. Alles andere
     // wäre eine Bestätigung, die man nicht bekommen hat.
-    const mark = icon('i-check-double');
-    mark.classList.add('is-read');
-    meta.appendChild(mark);
+    meta.appendChild(zeichen('i-check-double', t('stateRead'), true));
   } else if (anyOnline()) {
-    meta.appendChild(icon('i-check-double'));
+    meta.appendChild(zeichen('i-check-double', t('stateDelivered')));
   } else {
-    meta.appendChild(icon('i-check'));
+    meta.appendChild(zeichen('i-check', t('stateSent')));
   }
   return meta;
 }
@@ -4955,7 +4974,7 @@ function applyTheme(theme) {
   // für hell und für dunkel, damit der Balken schon vor dem ersten Skript
   // stimmt. Der Browser nimmt die, deren media-Bedingung passt - wer hier nur
   // eine ändert, ändert auf dem jeweils anderen Gerät gar nichts.
-  const farbe = effectiveDark ? '#0f1319' : '#f6f7f9';
+  const farbe = effectiveDark ? '#20221d' : '#f4f7f2';
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
     meta.setAttribute('content', farbe);
   }
