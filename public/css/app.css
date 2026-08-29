@@ -124,6 +124,34 @@
 
 * { box-sizing: border-box; }
 
+/* ---------------------------------------------------- Trefferflaechen ---
+   Manche Bedienelemente muessen klein AUSSEHEN - ein Haken unter einer
+   Nachricht, das Kreuz an einer Anhangkachel, die Marke einer Reaktion. Sie
+   duerfen deshalb trotzdem nicht klein SEIN: gemessen waren es 22x22, 35x16,
+   32x21 und 16 Bildpunkte hoch, bei einer eigenen Regel von 44.
+
+   Groesser gezeichnet wuerde das Layout sprengen. Also bleibt das Bild, wie
+   es ist, und ein unsichtbares Feld darueber nimmt den Finger auf. Es sitzt
+   mittig und waechst nur so weit, wie die Nachbarn es zulassen - zwei
+   Trefferflaechen, die sich ueberlappen, waeren schlimmer als eine zu
+   kleine. */
+.griff {
+  /* Steht bewusst hier oben, vor allen Bauteilen: ein Knopf, der selbst
+     schon absolut sitzt (das Kreuz an der Anhangkachel), soll seine eigene
+     Lage behalten. */
+  position: relative;
+}
+.griff::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: max(100%, var(--griff-breit, 44px));
+  height: max(100%, var(--griff-hoch, 44px));
+}
+
+
 /* Muss vor den Layout-Regeln stehen: sonst gewinnt display:flex gegen [hidden]. */
 [hidden] { display: none !important; }
 
@@ -828,12 +856,20 @@ button, input, textarea { font: inherit; color: inherit; }
 .msg--out .bubble__meta { color: var(--bubble-out-text); }
 .msg--in .bubble__meta { color: var(--text-muted); }
 .bubble__meta .icon { width: 14px; height: 14px; stroke-width: 2.4; }
-.bubble__meta .is-read { color: var(--auf-blase); }
+/* Der Unterschied zwischen "zugestellt" und "gelesen" ist derselbe
+   Doppelhaken in einer anderen Farbe - und die unterschieden sich nur um
+   1,25:1. Das ist keine Unterscheidung, das ist ein Farbton. Gelesen wird
+   deshalb zusaetzlich kraeftiger gezeichnet. */
+.bubble__meta .is-read { color: var(--auf-blase); stroke-width: 3; }
 
 /* ------------------------------------------------- Wer hat es gelesen? ---
    In einer Gruppe steht unter der eigenen Nachricht ein Auge mit einer Zahl:
    so viele haben sie gelesen. Antippen oeffnet die Liste; wer eine Maus hat,
    sieht sie schon beim Darueberfahren. */
+/* Die Flaeche waechst in die Breite auf 44 und in die Hoehe nur auf 32:
+   hoeher griffe sie in den Text der Blase darueber, und bei einer verdeckten
+   Nachricht deckt ein Tipp dorthin die Nachricht auf. */
+.seen { --griff-hoch: 32px; }
 .seen {
   position: relative;
   display: inline-flex;
@@ -975,15 +1011,28 @@ button, input, textarea { font: inherit; color: inherit; }
    Flaeche, auf die man tippt. */
 .reactions {
   display: flex;
+  /* Umbrechen, nicht hinauslaufen: bei vielen Marken an einer Nachricht
+     standen die ersten dauerhaft ausserhalb des Bildschirms und waren
+     ueberhaupt nicht mehr zu erreichen. */
+  flex-wrap: wrap;
   gap: 4px;
   margin-top: -4px;
   padding: 0 6px;
+  max-width: 100%;
   position: relative;
   z-index: 1;
 }
 .reaction {
   font-size: .82rem;
   line-height: 1;
+  /* Bewusst KEINE unsichtbare Trefferflaeche wie bei den anderen kleinen
+     Knoepfen: Reaktionsmarken stehen dicht nebeneinander, und zwei
+     ueberlappende Flaechen nehmen einander die Tipps weg. Stattdessen die
+     Marke selbst auf die 24 Bildpunkte bringen, die WCAG 2.5.8 verlangt -
+     gemessen waren es 21. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   padding: 3px 7px;
   border-radius: 999px;
   background: var(--bg-elevated);
@@ -1183,6 +1232,9 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
   display: grid; place-items: center;
 }
 .attachment img { width: 100%; height: 100%; object-fit: cover; }
+/* Das Kreuz bleibt klein - die Kachel ist es auch. Angefasst wird es ueber
+   die unsichtbare Flaeche der Klasse .griff (siehe oben), die das JavaScript
+   mitgibt: 22x22 war die Haelfte der eigenen Mindestgroesse. */
 .attachment__remove {
   position: absolute; top: 2px; right: 2px;
   width: 22px; height: 22px;
@@ -1237,14 +1289,19 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 .sheet__grip::before {
   content: "";
   display: block;
+  margin-top: 9px;
   width: 40px;
   height: 4px;
   border-radius: 2px;
   background: var(--border);
   margin: 11px auto;
 }
-.sheet__title { font-size: 1rem; margin-bottom: 8px; padding: 0 4px; }
-.sheet__body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+/* Ein Titel aus einem einzigen langen Wort - ein Chatname etwa - zog eine
+   Querrolle ins Blatt und schob die Eintraege 57 Bildpunkte hinaus. */
+.sheet__title { font-size: 1rem; margin-bottom: 8px; padding: 0 4px; overflow-wrap: anywhere; }
+/* Das untere Polster gehoert an den Koerper, nicht ans Blatt: beim Rollen ans
+   Ende stiess der letzte Eintrag sonst an die Bildschirmkante. */
+.sheet__body { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding-bottom: 8px; }
 /* Der Inhalt kommt in der Reihenfolge herein, in der man ihn liest - ein
    Hauch Versatz, nicht mehr. Nach den ersten Zeilen ist Schluss: bei einer
    langen Liste wuerde man sonst unten auf sein Blatt warten. */
@@ -1329,7 +1386,9 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
   gap: 2px;
   padding: 6px 4px 10px;
 }
-.emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; flex: none; }
+/* min-height statt groesserer Schrift: das Emoji bleibt, wie es ist, die
+   Flaeche darum erreicht die eigenen 44 Bildpunkte (gemessen waren 41). */
+.emoji-row button { font-size: 1.7rem; line-height: 1; background: none; border: none; padding: 7px; border-radius: 12px; cursor: pointer; flex: none; min-width: 44px; min-height: 44px; }
 .emoji-row button:hover { background: var(--bg-sunken); }
 .emoji-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -1360,11 +1419,25 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 }
 .emoji-search:focus { outline: none; border-color: var(--accent); }
 
+/* Die Trefferliste der Suche rollt selbst. Ohne das rollte sie das ganze
+   Blatt und schob das Suchfeld nach oben aus dem Bild - man sah nicht mehr,
+   wonach man gesucht hatte. Dieselben Grenzen wie beim Katalog daneben. */
+.emoji-picker > .emoji-grid { overflow-y: auto; min-height: min(220px, 40dvh); }
+
+/* Eine Meldung ist keine Kachel: "Nichts gefunden" wurde in eine einzige
+   Rasterspalte gequetscht - 82 Bildpunkte breit, sieben Zeilen hoch. */
+.emoji-grid > p, .emoji-grid > .sheet-note, .gif-grid > p, .gif-grid > .sheet-note {
+  grid-column: 1 / -1;
+}
+
 /* Feste Spaltenzahl statt auto-fill: sonst springt das Raster bei jedem
    Tastendruck in der Suche in eine andere Breite. */
 .emoji-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  /* Nicht acht feste Spalten: auf 320px blieben davon 34x34 je Emoji uebrig.
+     So viele Spalten, wie bei 44 Bildpunkten hineinpassen - auf dem Handy
+     sechs, am Rechner mehr. */
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
   gap: 2px;
 }
 .emoji-grid button {
@@ -1382,7 +1455,11 @@ button.reveal-mark { cursor: pointer; text-decoration: underline dotted; text-un
 .emoji-grid button:hover { background: var(--bg-sunken); }
 .emoji-grid button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.emoji-groups { overflow-y: auto; min-height: 0; }
+/* Eine Mindesthoehe, sonst bleibt bei niedrigem Fenster nichts uebrig: das
+   Blatt teilt seine Hoehe unter den Kindern auf, und mit `min-height: 0`
+   darf dieser Bereich bis auf null schrumpfen - gemessen 6 Bildpunkte, kein
+   einziges Emoji sichtbar. Lieber rollt das Blatt als Ganzes. */
+.emoji-groups { overflow-y: auto; min-height: min(220px, 40dvh); }
 .emoji-group__title {
   position: sticky;
   top: 0;

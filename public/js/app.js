@@ -1982,7 +1982,7 @@ function buildHiddenNode(entry) {
 
 /** Der kleine Knopf, der eine aufgedeckte Nachricht wieder zudeckt. */
 function buildCoverAgain(entry) {
-  const knopf = make('button', 'spoiler-again');
+  const knopf = make('button', 'spoiler-again griff');
   knopf.type = 'button';
   knopf.appendChild(icon('i-eye'));
   knopf.setAttribute('aria-label', t('spoilerCoverAgain'));
@@ -2185,14 +2185,12 @@ function buildMeta(entry, mine) {
  */
 function buildSeen(entry) {
   const { gelesen, offen } = seenSplit(entry.seq);
-  const knopf = make('button', 'seen');
+  const knopf = make('button', 'seen griff');
   knopf.type = 'button';
   if (gelesen.length > 0) knopf.classList.add('is-read');
   knopf.setAttribute('aria-label', t('seenCount', { n: gelesen.length, total: gelesen.length + offen.length }));
 
-  const auge = icon('i-eye');
-  auge.classList.add('seen__eye');
-  knopf.appendChild(auge);
+  knopf.appendChild(icon('i-eye'));
   knopf.appendChild(make('span', 'seen__count', String(gelesen.length)));
   // Die Blase gehoert nicht in die Nachricht - sie steht oben im Dokument,
   // eine einzige fuer den ganzen Chat, und wird hier nur gerufen.
@@ -3431,7 +3429,7 @@ function renderAttachments() {
       bar.style.width = `${Math.round(item.progress * 100)}%`;
       box.appendChild(bar);
     }
-    const remove = make('button', 'attachment__remove');
+    const remove = make('button', 'attachment__remove griff');
     remove.type = 'button';
     remove.setAttribute('aria-label', t('removeAttachment'));
     remove.appendChild(icon('i-close'));
