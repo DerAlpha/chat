@@ -24,11 +24,15 @@ async function paar(browser, gerät = G(360)) {
 
 test('Der Sprungknopf hängt am Verlauf, nicht an der Textzeile', async ({ browser }) => {
   const { kA, kB, a } = await paar(browser);
-  for (let i = 0; i < 25; i += 1) await sendText(a, `Nachricht ${i}`);
-  // Erst wenn alle da sind, hat der Verlauf seine endgueltige Hoehe. Gegen
-  // das PHP-Backend kommen sie deutlich langsamer an; ein starres Warten
-  // reichte dort unter der Last der ganzen Suite nicht.
-  await expect(a.locator('#messages .msg:not(.msg--typing)')).toHaveCount(25, { timeout: 30_000 });
+  // Drei lange Nachrichten statt fuenfundzwanzig kurzer: gebraucht wird nur
+  // ein Verlauf, der laenger ist als das Fenster. Mit 25 Umlaeufen war dies
+  // der teuerste Test der ganzen Suite - und erzeugte gegen PHP genau die
+  // Last, an der er dann selbst scheiterte.
+  for (let i = 0; i < 3; i += 1) await sendText(a, `Nachricht ${i} ${'sehr lang '.repeat(40)}`);
+  await expect(a.locator('#messages .msg:not(.msg--typing)')).toHaveCount(3, { timeout: 30_000 });
+  await expect
+    .poll(() => a.locator('#messages').evaluate((n) => n.scrollHeight - n.clientHeight), { timeout: 15_000 })
+    .toBeGreaterThan(80);
   await a.locator('#messages').evaluate((n) => { n.scrollTop = 0; });
   // Und auf den Knopf warten, statt eine Frist zu raten: er erscheint erst,
   // wenn die App das Rollen bemerkt hat.
@@ -53,8 +57,8 @@ test('Der Sprungknopf hängt am Verlauf, nicht an der Textzeile', async ({ brows
 
 test('Der Verlauf bleibt unten, wenn ihm Höhe genommen wird', async ({ browser }) => {
   const { kA, kB, a } = await paar(browser);
-  for (let i = 0; i < 20; i += 1) await sendText(a, `Nachricht ${i}`);
-  await expect(a.locator('#messages .msg:not(.msg--typing)')).toHaveCount(20, { timeout: 30_000 });
+  for (let i = 0; i < 3; i += 1) await sendText(a, `Nachricht ${i} ${'sehr lang '.repeat(40)}`);
+  await expect(a.locator('#messages .msg:not(.msg--typing)')).toHaveCount(3, { timeout: 30_000 });
   await a.waitForTimeout(400);
 
   /** Wieviel von der letzten Blase liegt unter dem Verlauf? */
