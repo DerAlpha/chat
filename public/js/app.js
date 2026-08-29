@@ -24,7 +24,7 @@ import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration,
 import { configureSound, playSound, primeSound } from './sound.js';
 import {
   el, make, icon, showScreen, currentScreen, isDesktop, onLayoutChange, toast, busy,
-  openSheet, closeSheet, sheetOpen,
+  openSheet, closeSheet, sheetOpen, fangeFokus, gibFokusZurueck,
   confirmSheet, promptSheet, openLightbox, closeLightbox, lightboxOpen,
   formatClock, formatDay, sameDay, relativeTime, linkify, initial, onLongPress, copyText,
 } from './ui.js';
@@ -3052,9 +3052,14 @@ function renderCall(state) {
   // Nur beim Auftauchen: renderCall() laeuft bei jeder Zustandsmeldung, und
   // unbedingt geschlossen fiele einem das Blatt mit den Pruefzeichen bei der
   // naechsten gleich wieder zu.
-  if (overlay.hidden && sheetOpen()) closeSheet();
+  const kamGerade = overlay.hidden;
+  if (kamGerade && sheetOpen()) closeSheet();
   overlay.hidden = false;
   document.body.classList.add('is-calling');
+  // Der Anruf ist als aria-modal ausgezeichnet - dann muss er den Fokus auch
+  // halten. Gemessen war "Annehmen" der elfte Tab-Halt, davor lagen neun in
+  // dem Chat, den der Anruf gerade zudeckt.
+  if (kamGerade) fangeFokus(overlay);
   overlay.dataset.state = state.state;
   overlay.dataset.kind = state.kind;
 
@@ -3195,8 +3200,10 @@ function closeCallScreen() {
   closeCallNotification();
   const overlay = el('call');
   if (overlay) {
+    const warOffen = !overlay.hidden;
     overlay.hidden = true;
     delete overlay.dataset.state;
+    if (warOffen) gibFokusZurueck(overlay);
   }
   document.body.classList.remove('is-calling');
   stopRingTone();
@@ -5556,6 +5563,10 @@ function showUpdateScreen() {
   const screen = el('update');
   if (!screen || !screen.hidden) return;
   screen.hidden = false;
+  // Wegklicken soll man es nicht - dann darf man es auch nicht mit der
+  // Tastatur umgehen. Zwei Tabs und die Eingabetaste legten darunter einen
+  // neuen Chat an, waehrend das Fenster stehen blieb.
+  fangeFokus(screen);
   // Das Fenster nimmt den ganzen Bildschirm ein - wer gerade woanders
   // hinsieht, soll wenigstens hören, dass etwas passiert ist.
   playSound('notify');

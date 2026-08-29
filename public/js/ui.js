@@ -84,6 +84,10 @@ export const currentScreen = () => activeScreen;
 
 let toastTimer = null;
 
+/**
+ * Kurze Meldung. Sie liegt ueber allem - auch ueber einem offenen Blatt -,
+ * darf aber nichts abfangen: siehe `pointer-events: none` im Stilblatt.
+ */
 export function toast(message, ms = 2400) {
   const node = el('toast');
   node.textContent = message;
@@ -95,7 +99,123 @@ export function toast(message, ms = 2400) {
 export function busy(on, text = '') {
   const node = el('busy');
   el('busy-text').textContent = text;
+  const vorher = !node.hidden;
   node.hidden = !on;
+  // Der Schleier war fuer den Zeiger dicht und fuer die Tastatur offen: der
+  // Fokus blieb auf dem Knopf darunter stehen, und die Eingabetaste loeste
+  // ihn ein zweites Mal aus - bei "Alle Daten loeschen" ausgerechnet dort.
+  if (on && !vorher) fangeFokus(node);
+  else if (!on && vorher) gibFokusZurueck(node);
+}
+
+// --------------------------------------------------------------- Fokusfalle
+
+/**
+ * Was gerade modal offen ist - von unten nach oben gestapelt.
+ *
+ * `aria-modal="true"` ist eine Behauptung, keine Wirkung: der Browser laesst
+ * die Tabulatortaste trotzdem in die Seite dahinter wandern. Gemessen an
+ * einem offenen Blatt lagen 16 von 20 Tab-Halten HINTER dem Blatt - auf
+ * Knoepfen, die der Schleier zudeckt, mit sichtbarem Fokusring, und die
+ * Eingabetaste loeste sie wirklich aus. Hinter dem Fenster "neue Fassung",
+ * das sich ausdruecklich nicht wegklicken laesst, liess sich so
+ * weiterarbeiten.
+ *
+ * Ein Stapel und nicht eine einzelne Flaeche, weil es sie uebereinander
+ * gibt: die Lupe geht aus einem Blatt heraus auf, der Anruf kommt ueber
+ * alles. Gefangen wird immer im obersten.
+ */
+const modale = [];
+/** Wohin der Fokus zurueckgeht, wenn eine Flaeche wieder zugeht. */
+const rueckweg = new WeakMap();
+
+const FOKUSSIERBAR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), '
+  + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Was in dieser Flaeche wirklich zu erreichen ist - versteckte Aeste zaehlen nicht mit. */
+function fokusZiele(flaeche) {
+  return [...flaeche.querySelectorAll(FOKUSSIERBAR)]
+    .filter((n) => !n.hidden && n.getClientRects().length > 0 && !n.closest('[hidden]'));
+}
+
+/**
+ * Den Fokus in `flaeche` holen und dort festhalten.
+ *
+ * @param {HTMLElement} flaeche
+ * @param {{auf?: HTMLElement|null}} [optionen] `auf` setzt das erste Ziel
+ *   ausdruecklich - fuer Flaechen, deren erster Knopf etwas zerstoert.
+ */
+export function fangeFokus(flaeche, { auf } = {}) {
+  halteFokusFest();
+  const vorher = document.activeElement;
+  rueckweg.set(flaeche, vorher instanceof HTMLElement && vorher !== document.body ? vorher : null);
+  const schon = modale.indexOf(flaeche);
+  if (schon >= 0) modale.splice(schon, 1);
+  modale.push(flaeche);
+  // Eine Flaeche ganz ohne Bedienelement - der Schleier etwa - nimmt den
+  // Fokus selbst auf. Sonst bliebe er draussen und die Falle griffe ins Leere.
+  if (!flaeche.hasAttribute('tabindex')) flaeche.setAttribute('tabindex', '-1');
+  requestAnimationFrame(() => {
+    if (modale[modale.length - 1] !== flaeche) return;
+    const ziel = auf ?? fokusZiele(flaeche)[0] ?? flaeche;
+    ziel.focus({ preventScroll: true });
+  });
+}
+
+/**
+ * Die Flaeche gibt den Fokus wieder her - moeglichst dorthin zurueck, wo er
+ * herkam. Ohne das faellt er auf <body>, und der naechste Tabulator faengt
+ * wieder ganz oben auf der Seite an.
+ */
+export function gibFokusZurueck(flaeche) {
+  const i = modale.lastIndexOf(flaeche);
+  if (i >= 0) modale.splice(i, 1);
+  const zurueck = rueckweg.get(flaeche);
+  rueckweg.delete(flaeche);
+  if (zurueck && zurueck.isConnected && !zurueck.closest('[hidden]') && zurueck.getClientRects().length > 0) {
+    zurueck.focus({ preventScroll: true });
+    return;
+  }
+  // Der Ausloeser ist weg (der Verlauf wurde neu gebaut, der Knopf
+  // ausgeblendet). Dann wenigstens in die offene Flaeche darunter, statt
+  // den Fokus auf <body> fallen zu lassen.
+  const darunter = modale[modale.length - 1];
+  if (darunter) (fokusZiele(darunter)[0] ?? darunter).focus({ preventScroll: true });
+}
+
+/**
+ * Der Zuhoerer haengt erst dran, wenn wirklich etwas modal offen ist - und
+ * nicht schon beim Laden des Moduls. Ein Modul soll beim Einlesen nichts tun.
+ */
+let faengtSchon = false;
+function halteFokusFest() {
+  if (faengtSchon) return;
+  faengtSchon = true;
+  document.addEventListener('keydown', beiTabulator, true);
+}
+
+function beiTabulator(ereignis) {
+  if (ereignis.key !== 'Tab' || modale.length === 0) return;
+  const oben = modale[modale.length - 1];
+  const ziele = fokusZiele(oben);
+  if (ziele.length === 0) {
+    ereignis.preventDefault();
+    oben.focus({ preventScroll: true });
+    return;
+  }
+  const erster = ziele[0];
+  const letzter = ziele[ziele.length - 1];
+  const aktiv = document.activeElement;
+  if (!oben.contains(aktiv)) {
+    ereignis.preventDefault();
+    (ereignis.shiftKey ? letzter : erster).focus({ preventScroll: true });
+  } else if (ereignis.shiftKey && aktiv === erster) {
+    ereignis.preventDefault();
+    letzter.focus({ preventScroll: true });
+  } else if (!ereignis.shiftKey && aktiv === letzter) {
+    ereignis.preventDefault();
+    erster.focus({ preventScroll: true });
+  }
 }
 
 // -------------------------------------------------------------------- Sheets
@@ -139,22 +259,17 @@ export function openSheet(title, items, { onClose, autofocus = true } = {}) {
 
   sheet.hidden = false;
   sheetCloser = onClose ?? null;
-  // Fokus in das Sheet holen, damit Tastatur- und Screenreader-Nutzung funktioniert.
-  requestAnimationFrame(() => {
-    if (autofocus) {
-      body.querySelector('button, input')?.focus({ preventScroll: true });
-      return;
-    }
-    // Trotzdem in das Blatt hinein - nur eben nicht auf den Knopf.
-    sheet.setAttribute('tabindex', '-1');
-    sheet.focus({ preventScroll: true });
-  });
+  // Fokus in das Blatt holen UND dort festhalten - siehe fangeFokus().
+  // `autofocus: false` laesst ihn auf dem Blatt selbst statt auf dem ersten
+  // Knopf; die Falle gilt in beiden Faellen.
+  fangeFokus(sheet, { auf: autofocus ? undefined : sheet });
 }
 
 export function closeSheet() {
   const sheet = el('sheet');
   if (sheet.hidden) return;
   sheet.hidden = true;
+  gibFokusZurueck(sheet);
   const closer = sheetCloser;
   sheetCloser = null;
   closer?.();
@@ -246,12 +361,14 @@ export function openLightbox(url, caption, filename) {
   download.href = url;
   download.download = filename || 'bild.jpg';
   box.hidden = false;
+  fangeFokus(box);
 }
 
 export function closeLightbox() {
   const box = el('lightbox');
   if (box.hidden) return;
   box.hidden = true;
+  gibFokusZurueck(box);
   el('lightbox-image').removeAttribute('src');
 }
 
@@ -278,12 +395,26 @@ export const sameDay = (a, b) =>
   new Date(a).toDateString() === new Date(b).toDateString();
 
 /** "gerade eben", "vor 5 Min.", sonst Uhrzeit bzw. Datum. */
-export function relativeTime(ts) {
+/**
+ * @param {number} ts
+ * @param {{kurz?: boolean}} [wie] `kurz` fuer enge Stellen - die Chatliste.
+ *   Dort steht die Zeit in einer Spalte von rund 135 Bildpunkten, und
+ *   "Donnerstag, 27. August, 22:16" ist 177 breit. Ausgeschrieben gehoert
+ *   das in die Trennzeile des Verlaufs, wo eine ganze Zeile Platz ist.
+ */
+export function relativeTime(ts, { kurz = false } = {}) {
   if (!ts) return '';
   const diff = Date.now() - ts;
   if (diff < 60_000) return t('justNow');
   if (diff < 3_600_000) return t('minutesAgo', { n: Math.floor(diff / 60_000) });
   if (diff < 86_400_000) return t('hoursAgo', { n: Math.floor(diff / 3_600_000) });
+  if (kurz) {
+    const tage = Math.round((Date.now() - ts) / 86_400_000);
+    // Bis eine Woche zurueck reicht der Wochentag, danach das reine Datum.
+    return tage <= 6
+      ? new Intl.DateTimeFormat(getLanguage(), { weekday: 'short' }).format(new Date(ts))
+      : new Intl.DateTimeFormat(getLanguage(), { day: '2-digit', month: '2-digit', year: '2-digit' }).format(new Date(ts));
+  }
   return `${formatDay(ts)}, ${formatClock(ts)}`;
 }
 
