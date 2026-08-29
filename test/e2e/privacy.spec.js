@@ -287,19 +287,32 @@ test('Die Oberfläche passt auf ein schmales Display', async ({ browser }) => {
     .evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
   expect(fontSize).toBeGreaterThanOrEqual(16);
 
-  // Antippbares muss den Daumen vertragen.
+  /**
+   * Antippbares muss den Daumen vertragen.
+   *
+   * Gemessen wird nachgiebig, weil waehrend einer Animation die Zahl selbst
+   * wackelt: ein Element, das um einen Bruchteil eines Pixels verschoben ist,
+   * meldet 43.99993896484375 statt 44 - `bottom - top` in Gleitkomma. Genau
+   * das ist hier passiert, als der Startbildschirm noch einblendete. Der
+   * Anspruch bleibt hart: was nie 44 erreicht, faellt weiterhin durch.
+   */
+  const grossGenug = async (selector) => {
+    await expect.poll(async () => {
+      const box = await page.locator(selector).boundingBox();
+      return box ? Math.min(box.width, box.height) : 0;
+    }, { message: `${selector} vertraegt keinen Daumen` }).toBeGreaterThanOrEqual(44);
+  };
+
   for (const selector of ['#btn-send', '#btn-attach', '#chat-menu', '#chat-back', '#jump-down']) {
-    const box = await page.locator(selector).boundingBox();
-    if (!box) continue;
-    expect(box.width, `${selector} zu schmal`).toBeGreaterThanOrEqual(44);
-    expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(44);
+    // #jump-down zeigt sich nur, wenn man nicht ganz unten steht.
+    if (!(await page.locator(selector).boundingBox())) continue;
+    await grossGenug(selector);
   }
 
   // Auch die kleinen Chips auf der Startseite.
   await page.goto('./');
-  for (const selector of ['#btn-lang', '#btn-theme', '#btn-about']) {
-    const box = await page.locator(selector).boundingBox();
-    expect(box.height, `${selector} zu flach`).toBeGreaterThanOrEqual(44);
+  for (const selector of ['#btn-lang', '#btn-theme', '#btn-about', '#btn-changelog']) {
+    await grossGenug(selector);
   }
 
   await context.close();
