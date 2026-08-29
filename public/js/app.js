@@ -28,6 +28,7 @@ import {
   openSheet, closeSheet, sheetOpen, fangeFokus, gibFokusZurueck,
   confirmSheet, promptSheet, openLightbox, closeLightbox, lightboxOpen,
   formatClock, formatDay, sameDay, relativeTime, linkify, initial, onLongPress, copyText,
+  alsAppInstalliert, aufApfelGeraet,
 } from './ui.js';
 
 const MAX_ATTACHMENTS = 4;
@@ -132,6 +133,8 @@ function boot() {
   // Was beim letzten Mal als "tippt" gespeichert wurde, stimmt jetzt sicher
   // nicht mehr.
   tippenLoeschen();
+  // Die Erlaubnis kann laengst widerrufen sein, ohne dass es jemand sagt.
+  meldungenAbgleichen();
   // Nach einer Aktualisierung zeigt sich von selbst, was neu ist.
   changelogNachUpdate();
   watchStatusWidth();
@@ -3188,31 +3191,35 @@ function renderCall(state) {
  * Deshalb geht dieselbe Benachrichtigung heraus wie bei einer Nachricht -
  * mit einem Hinweis, worum es geht, aber ohne Inhalt.
  */
+/** Die Marke der laufenden Anrufmeldung - kein Griff auf das Objekt. */
 let callNotification = null;
 
 function notifyCall(state) {
   closeCallNotification();
   if (state.state !== 'ringing') return;
   announce(`${peerName()}: ${callStateLabel(state)}`);
-  if (!app.prefs.notifications || typeof Notification === 'undefined') return;
-  if (Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
-  try {
-    callNotification = new Notification(peerName(), {
-      body: callStateLabel(state),
-      icon: appUrl('img/icon-192.png'),
-      badge: appUrl('img/badge.png'),
-      tag: `anruf:${app.session?.roomId ?? ''}`,
-      requireInteraction: true,
-    });
-    callNotification.onclick = () => {
-      window.focus();
-      closeCallNotification();
-    };
-  } catch { /* Benachrichtigungen sind Beiwerk */ }
+  if (!darfMelden() || document.visibilityState === 'visible') return;
+  callNotification = `anruf:${app.session?.roomId ?? ''}`;
+  void zeigeMeldung(peerName(), {
+    body: callStateLabel(state),
+    icon: appUrl('img/icon-192.png'),
+    badge: appUrl('img/badge.png'),
+    tag: callNotification,
+    requireInteraction: true,
+    data: { basis: basePath },
+  });
 }
 
+/**
+ * Die Meldung zum Anruf wieder wegnehmen.
+ *
+ * Gemerkt wird nur ihre Marke, kein Griff auf das Objekt: eine Meldung des
+ * Service Workers ueberlebt die Seite, und ein Griff aus dem Fenster wuerde
+ * sie nach einem Neuladen nicht mehr finden.
+ */
 function closeCallNotification() {
-  try { callNotification?.close(); } catch { /* schon zu */ }
+  if (!callNotification) return;
+  void schliesseMeldungen(callNotification);
   callNotification = null;
 }
 
@@ -3913,12 +3920,7 @@ async function editMessage(entry) {
 }
 
 function openChatMenu() {
-  // Achtung: `Notification?.permission` wuerde werfen, wenn es die API gar
-  // nicht gibt - Optional Chaining schuetzt nicht vor unbekannten Bezeichnern.
-  const notificationsBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
-  const notificationLabel = notificationsBlocked
-    ? t('notificationsBlocked')
-    : (app.prefs.notifications ? t('switchOn') : t('switchOff'));
+  const notificationLabel = meldungsBeschriftung();
 
   openSheet(t('menu'), [
     { icon: 'i-users', label: t('yourName'), value: app.session?.nick || '–', onClick: changeNick },
@@ -5083,9 +5085,79 @@ function toggleSound() {
   toast(app.prefs.sound ? t('soundOn') : t('soundOff'));
 }
 
-async function toggleNotifications() {
+/**
+ * Was auf diesem Geraet ueberhaupt geht.
+ *
+ * Frueher stand hinter jedem Fehlschlag derselbe Satz: "Im Browser
+ * blockiert". Auf dem Telefon ist das fast nie die Wahrheit und nie ein
+ * Hinweis, der weiterhilft - deshalb vier Zustaende statt einem:
+ *
+ *   'geht'         Die Erlaubnis liegt vor.
+ *   'fragen'       Man darf fragen.
+ *   'verweigert'   Abgelehnt. Da kommt nur der Nutzer wieder raus.
+ *   'homebildschirm'  iPhone im Safari-Reiter: die Schnittstelle gibt es
+ *                  dort gar nicht, erst in der App vom Home-Bildschirm.
+ *   'unmoeglich'   Dieser Browser kann es nicht.
+ */
+function meldungsLage() {
   if (typeof Notification === 'undefined') {
-    toast(t('notificationsBlocked'));
+    return aufApfelGeraet() && !alsAppInstalliert() ? 'homebildschirm' : 'unmoeglich';
+  }
+  if (Notification.permission === 'granted') return 'geht';
+  if (Notification.permission === 'denied') return 'verweigert';
+  return 'fragen';
+}
+
+/**
+ * Beim Start: die Voreinstellung mit der echten Erlaubnis abgleichen.
+ *
+ * Wer sie im Browser wieder entzieht, sagt es der App nicht. Ohne diesen
+ * Abgleich stuende im Menue weiter "An", waehrend nie wieder etwas kommt -
+ * und der erste Tipp darauf haette ausgeschaltet, was ohnehin aus war.
+ *
+ * Geschrieben wird nur, wenn wirklich etwas nicht stimmt: auf einem frisch
+ * geleerten Geraet darf beim Start kein Eintrag entstehen.
+ */
+function meldungenAbgleichen() {
+  if (app.prefs?.notifications !== true) return;
+  if (meldungsLage() === 'geht') return;
+  app.prefs = setPrefs({ notifications: false });
+}
+
+/** Der Wert, der im Menue neben "Benachrichtigungen" steht. */
+function meldungsBeschriftung() {
+  switch (meldungsLage()) {
+    case 'homebildschirm': return t('notificationsNeedsApp');
+    case 'unmoeglich': return t('notificationsUnsupported');
+    case 'verweigert': return t('notificationsBlocked');
+    default: return app.prefs.notifications ? t('switchOn') : t('switchOff');
+  }
+}
+
+/**
+ * Der Weg fuer das iPhone: ein Blatt statt einer Pille.
+ *
+ * In einen Toast passt der Weg nicht hinein - und er braucht eine Warnung.
+ * Eine App vom Home-Bildschirm hat auf iOS ihren eigenen Speicher; die Chats
+ * aus dem Safari-Reiter sind dort nicht. Deshalb steht der Knopf zum
+ * Verknuepfen gleich daneben.
+ */
+function zeigeHomeBildschirmBlatt() {
+  openSheet(t('notifications'), [
+    make('p', 'sheet-note', t('notificationsIosHint')),
+    make('p', 'sheet-note', t('notificationsIosChats')),
+    { icon: 'i-link', label: t('linkDevice'), onClick: () => void shareDeviceLink() },
+  ], { autofocus: false });
+}
+
+async function toggleNotifications() {
+  const lage = meldungsLage();
+  if (lage === 'homebildschirm') {
+    zeigeHomeBildschirmBlatt();
+    return;
+  }
+  if (lage === 'unmoeglich') {
+    toast(t('notificationsUnsupported'));
     return;
   }
   if (app.prefs.notifications) {
@@ -5093,15 +5165,87 @@ async function toggleNotifications() {
     toast(t('notificationsOff'));
     return;
   }
-  const permission = Notification.permission === 'granted'
-    ? 'granted'
-    : await Notification.requestPermission();
-  if (permission !== 'granted') {
-    toast(t('notificationsBlocked'));
+  if (lage === 'verweigert') {
+    // Aus 'denied' kommt kein Code heraus - nur der Nutzer, in den
+    // Einstellungen seines Browsers. Also sagen, wo.
+    toast(t('notificationsBlockedHint'));
+    return;
+  }
+  // Kein `await` vor dieser Zeile: die Erlaubnis darf nur unmittelbar aus
+  // der Tippgeste erfragt werden, sonst lehnt der Browser von sich aus ab.
+  // Sehr alte Safari-Fassungen kennen nur die Rueckruf-Form und liefern
+  // hier `undefined` - das ist kein "verweigert", sondern "nicht gefragt".
+  const antwort = await Notification.requestPermission();
+  if (antwort === 'denied') {
+    toast(t('notificationsBlockedHint'));
+    return;
+  }
+  if (antwort !== 'granted') {
+    toast(t('notificationsDismissed'));
     return;
   }
   app.prefs = setPrefs({ notifications: true });
   toast(t('notificationsOn'));
+}
+
+/**
+ * Wohin die Meldung geht.
+ *
+ * Auf Android ist `new Notification(...)` verboten - Chrome wirft dort
+ * "Illegal constructor" und verlangt den Weg ueber den Service Worker.
+ * Genau deshalb kam auf dem Telefon nie eine Meldung an, obwohl die
+ * Erlaubnis erteilt war: der Fehler landete im Fang und blieb still.
+ *
+ * Der Worker ist also der erste Weg. Den Konstruktor gibt es nur noch als
+ * Rueckfall - fuer den Fall, dass gar kein Worker laeuft (kein HTTPS,
+ * abgeschaltet, alter Browser).
+ */
+async function meldungsKanal() {
+  if (typeof app.swRegistration?.showNotification === 'function') return app.swRegistration;
+  // Kurz nach dem Start steht die Registrierung noch nicht in app - der
+  // Browser kennt sie aber schon. Eine Nachricht, die genau in dieses
+  // Fenster faellt, soll deshalb nicht am alten Weg scheitern.
+  try {
+    const registrierung = await navigator.serviceWorker?.getRegistration?.();
+    if (typeof registrierung?.showNotification === 'function') return registrierung;
+  } catch { /* kein Worker */ }
+  return null;
+}
+
+/** Kann ueberhaupt eine Meldung herausgehen? Synchron, denn daran haengt der Ton. */
+function darfMelden() {
+  return app.prefs.notifications === true && meldungsLage() === 'geht';
+}
+
+/**
+ * Zeigt eine Meldung. Liefert, ob sie wirklich herausging.
+ *
+ * @param {string} titel
+ * @param {NotificationOptions} optionen
+ */
+async function zeigeMeldung(titel, optionen) {
+  const kanal = await meldungsKanal();
+  try {
+    if (kanal) {
+      await kanal.showNotification(titel, optionen);
+      return true;
+    }
+    const meldung = new Notification(titel, optionen);
+    meldung.onclick = () => { window.focus(); meldung.close(); };
+    return true;
+  } catch {
+    // Benachrichtigungen sind Beiwerk - dann eben nur der eigene Ton.
+    return false;
+  }
+}
+
+/** Schliesst alle Meldungen mit dieser Marke - egal, wer sie gezeigt hat. */
+async function schliesseMeldungen(marke) {
+  const kanal = await meldungsKanal();
+  if (!kanal) return;
+  try {
+    for (const meldung of await kanal.getNotifications({ tag: marke })) meldung.close();
+  } catch { /* schon zu */ }
 }
 
 /** Sagt Screenreadern genau eine neue Nachricht an - nicht den ganzen Verlauf. */
@@ -5142,25 +5286,19 @@ function senderLabel(entry) {
 }
 
 function systemMeldung(entry) {
-  if (!app.prefs.notifications || typeof Notification === 'undefined') return false;
-  if (Notification.permission !== 'granted') return false;
-  try {
-    const notification = new Notification(senderLabel(entry), {
-      body: previewOf(entry).slice(0, 140),
-      icon: appUrl('img/icon-192.png'),
-      badge: appUrl('img/badge.png'),
-      tag: app.session.roomId,
-      renotify: false,
-    });
-    notification.onclick = () => {
-      window.focus();
-      notification.close();
-    };
-    return true;
-  } catch {
-    // Benachrichtigungen sind Beiwerk - dann eben der eigene Ton.
-    return false;
-  }
+  if (!darfMelden()) return false;
+  // Sie geht ueber den Service Worker heraus, also asynchron. Ob das klappt,
+  // steht erst hinterher fest - der Aufrufer entscheidet aber jetzt, ob er
+  // zusaetzlich einen Ton spielt. Deshalb hier die Zusage, und wenn sie
+  // doch nicht eingehalten werden kann, kommt der Ton eben nachtraeglich.
+  void zeigeMeldung(senderLabel(entry), {
+    body: previewOf(entry).slice(0, 140),
+    icon: appUrl('img/icon-192.png'),
+    badge: appUrl('img/badge.png'),
+    tag: app.session.roomId,
+    data: { basis: basePath },
+  }).then((ging) => { if (!ging) playSound('notify'); });
+  return true;
 }
 
 // ===========================================================================

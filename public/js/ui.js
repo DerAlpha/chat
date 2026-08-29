@@ -38,6 +38,28 @@ const desktop = typeof window.matchMedia === 'function'
 
 export const isDesktop = () => desktop?.matches === true;
 
+const STANDALONE_QUERY = '(display-mode: standalone)';
+
+/**
+ * Laeuft die App als eigenes Fenster - also vom Home-Bildschirm gestartet?
+ *
+ * Zwei Wege, weil keiner allein reicht: `display-mode: standalone` ist der
+ * Weg fuer alle anderen, `navigator.standalone` der einzige, den Safari auf
+ * dem iPhone kennt.
+ */
+export const alsAppInstalliert = () => window.navigator.standalone === true
+  || window.matchMedia?.(STANDALONE_QUERY).matches === true;
+
+/**
+ * iPhone oder iPad?
+ *
+ * Nicht ueber navigator.platform: ein iPad gibt sich seit iPadOS 13 als
+ * "Macintosh" aus. Es verraet sich aber ueber die Zahl der Beruehrungspunkte
+ * - ein echter Mac meldet dort null.
+ */
+export const aufApfelGeraet = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 let activeScreen = null;
 const layoutListeners = new Set();
 

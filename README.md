@@ -246,6 +246,9 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   rutscht nach oben
 - Zweites eigenes Gerät per Geräte-Link dazuschalten
 - Als App installierbar (PWA), offline lauffähige Oberfläche, Benachrichtigungen
+  über den Service Worker – der einzige Weg, den Android erlaubt. Auf dem
+  iPhone gibt es sie erst, wenn die App auf dem Home-Bildschirm liegt; die App
+  sagt das auch, statt „blockiert" zu behaupten
 - Hell/Dunkel/Automatisch, Deutsch und Englisch
 - GIF-Suche über das eigene Backend – Giphy sieht den Server, nie die Nutzer
 - Reaktionen aus allen gängigen Emoji, mit Suche auf Deutsch und Englisch
@@ -295,7 +298,8 @@ HOST=0.0.0.0 npm start
 # dann z. B. http://192.168.1.42:3000 am Telefon öffnen
 ```
 
-> **Wichtig:** Kamera, Mikrofon und die Installation als App brauchen **HTTPS**
+> **Wichtig:** Kamera, Mikrofon, Benachrichtigungen und die Installation als App
+> brauchen **HTTPS**
 > (`localhost` ausgenommen). Im Betrieb gehört ein Reverse Proxy mit Zertifikat davor.
 
 ### Mit Docker

@@ -12,6 +12,10 @@
  * Neueste zuerst. Wer etwas ergänzt, setzt es nach oben.
  */
 export const CHANGELOG = [
+  { ts: '2026-08-29T18:40', de: 'Benachrichtigungen kommen jetzt auch auf dem Handy an. Android verbietet den Weg, den die App bisher benutzt hat - sie geht jetzt über den Service Worker, und ein Tipp auf die Meldung holt den Chat nach vorn.',
+    en: 'Notifications now arrive on phones too. Android forbids the route the app used to take - it now goes through the service worker, and tapping the notification brings the chat to the front.' },
+  { ts: '2026-08-29T18:40', de: 'Statt „Im Browser blockiert" für alles steht jetzt da, was wirklich los ist: abgelehnt, weggetippt, oder - auf dem iPhone - dass die App dafür auf dem Home-Bildschirm liegen muss.',
+    en: 'Instead of "Blocked by the browser" for everything, it now says what is actually going on: refused, dismissed, or - on iPhone - that the app has to sit on your Home Screen first.' },
   { ts: '2026-08-29T16:10', de: 'Das Auge unter einer Gruppennachricht ist wieder neutral. Blau bleibt allein der Lesebestätigung vorbehalten - zwei blaue Zeichen nebeneinander nehmen dem Haken genau die Bedeutung, wegen der er blau ist.',
     en: 'The eye under a group message is neutral again. Blue is reserved for the read receipt alone - two blue marks side by side take from the tick the very meaning it is blue for.' },
   { ts: '2026-08-29T13:21', de: 'Diese Liste. Der Knopf "Änderungen" unten auf der Startseite zeigt sie jederzeit - und nach einer Aktualisierung geht sie einmal von selbst auf.',

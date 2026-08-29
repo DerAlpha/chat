@@ -11,7 +11,7 @@
  * Datei, aendert sich die Fassung - und dieser Worker raeumt seinen Speicher.
  * Ein Test wird rot, wenn der Stempel nicht mehr zum Inhalt passt.
  */
-const VERSION = '3946984e746f';
+const VERSION = '17f6776e97d9';
 
 /**
  * Die App kann unter "/" oder unter "/chats/" liegen. Der Geltungsbereich des
@@ -120,4 +120,30 @@ self.addEventListener('message', (event) => {
   // Worker auch dann noch wecken kann, wenn sie die neue nicht kennt.
   const wunsch = typeof event.data === 'string' ? event.data : event.data?.type;
   if (wunsch === 'skip-waiting' || wunsch === 'skipWaiting') self.skipWaiting();
+});
+
+/**
+ * Ein Tipp auf die Meldung.
+ *
+ * Auf Android zeigt der Worker die Meldung - also muss er auch beantworten,
+ * was ein Tipp darauf bedeutet. Ohne diesen Handler waere sie eine
+ * Sackgasse: sie geht weg, und sonst passiert nichts.
+ *
+ * Zuerst wird ein offenes Fenster gesucht und nach vorn geholt; nur wenn es
+ * keines gibt, wird eines geoeffnet. Gesucht wird ausdruecklich innerhalb
+ * der eigenen Basis - auf derselben Domain koennen Nachbar-Apps liegen, und
+ * deren Fenster gehen uns nichts an.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const zuhause = new URL(BASE, self.location.origin).href;
+  event.waitUntil((async () => {
+    const fenster = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const fensterchen of fenster) {
+      if (!fensterchen.url.startsWith(zuhause)) continue;
+      await fensterchen.focus();
+      return;
+    }
+    await self.clients.openWindow(zuhause);
+  })());
 });
