@@ -27,6 +27,34 @@ async function gruppeAnlegen(page, { name = 'Verein', count = 2, nick = 'Anton' 
 
 const auge = (seite) => seite.locator('#messages .msg--out:not(.msg--typing) .seen').last();
 
+/**
+ * Die Farbe eines Elements, daneben die beiden Marken-Token.
+ *
+ * Verglichen wird nicht gegen eine hingeschriebene Zahl, sondern gegen die
+ * Token selbst - so haelt der Test auch, wenn sich die Farbwelt noch einmal
+ * dreht. Gemessen wird an einer Probe im selben Dokument, damit hell und
+ * dunkel dasselbe Verfahren haben.
+ */
+async function farben(seite, wahl) {
+  return seite.evaluate((sel) => {
+    const alsRgb = (wert) => {
+      const probe = document.createElement('span');
+      probe.style.color = wert;
+      document.body.appendChild(probe);
+      const farbe = getComputedStyle(probe).color;
+      probe.remove();
+      return farbe;
+    };
+    const treffer = [...document.querySelectorAll(sel)];
+    return {
+      gefunden: treffer.length,
+      ist: treffer.length ? getComputedStyle(treffer[treffer.length - 1]).color : null,
+      aufBlase: alsRgb('var(--auf-blase)'),
+      lesehaken: alsRgb('var(--lesehaken)'),
+    };
+  }, wahl);
+}
+
 test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ browser }) => {
   const kontextA = await browser.newContext(HANDY);
   const kontextB = await browser.newContext(HANDY);
@@ -56,6 +84,20 @@ test('Unter der eigenen Nachricht steht, wie viele sie gelesen haben', async ({ 
   // Das Auge steht da und zählt mit.
   await expect(auge(seiteA)).toBeVisible({ timeout: 20_000 });
   await expect(auge(seiteA).locator('.seen__count')).toHaveText('1', { timeout: 30_000 });
+
+  /*
+   * Das Auge bleibt in der gruenen Farbwelt.
+   *
+   * Blau ist die eine Ausnahme und gehoert der Lesebestaetigung allein - ein
+   * zweites blaues Zeichen daneben macht aus der Ausnahme eine Regel und
+   * nimmt dem Haken genau die Bedeutung, wegen der er blau ist.
+   */
+  const augenfarbe = await farben(seiteA, '#messages .msg--out:not(.msg--typing) .seen.is-read');
+  expect(augenfarbe.gefunden, 'das gelesene Auge steht nicht da').toBeGreaterThan(0);
+  expect(augenfarbe.ist, 'das Auge traegt nicht den Ton der Zeichen auf der eigenen Blase')
+    .toBe(augenfarbe.aufBlase);
+  expect(augenfarbe.ist, 'das Auge ist blau wie die Lesebestätigung')
+    .not.toBe(augenfarbe.lesehaken);
 
   // Und die Liste trennt beide sauber.
   await auge(seiteA).click();
@@ -106,6 +148,14 @@ test('Im Zweiergespräch bleibt es beim Haken', async ({ browser }) => {
   // Kein Auge - bei einer Person sagt der Haken alles.
   await expect(seiteA.locator('#messages .msg--out:not(.msg--typing) .seen')).toHaveCount(0);
   await expect(seiteA.locator('#messages .msg--out:not(.msg--typing) .bubble__meta .icon')).toBeVisible();
+
+  // Und dieser Haken ist blau - er ist die einzige Stelle, die es sein darf.
+  const haken = '#messages .msg--out:not(.msg--typing) .bubble__meta .is-read';
+  await expect(seiteA.locator(haken)).toBeVisible({ timeout: 20_000 });
+  const hakenfarbe = await farben(seiteA, haken);
+  expect(hakenfarbe.ist, 'die Lesebestätigung ist nicht blau').toBe(hakenfarbe.lesehaken);
+  expect(hakenfarbe.ist, 'die Lesebestätigung ist vom Auge nicht zu unterscheiden')
+    .not.toBe(hakenfarbe.aufBlase);
 
   await kontextA.close();
   await kontextB.close();

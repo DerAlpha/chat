@@ -12,6 +12,8 @@
  * Neueste zuerst. Wer etwas ergänzt, setzt es nach oben.
  */
 export const CHANGELOG = [
+  { ts: '2026-08-29T16:10', de: 'Das Auge unter einer Gruppennachricht ist wieder neutral. Blau bleibt allein der Lesebestätigung vorbehalten - zwei blaue Zeichen nebeneinander nehmen dem Haken genau die Bedeutung, wegen der er blau ist.',
+    en: 'The eye under a group message is neutral again. Blue is reserved for the read receipt alone - two blue marks side by side take from the tick the very meaning it is blue for.' },
   { ts: '2026-08-29T13:21', de: 'Diese Liste. Der Knopf "Änderungen" unten auf der Startseite zeigt sie jederzeit - und nach einer Aktualisierung geht sie einmal von selbst auf.',
     en: 'This list. The "Changes" button at the bottom of the start screen shows it any time - and after an update it opens once by itself.' },
   { ts: '2026-08-29T11:21', de: 'Die ganze Oberfläche trägt jetzt eine Farbwelt aus Moosgrün (RAL Design 130 50 20). Die Lesebestätigung bleibt als Einzige blau - und ist damit endlich zu sehen.',

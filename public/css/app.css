@@ -952,8 +952,12 @@ button, input, textarea { font: inherit; color: inherit; }
 .seen__count { font-size: .72rem; font-variant-numeric: tabular-nums; }
 .seen { transition: color var(--dauer-kurz) ease, transform var(--dauer-kurz) var(--kurve); }
 .seen:active { transform: scale(.92); }
-/* Dasselbe Signal wie der blaue Doppelhaken, nur fuer mehrere Leute. */
-.seen.is-read { color: var(--lesehaken); }
+/* Dasselbe Signal wie der Doppelhaken, nur fuer mehrere Leute - aber
+   ausdruecklich NICHT in dessen Blau. Blau ist die eine Ausnahme von der
+   gruenen Farbwelt und bleibt der Lesebestaetigung vorbehalten; das Auge
+   traegt den Ton, den alle Zeichen auf der eigenen Blase tragen. Was es
+   sagt, sagt ohnehin die Zahl daneben und der Name des Knopfes. */
+.seen.is-read { color: var(--auf-blase); }
 
 /* Die Blase waechst aus dem Auge heraus - mit Spitze zum Auge hin. Es gibt
    sie nur dort, wo es auch einen Mauszeiger gibt: auf einem Telefon bliebe
