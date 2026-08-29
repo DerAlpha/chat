@@ -102,7 +102,21 @@ export const bubbles = (page) => page.locator('#messages .msg:not(.msg--typing)'
  * hier die Touch-Ereignisse direkt - nur so entstehen Zeiger-Ereignisse mit
  * pointerType "touch", und nur die loesen im Browser das Markieren aus.
  */
-export async function longPress(page, locator, { ms = 700, slideY = 0 } = {}) {
+/**
+ * Langes Druecken mit dem Finger.
+ *
+ * 900 ms gegen eine Schwelle von 480 (onLongPress in public/js/ui.js) - also
+ * 420 ms Luft. Vorher waren es 700, und damit blieben nur 220: unter der Last
+ * der ganzen Suite gegen PHP wurde der Renderer so weit ausgehungert, dass
+ * der Zeitgeber der App erst NACH dem Loslassen ablief. Das Menue ging dann
+ * gar nicht auf, und der Test las "hidden" - nachgewiesen durch Mutation:
+ * mit einer Schwelle von 900 gegen 700 ms Haltezeit faellt genau derselbe
+ * Test an genau derselben Zeile.
+ *
+ * Die Haltezeit ist kein Teil der Zusicherung - geprueft wird, was NACH dem
+ * Langdruck passiert. Sie darf deshalb grosszuegig sein.
+ */
+export async function longPress(page, locator, { ms = 900, slideY = 0 } = {}) {
   const box = await locator.boundingBox();
   const x = Math.round(box.x + box.width / 2);
   const y = Math.round(box.y + box.height / 2);
