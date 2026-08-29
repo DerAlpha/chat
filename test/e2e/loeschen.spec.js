@@ -203,10 +203,24 @@ test('Löschen räumt dieses Gerät und die Chats bei den anderen ab', async ({ 
 
   const knopf = endknopf(seiteA);
   await expect(knopf).toBeEnabled({ timeout: 25_000 });
+  // Ein Zeichen, das nur dieses Dokument kennt. Das Löschen räumt die Chats
+  // schon vor dem Neuladen aus der Liste - die beiden Erwartungen unten sind
+  // also bereits im ALTEN Dokument erfüllt, und der anschließende Blick in
+  // den Speicher fiel mitten in die Navigation ("execution context was
+  // destroyed"). Erst wenn das Zeichen weg ist, läuft das neue Dokument.
+  await seiteA.evaluate(() => { window.__vorDemLoeschen = true; });
   await knopf.click();
 
   // Dieses Gerät: keine Chats mehr, und auch der Name ist weg.
   await expect(seiteA.locator('#screen-start')).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => {
+    try {
+      return await seiteA.evaluate(() => window.__vorDemLoeschen === true);
+    } catch {
+      // Genau waehrend der Navigation - also noch nicht so weit.
+      return true;
+    }
+  }, { timeout: 30_000 }).toBe(false);
   await expect(seiteA.locator('#chat-list .chat-list__item')).toHaveCount(0, { timeout: 25_000 });
   // Die Chats sind aus dem Speicher raus. (Dass gar nichts zurueckbleibt,
   // prueft der Test weiter unten - hier setzt die Testumgebung den Namen bei
