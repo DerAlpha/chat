@@ -105,7 +105,13 @@ test('Der Knopf holt alles frisch und räumt die Adresszeile wieder auf', async 
     .toBe(true);
   // Und danach ist das Anhängsel wieder weg: in einem geteilten Link hätte
   // es nichts verloren.
-  expect(seite.url()).not.toContain('frisch=');
+  //
+  // Abgewartet statt einmal nachgesehen: die beiden Zusicherungen darüber
+  // sind schon im rohen HTML erfüllt - der Knopf steht da, und #update trägt
+  // von Haus aus `hidden`. Sie sagen also nichts darüber, ob das Skript
+  // überhaupt schon gelaufen ist, und dropCacheBuster() räumt erst dort auf.
+  // Unter Last las der Test die Adresszeile, bevor es so weit war.
+  await expect.poll(() => seite.url(), { timeout: 10_000 }).not.toContain('frisch=');
 
   // Der untergeschobene Speicher ist weg - und weil hier kein Service Worker
   // läuft, kann ihn nur der Knopf geräumt haben.
