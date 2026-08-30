@@ -351,6 +351,53 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---------------------------------------------------------- Chat-Liste --- */
 
 .section-title { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); font-weight: 600; }
+/* --------------------------------------------------------------- Suche --- */
+
+/* Die Leiste steht immer da - auch ohne einen einzigen Chat. Sie ist der
+   einzige Weg zu einem versteckten Chat, und weil sie IMMER da ist, verraet
+   ihre Anwesenheit auch nichts. */
+.chat-suche {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* In der Seitenleiste am Rechner ist sie ein Kind eines Flex-Kastens mit
+     begrenzter Hoehe - ohne das hier wuerde sie als Erstes zusammengedrueckt. */
+  flex: none;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+.chat-suche:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chat-suche__lupe { width: 18px; height: 18px; flex: none; color: var(--text-muted); }
+.chat-suche__feld {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  /* Unter 16 px zoomt iOS beim Antippen ins Feld hinein. */
+  font: inherit;
+  font-size: 1rem;
+  min-height: 44px;
+  padding: 0;
+}
+.chat-suche__feld:focus { outline: none; }
+/* Das Kreuz, das manche Browser selbst in ein type="search" setzen, waere
+   ein zweites neben unserem - und keines von beiden traegt einen Daumen. */
+.chat-suche__feld::-webkit-search-cancel-button { display: none; }
+.chat-suche__leeren { flex: none; width: 36px; min-height: 36px; }
+
+.chat-list__leer {
+  padding: 14px 4px;
+  color: var(--text-muted);
+  font-size: .92rem;
+  text-align: center;
+}
+/* Ein aufgeschlossenes Versteck traegt ein Zeichen - es ist ohnehin nur zu
+   sehen, wenn die Zeichenfolge schon eingetippt wurde. */
+.chat-list__versteckt { width: 17px; height: 17px; flex: none; color: var(--text-muted); }
+
 .chats { display: flex; flex-direction: column; gap: 10px; }
 .chat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 

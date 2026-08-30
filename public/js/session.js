@@ -15,6 +15,20 @@
 const KEY_PREFIX = 'fc:';
 const SESSIONS_KEY = `${KEY_PREFIX}sessions:v1`;
 const PREFS_KEY = `${KEY_PREFIX}prefs:v1`;
+/**
+ * Die versteckten Chats.
+ *
+ * Hier liegt je Chat ein verschluesselter Block und sonst nichts: kein Name,
+ * kein Code, keine Raum-ID. Ohne die Zeichenfolge, die der Nutzer beim
+ * Verstecken gewaehlt hat, kann nicht einmal die App selbst sagen, mit wem
+ * dieser Chat war - sie kann ihn deshalb auch nicht abfragen, nicht zaehlen
+ * und nicht melden.
+ *
+ * Was ein Blick in den Speicher trotzdem verraet: DASS etwas versteckt ist,
+ * und wie viele. Das laesst sich ohne Blendwerk nicht vermeiden; in der App
+ * selbst gibt es dafuer keine Spur.
+ */
+const HIDDEN_KEY = `${KEY_PREFIX}hidden:v1`;
 
 const DEFAULT_PREFS = {
   lang: null,
@@ -160,6 +174,33 @@ export function wipeStorage() {
 
 export function removeSession(roomId) {
   writeJson(SESSIONS_KEY, listSessions().filter((entry) => entry.roomId !== roomId));
+}
+
+// ------------------------------------------------------------------ Verstecke
+
+/** Die verschluesselten Bloecke, so wie sie daliegen. */
+export function listHidden() {
+  const bloecke = readJson(HIDDEN_KEY, []);
+  if (!Array.isArray(bloecke)) return [];
+  return bloecke.filter((block) => block && typeof block.ct === 'string' && typeof block.salt === 'string');
+}
+
+/** Legt einen weiteren Block dazu und liefert seine Kennung. */
+export function addHidden(block) {
+  writeJson(HIDDEN_KEY, [...listHidden(), block]);
+  return block.id;
+}
+
+/** Tauscht einen Block aus - wenn sich am versteckten Chat etwas geaendert hat. */
+export function replaceHidden(id, block) {
+  writeJson(HIDDEN_KEY, listHidden().map((alt) => (alt.id === id ? block : alt)));
+}
+
+/** Nimmt einen Block wieder heraus - beim Aufheben des Verstecks. */
+export function removeHidden(id) {
+  const uebrig = listHidden().filter((block) => block.id !== id);
+  writeJson(HIDDEN_KEY, uebrig);
+  return uebrig;
 }
 
 // -------------------------------------------------------------- Einstellungen

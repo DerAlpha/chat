@@ -206,6 +206,39 @@ export async function deriveKey(code) {
   return (await deriveSecrets(code)).keyRaw;
 }
 
+/**
+ * Der Schluessel hinter einer selbst gewaehlten Zeichenfolge.
+ *
+ * Gebraucht fuers Verstecken eines Chats: die Zeichenfolge waehlt der Nutzer,
+ * sie ist also viel schwaecher als ein Einmal-Code. Deshalb dieselben 250.000
+ * Runden - und ein ZUFAELLIGES Salz je Chat, nicht eines aus der Zeichenfolge.
+ * Sonst ergaebe dieselbe Zeichenfolge ueberall denselben Schluessel, und wer
+ * einen Versteck-Block knackt, haette alle anderen gleich mit.
+ *
+ * Weil das Salz zufaellig ist, muss beim Suchen jeder Block einzeln probiert
+ * werden. Das ist gewollt: es gibt keinen billigen Index, an dem sich ablesen
+ * liesse, wie viele Verstecke dieselbe Zeichenfolge tragen.
+ *
+ * @param {string} zeichenfolge
+ * @param {Uint8Array} salz
+ */
+export async function deriveHideKey(zeichenfolge, salz) {
+  const material = await crypto.subtle.importKey(
+    'raw', encoder.encode(zeichenfolge), 'PBKDF2', false, ['deriveBits'],
+  );
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: salz, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    material,
+    KEY_BYTES * 8,
+  ));
+  return importKey(bits);
+}
+
+/** Frisches Salz fuer ein Versteck. */
+export function randomSalt() {
+  return crypto.getRandomValues(new Uint8Array(16));
+}
+
 /** Macht aus rohen Schluesselbytes einen benutzbaren AES-GCM-Schluessel. */
 export function importKey(rawBytes) {
   return crypto.subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);

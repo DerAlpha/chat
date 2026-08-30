@@ -10,7 +10,7 @@ import {
   cryptoAvailable, generateCode, formatCode, normalizeCode, isCompleteCode,
   deriveSecrets, deriveSlot, generateGroupKey, randomRoomId, wrapGroupKey, unwrapGroupKey,
   importKey, encryptJson, decryptJson, encryptBytes, decryptBytes,
-  toBase64, fromBase64, randomId,
+  toBase64, fromBase64, randomId, deriveHideKey, randomSalt,
 } from './crypto.js';
 import { qrSvg } from './qr.js';
 import { CallSession, mediaCryptoAvailable } from './call.js';
@@ -19,7 +19,7 @@ import { appUrl, baseUrl, basePath } from './base.js';
 import { APP_VERSION } from './version.js';
 import { CHANGELOG, NEUESTE_AENDERUNG } from './changelog.js';
 import { t, applyTranslations, setLanguage, getLanguage, detectLanguage, availableLanguages, onLanguageChange } from './i18n.js';
-import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, etwasGespeichert, storageAvailable } from './session.js';
+import { listSessions, getSession, saveSession, patchSession, patchSessions, removeSession, wipeStorage, getPrefs, setPrefs, etwasGespeichert, storageAvailable, listHidden, addHidden, removeHidden, replaceHidden } from './session.js';
 import { createRoom, claimSlot, roomStatus, overview, uploadBlob, downloadBlob, burnRoom, leaveRoom, addSlots, putAvatar, fetchAvatar, deleteAvatar, createConnection, serverConfig, searchGifs, gifMediaUrl, fetchGif, iceConfig, ApiError } from './net.js';
 import { prepareImage, readFileBytes, extensionFor, formatBytes, formatDuration, canRecordAudio, startRecording, openForCrop, finishAvatar, closeSource } from './media.js';
 import { configureSound, playSound, primeSound } from './sound.js';
@@ -55,6 +55,14 @@ const app = {
   call: null,
   /** Die Anmeldung des Service Workers - über sie kommt die Update-Meldung. */
   swRegistration: null,
+  /** Was gerade in der Suchleiste steht. */
+  suche: '',
+  /**
+   * Versteckte Chats, die die eingetippte Zeichenfolge gerade aufgeschlossen
+   * hat. Nur im Arbeitsspeicher: wird die Leiste geleert oder die Seite neu
+   * geladen, sind sie wieder weg.
+   */
+  entdeckt: [],
   me: null,
   /**
    * Alle anderen im Raum. In einem Zweiergespräch genau einer, in einer
@@ -607,7 +615,7 @@ async function askForName() {
   // wird die Raum-ID, nicht das Objekt: app.session wird bei jeder Änderung
   // durch ein neues ersetzt, ein Identitätsvergleich wäre immer ungleich.
   if (!next || app.session?.roomId !== opened) return;
-  app.session = patchSession(app.session.roomId, { nick: next }) ?? app.session;
+  app.session = merkeSession(app.session.roomId, { nick: next }) ?? app.session;
   app.prefs = setPrefs({ nick: next });
   sendNick(next);
 }
@@ -866,10 +874,10 @@ async function onWelcome(frame) {
   app.me = { id: frame.you.id, ...findMember(frame.members, frame.you.id) };
   app.limits = frame.room.limits ?? app.limits;
   // Erst die laufende Sitzung aktualisieren: ohne nutzbaren localStorage gibt
-  // patchSession() null zurueck, und das Token ginge sonst verloren.
+  // merkeSession() null zurueck, und das Token ginge sonst verloren.
   const patch = { token: frame.you.token, memberId: frame.you.id, lastActivity: Date.now() };
   app.session = { ...app.session, ...patch };
-  patchSession(app.session.roomId, patch);
+  merkeSession(app.session.roomId, patch);
   if (app.conn) app.conn.token = frame.you.token;
 
   app.members.clear();
@@ -1162,7 +1170,7 @@ async function onIncomingMessage(message) {
     scrollToBottom();
     return;
   }
-  patchSession(app.session.roomId, { lastActivity: Date.now() });
+  merkeSession(app.session.roomId, { lastActivity: Date.now() });
   if (app.atBottom && document.visibilityState === 'visible') {
     scrollToBottom();
     markRead();
@@ -1283,7 +1291,7 @@ async function onNick(frame) {
 function rememberPeerNick(nick) {
   const sauber = (nick ?? '').trim();
   if (!sauber || !app.session || app.session.peerNick === sauber) return;
-  app.session = patchSession(app.session.roomId, { peerNick: sauber }) ?? { ...app.session, peerNick: sauber };
+  app.session = merkeSession(app.session.roomId, { peerNick: sauber }) ?? { ...app.session, peerNick: sauber };
   renderChatList();
 }
 
@@ -1352,7 +1360,7 @@ function entrumpleAusgeblendete() {
   const bleibt = liste.filter((owner) => owner === 'group' || app.members.has(owner));
   if (bleibt.length === liste.length) return;
   const patch = { hiddenAvatars: bleibt };
-  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  app.session = merkeSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
 }
 
 /**
@@ -1480,7 +1488,7 @@ function rememberChatAvatar(erwartet = app.session?.roomId) {
     // Nichts schreiben, wenn sich nichts geaendert hat: jeder Schreibvorgang
     // legt die ganze Chatliste neu ab.
     if (stand.listAvatar === klein) return;
-    const gemerkt = patchSession(roomId, { listAvatar: klein });
+    const gemerkt = merkeSession(roomId, { listAvatar: klein });
     if (!gemerkt) return;
     if (app.session?.roomId === roomId) app.session = gemerkt;
     renderChatList();
@@ -1503,7 +1511,7 @@ function hatBildFassung(owner) {
  */
 function vergissListenbild() {
   if (!app.session?.listAvatar) return;
-  const gemerkt = patchSession(app.session.roomId, { listAvatar: null });
+  const gemerkt = merkeSession(app.session.roomId, { listAvatar: null });
   if (gemerkt) app.session = gemerkt;
   renderChatList();
 }
@@ -1610,7 +1618,7 @@ async function bildHochladen(ziel, { force, verborgen, liegtDort }) {
     const sealed = await encryptBytes(app.key, bytes);
     await putAvatar(roomId, token, wer, sealed);
     const patch = { avatarSig: marke };
-    const gemerkt = patchSession(roomId, patch);
+    const gemerkt = merkeSession(roomId, patch);
     if (app.session?.roomId === roomId) app.session = gemerkt ?? { ...app.session, ...patch };
     return true;
   } catch {
@@ -1633,7 +1641,7 @@ async function bildWegnehmen(ziel = jetzigerRaum()) {
     await deleteAvatar(roomId, token, wer);
     if (app.me?.id === wer) app.me.avatarVer = null;
     const patch = { avatarSig: null };
-    const gemerkt = patchSession(roomId, patch);
+    const gemerkt = merkeSession(roomId, patch);
     if (app.session?.roomId === roomId) app.session = gemerkt ?? { ...app.session, ...patch };
     return true;
   } catch {
@@ -1708,7 +1716,7 @@ function onCapacity(frame) {
   const platz = Number(frame.capacity);
   if (!Number.isInteger(platz) || platz <= 0) return;
   if (app.session) {
-    app.session = patchSession(app.session.roomId, { capacity: platz }) ?? { ...app.session, capacity: platz };
+    app.session = merkeSession(app.session.roomId, { capacity: platz }) ?? { ...app.session, capacity: platz };
   }
   updatePeerStatus();
 }
@@ -2903,7 +2911,7 @@ async function deliver(payload, blobIds) {
   try {
     const ct = await encryptJson(app.key, payload);
     app.conn.send({ t: 'msg', cid, ct, blobs: blobIds });
-    patchSession(app.session.roomId, { lastActivity: Date.now() });
+    merkeSession(app.session.roomId, { lastActivity: Date.now() });
   } catch {
     markFailed(entry);
   }
@@ -3361,7 +3369,7 @@ function noteRead(seq) {
   const bisher = app.session.readSeq ?? 0;
   if (seq <= bisher && (app.session.unread ?? 0) === 0) return;
   const patch = { readSeq: Math.max(bisher, seq), unread: 0 };
-  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  app.session = merkeSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
   renderChatList();
 }
 
@@ -4000,7 +4008,7 @@ async function changeNick() {
     maxLength: 32,
   });
   if (next == null) return;
-  app.session = patchSession(app.session.roomId, { nick: next }) ?? app.session;
+  app.session = merkeSession(app.session.roomId, { nick: next }) ?? app.session;
   app.prefs = setPrefs({ nick: next });
   sendNick(next);
 }
@@ -4403,7 +4411,7 @@ async function removeMyAvatar() {
         // Ein Raum, der gerade nicht erreichbar ist, bekommt es beim
         // naechsten Betreten mit: dort steht dann kein Bild mehr an.
       }
-      patchSession(session.roomId, { avatarSig: null });
+      merkeSession(session.roomId, { avatarSig: null });
     }));
     busy(false);
   }
@@ -4429,7 +4437,7 @@ async function toggleMyAvatarHere() {
   // geht in jeden Raum einzeln - eine Sperre, die ueber alle Chats laeuft,
   // naehme es ueberall weg.
   const patch = { hideMyAvatar: verbergen };
-  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  app.session = merkeSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
   busy(true, t('avatarSaving'));
   let geschafft = true;
   try {
@@ -4462,7 +4470,7 @@ function toggleHiddenAvatar(owner) {
   const verbergen = !bisher.includes(owner);
   const liste = verbergen ? [...bisher, owner] : bisher.filter((eintrag) => eintrag !== owner);
   const patch = { hiddenAvatars: liste };
-  app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+  app.session = merkeSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
   if (verbergen) {
     // Nicht nur nicht zeigen: die entschluesselte Kopie kommt weg. Sie wieder
     // zu holen kostet eine Anfrage, und die faellt nur an, wenn man es
@@ -4781,7 +4789,7 @@ async function inviteMore() {
     const antwortServer = await addSlots(app.session.roomId, app.session.token, slots);
     const alle = [...(app.session.codes ?? []), ...codes];
     const patch = { codes: alle, capacity: antwortServer?.capacity ?? app.session.capacity };
-    app.session = patchSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
+    app.session = merkeSession(app.session.roomId, patch) ?? { ...app.session, ...patch };
     busy(false);
     showGroupCodes(app.session);
     toast(t('inviteMoreDone', { n: wieViele }));
@@ -5305,13 +5313,206 @@ function systemMeldung(entry) {
 // Startseite: Liste der eigenen Chats
 // ===========================================================================
 
+// ===========================================================================
+// Suchen und Verstecken
+// ===========================================================================
+
+/**
+ * Passt ein Chat zum Suchtext?
+ *
+ * Gesucht wird in dem, was auf dem Geraet steht: eigener Name fuer den Chat,
+ * der Name des Gegenuebers, und der Code. Alles ohne Ruecksicht auf Gross-
+ * und Kleinschreibung.
+ */
+function passtZurSuche(session, suchtext) {
+  if (!suchtext) return true;
+  const nadel = suchtext.toLowerCase();
+  const heuhaufen = [chatTitle(session), session.peerNick, session.label, session.code];
+  return heuhaufen.some((teil) => (teil || '').toLowerCase().includes(nadel));
+}
+
+/**
+ * Versteckt einen Chat hinter einer selbst gewaehlten Zeichenfolge.
+ *
+ * Der ganze Eintrag wandert verschluesselt in einen eigenen Block und
+ * verschwindet aus der Liste. Ab da weiss die App selbst nicht mehr, was
+ * dahintersteckt: kein Name, kein Code, keine Raum-ID. Sie kann den Raum
+ * deshalb auch nicht mehr abfragen - und genau daran haengt, dass von dort
+ * keine Benachrichtigung mehr kommt und keine ungelesene Zahl auftaucht.
+ */
+async function versteckeChat(session) {
+  const zeichenfolge = await promptSheet(t('hideChat'), {
+    value: '',
+    placeholder: t('hideChatPlaceholder'),
+    note: t('hideChatNote'),
+    maxLength: 64,
+  });
+  if (zeichenfolge == null) return;
+  const wort = zeichenfolge.trim();
+  if (wort.length < 3) {
+    toast(t('hideChatTooShort'));
+    return;
+  }
+  if (!await confirmSheet(t('hideChat'), t('hideChatConfirm', { wort }), t('hideChatDo'), { danger: false })) return;
+
+  busy(true, t('hideChatWorking'));
+  try {
+    const stand = getSession(session.roomId) ?? session;
+    const salz = randomSalt();
+    const schluessel = await deriveHideKey(wort, salz);
+    addHidden({
+      id: randomId(9),
+      salt: toBase64(salz),
+      ct: await encryptJson(schluessel, stand),
+    });
+    // Erst wegschliessen, dann aus der Liste nehmen - nie andersherum.
+    removeSession(stand.roomId);
+    if (app.session?.roomId === stand.roomId) {
+      teardownChat();
+      showStart();
+    }
+    sucheZuruecksetzen();
+    renderChatList();
+    toast(t('hideChatDone'));
+  } catch (fehler) {
+    reportError(fehler);
+  } finally {
+    busy(false);
+  }
+}
+
+/**
+ * Probiert die eingetippte Zeichenfolge an allen Verstecken.
+ *
+ * Jeder Block hat sein eigenes Salz, es gibt also keine Abkuerzung: jeder
+ * muss einzeln gerechnet werden. Bei einer Handvoll Verstecke ist das eine
+ * Sache von Sekundenbruchteilen, und es ist der Preis dafuer, dass nirgends
+ * ein Merkmal steht, an dem sich zwei Verstecke vergleichen liessen.
+ *
+ * @returns {Promise<Array<object>>} die aufgeschlossenen Chats
+ */
+async function schliesseAuf(wort) {
+  const bloecke = listHidden();
+  if (!wort || bloecke.length === 0) return [];
+  const treffer = [];
+  for (const block of bloecke) {
+    try {
+      const schluessel = await deriveHideKey(wort, fromBase64(block.salt));
+      const session = await decryptJson(schluessel, block.ct);
+      if (session && typeof session.roomId === 'string') {
+        versteckSchluessel.set(block.id, schluessel);
+        treffer.push({ ...session, versteckId: block.id });
+      }
+    } catch {
+      // Falsche Zeichenfolge fuer diesen Block - das ist der Normalfall.
+    }
+  }
+  return treffer;
+}
+
+/** Holt einen aufgeschlossenen Chat zurueck in die normale Liste. */
+async function zeigeChatWieder(session) {
+  if (!session.versteckId) return;
+  if (!await confirmSheet(t('unhideChat'), t('unhideChatConfirm'), t('unhideChatDo'), { danger: false })) return;
+  const { versteckId, ...rein } = session;
+  saveSession(rein);
+  removeHidden(versteckId);
+  versteckSchluessel.delete(versteckId);
+  sucheZuruecksetzen();
+  renderChatList();
+  toast(t('unhideChatDone'));
+}
+
+/** Leert die Suchleiste und vergisst, was sie aufgeschlossen hatte. */
+function sucheZuruecksetzen() {
+  const feld = el('chat-search');
+  if (feld) feld.value = '';
+  app.suche = '';
+  // Die Schluessel gehen mit: was zu ist, soll auch zu bleiben.
+  if (!app.session?.versteckId) versteckSchluessel.clear();
+  app.entdeckt = [];
+  const leeren = el('chat-search-clear');
+  if (leeren) leeren.hidden = true;
+}
+
+/**
+ * Die Schluessel der gerade aufgeschlossenen Verstecke - nur im Arbeitsspeicher.
+ *
+ * Gebraucht, um einen versteckten Chat nach einer Aenderung wieder
+ * wegzuschliessen. Das Salz bleibt dabei dasselbe; neu ist nur der
+ * Initialisierungsvektor, den encryptJson ohnehin je Aufruf frisch wuerfelt.
+ */
+const versteckSchluessel = new Map();
+
+/** Schreibt einen aufgeschlossenen Chat zurueck in seinen Block. */
+async function versteckSchreiben(session) {
+  const schluessel = versteckSchluessel.get(session.versteckId);
+  const block = listHidden().find((eintrag) => eintrag.id === session.versteckId);
+  if (!schluessel || !block) return;
+  const { versteckId, ...rein } = session;
+  try {
+    replaceHidden(versteckId, { ...block, ct: await encryptJson(schluessel, rein) });
+  } catch { /* Dann bleibt der alte Stand stehen - besser als gar keiner. */ }
+}
+
+/**
+ * Wie patchSession - aber ein versteckter Chat wird wieder weggeschlossen,
+ * statt still ins Leere zu laufen.
+ *
+ * Ohne das waere jede Aenderung an einem aufgeschlossenen Chat verloren,
+ * sobald man ihn wieder zumacht: ein neuer Name, ein neues Bild - und vor
+ * allem das Token, das der Server bei jedem Verbinden erneuert. Mit einem
+ * veralteten Token kaeme man nach laengerem Verstecken nicht mehr hinein.
+ */
+function merkeSession(roomId, patch) {
+  const versteckt = app.session?.roomId === roomId && app.session.versteckId
+    ? app.session
+    : app.entdeckt.find((eintrag) => eintrag.roomId === roomId);
+  if (!versteckt) return patchSession(roomId, patch);
+  Object.assign(versteckt, patch);
+  void versteckSchreiben(versteckt);
+  return versteckt;
+}
+
+/** Der Zeitgeber, der das Aufschliessen erst nach dem Tippen versucht. */
+let sucheTimer = null;
+
+function beiSuche(wert) {
+  app.suche = wert.trim();
+  const leeren = el('chat-search-clear');
+  if (leeren) leeren.hidden = app.suche === '';
+  // Was schon aufgeschlossen war, gilt nur fuer genau diese Zeichenfolge.
+  if (app.entdeckt.length > 0) app.entdeckt = [];
+  renderChatList();
+
+  clearTimeout(sucheTimer);
+  if (app.suche.length < 3) return;
+  // Erst wenn das Tippen steht: jede Runde kostet eine teure Ableitung je
+  // Versteck, und bei jedem Buchstaben zu rechnen waere Verschwendung.
+  const gefragt = app.suche;
+  sucheTimer = setTimeout(async () => {
+    const treffer = await schliesseAuf(gefragt);
+    // Inzwischen weitergetippt? Dann gilt das Ergebnis nicht mehr.
+    if (gefragt !== app.suche || treffer.length === 0) return;
+    app.entdeckt = treffer;
+    renderChatList();
+  }, 350);
+}
+
 function renderChatList() {
   const list = el('chat-list');
   const section = el('chats-section');
   if (!list || !section) return;
-  const sessions = listSessions();
-  section.hidden = sessions.length === 0;
+  const sichtbar = listSessions().filter((session) => passtZurSuche(session, app.suche));
+  // Aufgeschlossene Verstecke stehen oben: wer die Zeichenfolge eingetippt
+  // hat, sucht genau sie und nicht die zwanzig Chats darunter.
+  const sessions = [...app.entdeckt, ...sichtbar];
+  section.hidden = sessions.length === 0 && app.suche === '';
   list.replaceChildren();
+  if (sessions.length === 0) {
+    list.appendChild(make('li', 'chat-list__leer', t('searchNothing')));
+    return;
+  }
 
   for (const session of sessions) {
     const item = make('li');
@@ -5344,6 +5545,15 @@ function renderChatList() {
       const punkt = make('span', 'pill pill--unread', ungelesen > 99 ? '99+' : String(ungelesen));
       punkt.setAttribute('aria-label', t('unreadCount', { n: ungelesen }));
       button.appendChild(punkt);
+    }
+    if (session.versteckId) {
+      // Nur zu sehen, wenn die Zeichenfolge schon eingetippt wurde - also
+      // kein Verraeter, sondern die Antwort auf "ist der jetzt versteckt?".
+      const zeichen = icon('i-eye-off');
+      zeichen.classList.add('chat-list__versteckt');
+      zeichen.setAttribute('role', 'img');
+      zeichen.setAttribute('aria-label', t('hiddenChat'));
+      button.appendChild(zeichen);
     }
     button.appendChild(icon('i-chevron-down'));
     button.addEventListener('click', () => void openFromList(session));
@@ -5525,11 +5735,15 @@ function tippenLoeschen() {
 }
 
 function openSessionMenu(session) {
+  const verstecken = session.versteckId
+    ? { icon: 'i-eye', label: t('unhideChat'), hint: t('unhideChatHint'), onClick: () => void zeigeChatWieder(session) }
+    : { icon: 'i-eye-off', label: t('hideChat'), hint: t('hideChatHint'), onClick: () => void versteckeChat(session) };
   openSheet(chatTitle(session), [
     { icon: 'i-edit', label: t('renameChat'), hint: t('renameChatHint'), onClick: () => void renameChat(session.roomId) },
     { icon: 'i-copy', label: t('copyCode'), value: session.code, onClick: async () => {
       toast(await copyText(session.code) ? t('copied') : t('copyFailed'));
     } },
+    verstecken,
     { icon: 'i-close', label: t('leaveChat'), danger: true, onClick: () => void leaveSession(session.roomId) },
   ]);
 }
@@ -5548,7 +5762,7 @@ async function renameChat(roomId) {
     maxLength: 40,
   });
   if (next == null) return;
-  const gespeichert = patchSession(roomId, { label: next.trim() });
+  const gespeichert = merkeSession(roomId, { label: next.trim() });
   if (app.session?.roomId === roomId) app.session = gespeichert ?? { ...app.session, label: next.trim() };
   renderChatList();
   if (currentScreen() === 'chat') updatePeerStatus();
@@ -5617,6 +5831,12 @@ function wireStaticHandlers() {
     el('btn-do-join').disabled = true;
     showScreen('join');
     setTimeout(() => el('code-input').focus(), 60);
+  });
+  el('chat-search').addEventListener('input', (ereignis) => beiSuche(ereignis.target.value));
+  el('chat-search-clear').addEventListener('click', () => {
+    sucheZuruecksetzen();
+    renderChatList();
+    el('chat-search').focus();
   });
   el('update-now').addEventListener('click', () => void applyUpdate());
   el('btn-lang').addEventListener('click', cycleLanguage);

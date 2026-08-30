@@ -88,6 +88,7 @@
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.1 5.7A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.6 17.6 0 0 1-3.2 4M6.2 6.7A17.4 17.4 0 0 0 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.5-.65"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.3 2.9 7.9 7 9 4.1-1.1 7-4.7 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
 </svg>
 
@@ -116,6 +117,23 @@
           <span data-i18n="joinChat"></span>
         </button>
         <p class="muted center" data-i18n="startHint"></p>
+      </div>
+
+      <!-- Die Suche steht IMMER da, auch ohne einen einzigen Chat. Waere sie
+           an die Liste gebunden, verschwaende sie mit dem letzten sichtbaren
+           Chat - und mit ihr der einzige Weg zu den versteckten. Und sie
+           waere ein Verraeter: eine Suchleiste ueber einer leeren Liste
+           hiesse "hier ist noch etwas". -->
+      <div class="chat-suche">
+        <svg class="icon chat-suche__lupe" aria-hidden="true"><use href="#i-search"/></svg>
+        <input type="search" id="chat-search" class="chat-suche__feld"
+               autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+               enterkeyhint="search" maxlength="64"
+               data-i18n-attr="placeholder:searchChats, aria-label:searchChats">
+        <button class="btn btn--icon chat-suche__leeren" id="chat-search-clear" type="button" hidden
+                data-i18n-attr="aria-label:clearSearch">
+          <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
       </div>
 
       <section class="chats" id="chats-section" hidden aria-labelledby="chats-title">
