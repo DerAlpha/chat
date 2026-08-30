@@ -342,6 +342,12 @@ export function promptSheet(title, { value = '', placeholder = '', maxLength = 4
     input.placeholder = placeholder;
     input.maxLength = maxLength;
     input.autocomplete = 'off';
+    // Das Telefon schriebe sonst den ersten Buchstaben gross und verbesserte
+    // munter mit. Bei einer Zeichenfolge, die spaeter Zeichen fuer Zeichen
+    // passen muss, waere das ein sicherer Weg, sich auszusperren.
+    input.autocapitalize = 'none';
+    input.setAttribute('autocorrect', 'off');
+    input.spellcheck = false;
     // Ohne Namen heisst das Feld im Barrierefreiheitsbaum gar nichts. Der
     // Titel des Blattes steht direkt darueber und sagt genau das Richtige -
     // ein Platzhalter waere kein Ersatz, er verschwindet beim Tippen.

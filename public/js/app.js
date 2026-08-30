@@ -131,6 +131,9 @@ function boot() {
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') primeSound();
+    // Aus den Augen heisst zu: was aufgeschlossen war, wird wieder
+    // weggeschlossen - siehe versteckeSchliessen().
+    if (document.visibilityState === 'hidden') versteckeSchliessen();
     // Im Hintergrund fragt niemand nach der Liste - das kostet nur Akku.
     watchOverview();
   });
@@ -512,6 +515,13 @@ async function enterChat(code, { deviceToken = null, known: knownSession = null 
       keyRaw = fromBase64(knownSession.key);
     } else {
       ({ roomId, keyRaw } = await deriveSecrets(code));
+    }
+    // Wer den Code eines gerade aufgeschlossenen Verstecks eintippt, soll
+    // dorthin - und nicht einen zweiten Eintrag im Klartext danebenlegen.
+    const versteckt = app.entdeckt.find((eintrag) => eintrag.roomId === roomId);
+    if (versteckt) {
+      await openSession({ ...versteckt, unread: 0 }, { screen: 'chat' });
+      return;
     }
     const known = knownSession ?? getSession(roomId);
     // Der Schnappschuss aus der Liste kann aelter sein als der Speicher: das
@@ -4064,6 +4074,16 @@ async function leaveSession(roomId) {
   const ok = await confirmSheet(t('leaveChat'), t('leaveConfirm'), t('confirm'), { danger: false });
   if (!ok) return;
   removeSession(roomId);
+  // Ein versteckter Chat steht nicht in der Liste - fuer ihn muss der Block
+  // weg, sonst haette "verlassen" gar nichts getan.
+  const versteckt = app.session?.roomId === roomId && app.session.versteckId
+    ? app.session.versteckId
+    : app.entdeckt.find((eintrag) => eintrag.roomId === roomId)?.versteckId;
+  if (versteckt) {
+    removeHidden(versteckt);
+    versteckSchluessel.delete(versteckt);
+    app.entdeckt = app.entdeckt.filter((eintrag) => eintrag.roomId !== roomId);
+  }
   if (app.session?.roomId === roomId) {
     teardownChat();
     showStart();
@@ -5222,6 +5242,9 @@ async function meldungsKanal() {
 
 /** Kann ueberhaupt eine Meldung herausgehen? Synchron, denn daran haengt der Ton. */
 function darfMelden() {
+  // Ein versteckter Chat meldet sich nie - auch dann nicht, wenn er gerade
+  // aufgeschlossen ist. Wer ihn offen hat, sieht ohnehin hin.
+  if (app.session?.versteckId) return false;
   return app.prefs.notifications === true && meldungsLage() === 'geht';
 }
 
@@ -5353,6 +5376,13 @@ async function versteckeChat(session) {
     toast(t('hideChatTooShort'));
     return;
   }
+  // Eine Zeichenfolge, die auch auf einen sichtbaren Chat passt, waere eine
+  // Falle: dann ginge das Versteck bei jeder harmlosen Suche nach diesem
+  // Namen mit auf - vor den Augen dessen, der einem ueber die Schulter sieht.
+  if (listSessions().some((eintrag) => eintrag.roomId !== session.roomId && passtZurSuche(eintrag, wort))) {
+    toast(t('hideChatClashes'));
+    return;
+  }
   if (!await confirmSheet(t('hideChat'), t('hideChatConfirm', { wort }), t('hideChatDo'), { danger: false })) return;
 
   busy(true, t('hideChatWorking'));
@@ -5360,12 +5390,18 @@ async function versteckeChat(session) {
     const stand = getSession(session.roomId) ?? session;
     const salz = randomSalt();
     const schluessel = await deriveHideKey(wort, salz);
-    addHidden({
-      id: randomId(9),
-      salt: toBase64(salz),
-      ct: await encryptJson(schluessel, stand),
-    });
-    // Erst wegschliessen, dann aus der Liste nehmen - nie andersherum.
+    const block = { id: randomId(9), salt: toBase64(salz), ct: await encryptJson(schluessel, stand) };
+    // Erst wegschliessen, dann aus der Liste nehmen - nie andersherum. Und
+    // erst nachsehen, ob das Wegschliessen wirklich geklappt hat: ist der
+    // Speicher voll oder gesperrt, schluckt er den Fehler still. Wer sich
+    // darauf verliesse, haette den Chat vernichtet und dazu "Versteckt"
+    // gemeldet. Deshalb wird der Block danach gelesen und aufgeschlossen -
+    // erst wenn das gelingt, verschwindet der Eintrag aus der Liste.
+    if (!addHidden(block) || !await blockLesbar(block, wort)) {
+      toast(t('hideChatFailed'));
+      removeHidden(block.id);
+      return;
+    }
     removeSession(stand.roomId);
     if (app.session?.roomId === stand.roomId) {
       teardownChat();
@@ -5378,6 +5414,19 @@ async function versteckeChat(session) {
     reportError(fehler);
   } finally {
     busy(false);
+  }
+}
+
+/** Laesst sich der Block, der gerade geschrieben wurde, wirklich wieder oeffnen? */
+async function blockLesbar(block, wort) {
+  try {
+    const gespeichert = listHidden().find((eintrag) => eintrag.id === block.id);
+    if (!gespeichert) return false;
+    const schluessel = await deriveHideKey(wort, fromBase64(gespeichert.salt));
+    const wieder = await decryptJson(schluessel, gespeichert.ct);
+    return typeof wieder?.roomId === 'string';
+  } catch {
+    return false;
   }
 }
 
@@ -5414,7 +5463,13 @@ async function schliesseAuf(wort) {
 async function zeigeChatWieder(session) {
   if (!session.versteckId) return;
   if (!await confirmSheet(t('unhideChat'), t('unhideChatConfirm'), t('unhideChatDo'), { danger: false })) return;
-  const { versteckId, ...rein } = session;
+  // Nicht den Schnappschuss aus der Liste nehmen: seit dem Aufschliessen kann
+  // sich etwas geaendert haben - allen voran das Token, das der Server bei
+  // jedem Verbinden erneuert. Gilt der frische Stand.
+  const frisch = (app.session?.roomId === session.roomId && app.session.versteckId
+    ? app.session
+    : app.entdeckt.find((eintrag) => eintrag.roomId === session.roomId)) ?? session;
+  const { versteckId, ...rein } = frisch;
   saveSession(rein);
   removeHidden(versteckId);
   versteckSchluessel.delete(versteckId);
@@ -5423,13 +5478,42 @@ async function zeigeChatWieder(session) {
   toast(t('unhideChatDone'));
 }
 
+/**
+ * Raeumt die Suche ab, sobald man die Liste aus den Augen laesst.
+ *
+ * Ohne das bliebe nach einem Ausflug in den Chat die Zeichenfolge im Klartext
+ * in der Leiste stehen und der aufgeschlossene Chat samt Namen ganz oben in
+ * der Liste - eine PWA wird beim Zurueckholen aus dem App-Umschalter nicht
+ * neu geladen, das ueberlebt also Bildschirmsperre und Stundenpausen. Wer
+ * das Geraet danach in die Hand bekaeme, saehe beides: WELCHER Chat, und
+ * mit WELCHER Zeichenfolge er aufgeht.
+ *
+ * Steht ein Versteck offen, wird es dabei auch zugemacht. Das ist unbequem,
+ * wenn man nur kurz die Zwischenablage holt - aber ein offener versteckter
+ * Chat auf einem Sperrbildschirm waere genau das, was die Funktion
+ * verhindern soll.
+ */
+function versteckeSchliessen() {
+  const warOffen = Boolean(app.session?.versteckId);
+  // Erst den Chat abbauen, dann die Schluessel wegwerfen: beim Abbauen wird
+  // noch einmal geschrieben, und ohne Schluessel liefe das ins Leere.
+  if (warOffen) {
+    teardownChat();
+    showStart();
+  }
+  sucheZuruecksetzen({ auchOffene: true });
+  renderChatList();
+}
+
 /** Leert die Suchleiste und vergisst, was sie aufgeschlossen hatte. */
-function sucheZuruecksetzen() {
+function sucheZuruecksetzen({ auchOffene = false } = {}) {
   const feld = el('chat-search');
   if (feld) feld.value = '';
   app.suche = '';
-  // Die Schluessel gehen mit: was zu ist, soll auch zu bleiben.
-  if (!app.session?.versteckId) versteckSchluessel.clear();
+  // Die Schluessel gehen mit: was zu ist, soll auch zu bleiben. Nur der
+  // Schluessel des gerade offenen Verstecks bleibt - sonst liefe
+  // versteckSchreiben() still ins Leere und das Token ginge verloren.
+  if (auchOffene || !app.session?.versteckId) versteckSchluessel.clear();
   app.entdeckt = [];
   const leeren = el('chat-search-clear');
   if (leeren) leeren.hidden = true;
@@ -5551,6 +5635,10 @@ function renderChatList() {
       // kein Verraeter, sondern die Antwort auf "ist der jetzt versteckt?".
       const zeichen = icon('i-eye-off');
       zeichen.classList.add('chat-list__versteckt');
+      // icon() setzt aria-hidden - hier soll das Zeichen aber gerade GELESEN
+      // werden: es ist die einzige Auskunft darueber, dass dieser Chat
+      // versteckt ist, und wer nicht hinsieht, bekaeme sie sonst nie.
+      zeichen.removeAttribute('aria-hidden');
       zeichen.setAttribute('role', 'img');
       zeichen.setAttribute('aria-label', t('hiddenChat'));
       button.appendChild(zeichen);
@@ -5597,6 +5685,26 @@ function chatListMeta(session) {
 
 /** Einen Chat aus der Liste oeffnen - Gruppen haben keinen Code. */
 function openFromList(session) {
+  // Ein aufgeschlossenes Versteck geht denselben Weg wie eine Gruppe: direkt.
+  //
+  // Ueber enterChat zu gehen waere fatal - dort steht ein unbedingtes
+  // saveSession(), das den Chat unterwegs wieder im Klartext in die normale
+  // Liste schriebe. Ein einziger Fingertipp haette das Verstecken damit
+  // aufgehoben, ohne Nachfrage und ohne dass es jemand bemerkt.
+  const offen = app.entdeckt.find((eintrag) => eintrag.roomId === session.roomId);
+  if (offen ?? session.versteckId) {
+    const wer = offen ?? session;
+    // Die Leiste wird dabei geleert: die Zeichenfolge soll nicht im Klartext
+    // stehen bleiben, waehrend man im Chat ist. Der Schluessel des gerade
+    // geoeffneten Verstecks bleibt - daran haengt das Zurueckschreiben.
+    const feld = el('chat-search');
+    if (feld) feld.value = '';
+    app.suche = '';
+    app.entdeckt = [];
+    const leeren = el('chat-search-clear');
+    if (leeren) leeren.hidden = true;
+    return openSession({ ...wer, unread: 0 }, { screen: 'chat' }).catch(reportError);
+  }
   // Die Liste haelt einen Schnappschuss von ihrem letzten Aufbau in der Hand.
   // Was seither gespeichert wurde - eine Bildsperre etwa -, steht nur im
   // Speicher des Geraets. Also von dort lesen, nicht aus dem Klick.
@@ -5753,7 +5861,10 @@ function openSessionMenu(session) {
  * bekommt ihn nie zu sehen, und das Gegenüber auch nicht.
  */
 async function renameChat(roomId) {
-  const session = getSession(roomId) ?? (app.session?.roomId === roomId ? app.session : null);
+  const session = getSession(roomId)
+    ?? (app.session?.roomId === roomId ? app.session : null)
+    ?? app.entdeckt.find((eintrag) => eintrag.roomId === roomId)
+    ?? null;
   if (!session) return;
   const next = await promptSheet(t('renameChat'), {
     value: session.label ?? '',

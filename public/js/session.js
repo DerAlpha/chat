@@ -185,10 +185,16 @@ export function listHidden() {
   return bloecke.filter((block) => block && typeof block.ct === 'string' && typeof block.salt === 'string');
 }
 
-/** Legt einen weiteren Block dazu und liefert seine Kennung. */
+/**
+ * Legt einen weiteren Block dazu.
+ *
+ * Gibt zurueck, ob das Schreiben geklappt hat. Das ist keine Formsache: ist
+ * der Speicher voll oder gesperrt, schluckt writeJson den Fehler - und wer
+ * sich darauf verliesse und den Chat danach aus der Liste naehme, haette ihn
+ * vernichtet.
+ */
 export function addHidden(block) {
-  writeJson(HIDDEN_KEY, [...listHidden(), block]);
-  return block.id;
+  return writeJson(HIDDEN_KEY, [...listHidden(), block]);
 }
 
 /** Tauscht einen Block aus - wenn sich am versteckten Chat etwas geaendert hat. */

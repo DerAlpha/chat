@@ -386,7 +386,7 @@ button, input, textarea { font: inherit; color: inherit; }
 /* Das Kreuz, das manche Browser selbst in ein type="search" setzen, waere
    ein zweites neben unserem - und keines von beiden traegt einen Daumen. */
 .chat-suche__feld::-webkit-search-cancel-button { display: none; }
-.chat-suche__leeren { flex: none; width: 36px; min-height: 36px; }
+.chat-suche__leeren { flex: none; width: 44px; min-height: 44px; }
 
 .chat-list__leer {
   padding: 14px 4px;

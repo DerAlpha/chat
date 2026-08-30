@@ -141,6 +141,104 @@ test('Aus einem versteckten Chat kommt keine Meldung', async ({ browser }) => {
   await kontext.close(); await gegen.close();
 });
 
+/**
+ * Der teuerste Fehler dieser Funktion, gefunden von einer Spurensuche über
+ * den fertigen Stand: openFromList() schickte jeden Zweierchat durch
+ * enterChat(), und dort steht ein unbedingtes saveSession(). Ein einziger
+ * Fingertipp schrieb den Chat damit im Klartext zurück in die Liste - das
+ * Verstecken war aufgehoben, ohne Nachfrage und ohne Hinweis.
+ *
+ * GEGENPROBE: in public/js/app.js in openFromList() den Zweig für
+ * session.versteckId entfernen. Dann steht der Chat nach dem Neuladen wieder
+ * da, und dieser Test wird rot.
+ */
+test('Den Chat zu öffnen hebt das Versteck nicht auf', async ({ browser }) => {
+  const { kontext, seite, gegen } = await chatMit(browser, 'Mira');
+  const code = await seite.evaluate(() =>
+    JSON.parse(localStorage.getItem('fc:sessions:v1'))[0].code);
+  await seite.locator('#chat-back').click();
+  await expect(seite.locator('#screen-start')).toBeVisible();
+  await verstecken(seite, 'nachtfalter');
+
+  await suchfeld(seite).fill('nachtfalter');
+  await expect(eintraege(seite)).toHaveCount(1, { timeout: 15_000 });
+  await eintraege(seite).first().click();
+  await expect(seite.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+
+  // Schon im Chat darf nichts im Klartext liegen.
+  expect(await spuren(seite, 'Mira', code), 'das Öffnen hat den Chat im Klartext gespeichert').toEqual([]);
+
+  // Und nach dem Neuladen ist er wieder weg - nicht etwa zurück in der Liste.
+  await seite.reload();
+  await expect(seite.locator('#screen-start')).toBeVisible({ timeout: 20_000 });
+  await expect(eintraege(seite)).toHaveCount(0);
+  expect(await spuren(seite, 'Mira', code)).toEqual([]);
+  await kontext.close(); await gegen.close();
+});
+
+/**
+ * Aus den Augen heißt zu. Sonst bliebe nach einem Ausflug in den Chat die
+ * Zeichenfolge im Klartext in der Leiste stehen und der Chat ganz oben in
+ * der Liste - eine PWA wird beim Zurückholen aus dem App-Umschalter nicht neu
+ * geladen, das überlebt also die Bildschirmsperre.
+ *
+ * GEGENPROBE: in public/js/app.js den visibilitychange-Zweig entfernen, der
+ * versteckeSchliessen() ruft.
+ */
+test('Wer die App aus den Augen lässt, schließt das Versteck wieder', async ({ browser }) => {
+  const { kontext, seite, gegen } = await chatMit(browser, 'Mira');
+  await seite.locator('#chat-back').click();
+  await expect(seite.locator('#screen-start')).toBeVisible();
+  await verstecken(seite, 'nachtfalter');
+
+  await suchfeld(seite).fill('nachtfalter');
+  await expect(eintraege(seite)).toHaveCount(1, { timeout: 15_000 });
+
+  // Die App wandert in den Hintergrund.
+  await seite.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await expect(eintraege(seite)).toHaveCount(0);
+  await expect(suchfeld(seite), 'die Zeichenfolge steht noch in der Leiste').toHaveValue('');
+  await kontext.close(); await gegen.close();
+});
+
+/** Zwei Verstecke stören sich nicht - jede Zeichenfolge öffnet nur ihres. */
+test('Zwei Verstecke bleiben auseinander', async ({ browser }) => {
+  const kontext = await browser.newContext(HANDY);
+  const seite = await kontext.newPage();
+  const nebenan = [];
+  for (const name of ['Mira', 'Cem']) {
+    const { link } = await createChat(seite, { nick: 'Anton' });
+    const gegen = await browser.newContext(HANDY);
+    const gegenSeite = await gegen.newPage();
+    await joinChat(gegenSeite, link, { nick: name });
+    await expect(seite.locator('#screen-chat')).toBeVisible({ timeout: 25_000 });
+    await seite.locator('#chat-back').click();
+    await expect(seite.locator('#screen-start')).toBeVisible();
+    nebenan.push(gegen);
+  }
+  await expect(eintraege(seite)).toHaveCount(2);
+
+  // Der oberste ist der zuletzt angelegte - Cem.
+  await verstecken(seite, 'erstes-versteck');
+  await expect(eintraege(seite)).toHaveCount(1);
+  await verstecken(seite, 'zweites-versteck');
+  await expect(eintraege(seite)).toHaveCount(0);
+
+  await suchfeld(seite).fill('erstes-versteck');
+  await expect(eintraege(seite)).toHaveCount(1, { timeout: 15_000 });
+  await expect(eintraege(seite).first()).toContainText('Cem');
+  await suchfeld(seite).fill('zweites-versteck');
+  await expect(eintraege(seite)).toHaveCount(1, { timeout: 15_000 });
+  await expect(eintraege(seite).first()).toContainText('Mira');
+
+  await kontext.close();
+  for (const gegen of nebenan) await gegen.close();
+});
+
 test('Das Verstecken lässt sich wieder aufheben', async ({ browser }) => {
   const { kontext, seite, gegen } = await chatMit(browser, 'Mira');
   await seite.locator('#chat-back').click();
@@ -163,5 +261,9 @@ test('Das Verstecken lässt sich wieder aufheben', async ({ browser }) => {
   await seite.reload();
   await expect(eintraege(seite)).toHaveCount(1, { timeout: 20_000 });
   await expect(eintraege(seite).first()).toContainText('Mira');
+  // Und der Block ist wirklich fort, nicht nur unsichtbar.
+  const bloecke = await seite.evaluate(() =>
+    JSON.parse(localStorage.getItem('fc:hidden:v1') ?? '[]').length);
+  expect(bloecke, 'der verschlüsselte Block liegt noch da').toBe(0);
   await kontext.close(); await gegen.close();
 });

@@ -223,8 +223,13 @@ export async function deriveKey(code) {
  * @param {Uint8Array} salz
  */
 export async function deriveHideKey(zeichenfolge, salz) {
+  // NFC, sonst haengt alles an der Tastatur: dasselbe "ä" kommt je nach
+  // Geraet als ein Zeichen oder als a + Trema, und aus zwei Schreibweisen
+  // desselben Wortes wuerden zwei verschiedene Schluessel. Wer sein Versteck
+  // auf dem einen Geraet anlegt und auf dem anderen sucht, kaeme sonst nicht
+  // mehr hinein.
   const material = await crypto.subtle.importKey(
-    'raw', encoder.encode(zeichenfolge), 'PBKDF2', false, ['deriveBits'],
+    'raw', encoder.encode(zeichenfolge.normalize('NFC')), 'PBKDF2', false, ['deriveBits'],
   );
   const bits = new Uint8Array(await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt: salz, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
