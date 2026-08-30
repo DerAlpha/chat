@@ -12,6 +12,10 @@
  * Neueste zuerst. Wer etwas ergänzt, setzt es nach oben.
  */
 export const CHANGELOG = [
+  { ts: '2026-08-30T11:20', de: 'Eine Suchleiste auf der Startseite: sie findet Chats über den Namen, den Namen des Gegenübers oder den Code.',
+    en: 'A search bar on the start screen: it finds chats by their name, by the other person\'s name, or by the code.' },
+  { ts: '2026-08-30T11:20', de: 'Einzelne Chats lassen sich verstecken. Sie werden dabei mit einer selbst gewählten Zeichenfolge verschlüsselt und verschwinden vollständig - aus der Liste, aus den Zahlen und aus den Benachrichtigungen. Zurück kommen sie nur, wenn genau diese Zeichenfolge in der Suche steht; aufheben lässt es sich jederzeit.',
+    en: 'Individual chats can be hidden. They get encrypted with a phrase you choose and disappear completely - from the list, from the counters and from notifications. They come back only when exactly that phrase is in the search; you can unhide them any time.' },
   { ts: '2026-08-29T18:40', de: 'Benachrichtigungen kommen jetzt auch auf dem Handy an. Android verbietet den Weg, den die App bisher benutzt hat - sie geht jetzt über den Service Worker, und ein Tipp auf die Meldung holt den Chat nach vorn.',
     en: 'Notifications now arrive on phones too. Android forbids the route the app used to take - it now goes through the service worker, and tapping the notification brings the chat to the front.' },
   { ts: '2026-08-29T18:40', de: 'Statt „Im Browser blockiert" für alles steht jetzt da, was wirklich los ist: abgelehnt, weggetippt, oder - auf dem iPhone - dass die App dafür auf dem Home-Bildschirm liegen muss.',

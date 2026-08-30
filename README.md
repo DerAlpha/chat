@@ -245,6 +245,11 @@ Gebaut fürs Smartphone, funktioniert genauso am Rechner.
   und wenn dort gerade jemand schreibt, steht das auch da. Wo etwas ankommt,
   rutscht nach oben
 - Zweites eigenes Gerät per Geräte-Link dazuschalten
+- Suche über die eigenen Chats – und einzelne Chats verstecken: sie werden mit
+  einer selbst gewählten Zeichenfolge verschlüsselt weggeschlossen und
+  verschwinden aus Liste, Zahlen und Benachrichtigungen. Die App kennt den Raum
+  dann selbst nicht mehr; nur genau diese Zeichenfolge in der Suchleiste holt
+  ihn zurück
 - Als App installierbar (PWA), offline lauffähige Oberfläche, Benachrichtigungen
   über den Service Worker – der einzige Weg, den Android erlaubt. Auf dem
   iPhone gibt es sie erst, wenn die App auf dem Home-Bildschirm liegt; die App
